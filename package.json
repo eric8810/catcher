@@ -1,0 +1,11 @@
+{
+  "name": "catcher-monorepo",
+  "private": true,
+  "scripts": {
+    "build": "pnpm -r build",
+    "build:ts": "pnpm --filter catcher build",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "private": true,
+  "name": "catcher-test",
+  "type": "module",
+  "dependencies": {
+    "@catcher/core": "workspace:*",
+    "@catcher/http": "workspace:*",
+    "@catcher/ws": "workspace:*",
+    "@catcher/napi-http": "workspace:*",
+    "@catcher/napi-ws": "workspace:*",
+    "axios": "^1.11.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.0.0",
+    "vitest": "^2.0.0"
+  }
+}

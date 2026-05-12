@@ -1,0 +1,17 @@
+[package]
+name = "catcher-ws"
+version = "0.1.0"
+edition = "2021"
+description = "WebSocket client for catcher — resilient reconnect, heartbeat, multi-endpoint racing"
+license = "MIT"
+
+[dependencies]
+catcher-core = { path = "../catcher-core" }
+tokio = { version = "1", features = ["rt", "sync", "time", "net", "io-util", "macros"] }
+tokio-tungstenite = "0.24"
+futures-util = "0.3"
+backon = "1"
+rmp-serde = "1"
+rmpv = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

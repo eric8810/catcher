@@ -1,0 +1,19 @@
+{
+  "name": "@catcher/napi-http",
+  "version": "0.1.0",
+  "description": "catcher HTTP native addon for Node.js via napi-rs",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "napi": {
+    "name": "catcher-napi-http",
+    "triples": { "defaults": true }
+  },
+  "scripts": {
+    "build": "cargo build --release && napi artifacts",
+    "build-debug": "cargo build"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^2.18.0"
+  },
+  "license": "MIT"
+}

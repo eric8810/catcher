@@ -1,0 +1,11 @@
+[workspace]
+resolver = "2"
+members = [
+    "catcher-core",
+    "catcher-http",
+    "catcher-ws",
+    "catcher-napi-http",
+    "catcher-napi-ws",
+]
+
+# Planned: "catcher-tus",  (TUS client, to be created)

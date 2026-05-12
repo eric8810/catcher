@@ -1,0 +1,12 @@
+[package]
+name = "catcher_core_ffi"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+name = "catcher_core"
+
+[dependencies]
+catcher-http = { path = "../../catcher-http" }
+catcher-ws = { path = "../../catcher-ws" }

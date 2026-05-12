@@ -1,0 +1,19 @@
+{
+  "name": "@catcher/napi-ws",
+  "version": "0.1.0",
+  "description": "catcher WebSocket native addon for Node.js via napi-rs",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "napi": {
+    "name": "catcher-napi-ws",
+    "triples": { "defaults": true }
+  },
+  "scripts": {
+    "build": "cargo build --release && napi artifacts",
+    "build-debug": "cargo build"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^2.18.0"
+  },
+  "license": "MIT"
+}
