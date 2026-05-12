@@ -1,4 +1,4 @@
-import pRetry from 'p-retry'
+import pRetry, { AbortError } from 'p-retry'
 import type { AxiosInstance } from 'axios'
 import type { Socket } from 'node:net'
 import type { RetryOptions } from '@catcher/core'
@@ -58,7 +58,7 @@ export function createRetryWrapper(
             throw error // p-retry will catch and retry
           }
           // Don't retry 4xx, ETIMEDOUT, etc — mark as non-retryable
-          throw new (pRetry as any).AbortError(error)
+          throw new AbortError(error)
         }
       },
       {
