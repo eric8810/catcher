@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Catcher — Resilient Network Toolkit for Node.js</title>
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --surface: #13131f;
+    --border: #1e1e35;
+    --text: #e0e0e8;
+    --muted: #7a7a95;
+    --accent: #6c5ce7;
+    --accent2: #00d2a0;
+    --red: #ff6b6b;
+    --orange: #ffa502;
+    --yellow: #ffd93d;
+    --gradient: linear-gradient(135deg, #6c5ce7, #a855f7);
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
+  .container { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
+
+  /* Hero */
+  .hero {
+    text-align: center;
+    padding: 100px 24px 80px;
+    position: relative;
+  }
+  .hero::before {
+    content: '';
+    position: absolute;
+    top: -200px; left: 50%; transform: translateX(-50%);
+    width: 800px; height: 800px;
+    background: radial-gradient(circle, rgba(108,92,231,0.15) 0%, transparent 70%);
+    pointer-events: none;
+  }
+  .hero .logo { font-size: 72px; margin-bottom: 16px; }
+  .hero h1 {
+    font-size: 56px;
+    font-weight: 800;
+    background: var(--gradient);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 16px;
+    position: relative;
+  }
+  .hero .subtitle {
+    font-size: 20px;
+    color: var(--muted);
+    max-width: 600px;
+    margin: 0 auto 32px;
+  }
+  .hero .tagline {
+    display: inline-block;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 20px;
+    font-size: 14px;
+    color: var(--muted);
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    margin-bottom: 32px;
+  }
+  .btn {
+    display: inline-block;
+    padding: 14px 36px;
+    border-radius: 10px;
+    font-weight: 600;
+    font-size: 16px;
+    text-decoration: none;
+    transition: all 0.2s;
+    cursor: pointer;
+  }
+  .btn-primary {
+    background: var(--gradient);
+    color: #fff;
+    box-shadow: 0 4px 24px rgba(108,92,231,0.3);
+  }
+  .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 32px rgba(108,92,231,0.4); }
+
+  /* Section */
+  .section { padding: 80px 0; }
+  .section h2 {
+    font-size: 32px;
+    font-weight: 700;
+    margin-bottom: 16px;
+    text-align: center;
+  }
+  .section .desc {
+    text-align: center;
+    color: var(--muted);
+    max-width: 600px;
+    margin: 0 auto 48px;
+    font-size: 16px;
+  }
+
+  /* Stats Grid */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 20px;
+    margin-bottom: 48px;
+  }
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 28px 24px;
+    text-align: center;
+    transition: all 0.3s;
+  }
+  .stat-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+  .stat-card .value {
+    font-size: 42px;
+    font-weight: 800;
+    background: var(--gradient);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .stat-card .label { color: var(--muted); font-size: 14px; margin-top: 4px; }
+
+  /* Comparison Bar */
+  .compare-row {
+    display: flex;
+    align-items: center;
+    margin-bottom: 20px;
+    gap: 16px;
+  }
+  .compare-label {
+    width: 120px;
+    text-align: right;
+    font-size: 13px;
+    color: var(--muted);
+    flex-shrink: 0;
+  }
+  .compare-bars {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .bar-track {
+    height: 28px;
+    background: var(--border);
+    border-radius: 6px;
+    position: relative;
+    overflow: hidden;
+  }
+  .bar-fill {
+    height: 100%;
+    border-radius: 6px;
+    position: absolute;
+    left: 0; top: 0;
+    display: flex;
+    align-items: center;
+    padding-left: 10px;
+    font-size: 12px;
+    font-weight: 600;
+    transition: width 1s ease-out;
+  }
+  .bar-vanilla { background: rgba(255,107,107,0.4); color: var(--red); }
+  .bar-catcher { background: rgba(0,210,160,0.4); color: var(--accent2); }
+
+  /* Scenario Cards */
+  .scenario-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 20px;
+  }
+  .scenario-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 24px;
+  }
+  .scenario-card .sc-emoji { font-size: 28px; margin-bottom: 8px; }
+  .scenario-card h4 { font-size: 16px; margin-bottom: 12px; }
+  .sc-metric {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 14px;
+  }
+  .sc-metric:last-child { border-bottom: none; }
+  .sc-metric .win { color: var(--accent2); font-weight: 600; }
+  .sc-metric .lose { color: var(--red); }
+
+  /* Features */
+  .features-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 20px;
+  }
+  .feature-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 28px 24px;
+    transition: all 0.3s;
+  }
+  .feature-card:hover { border-color: var(--accent); }
+  .feature-card .icon { font-size: 32px; margin-bottom: 12px; }
+  .feature-card h4 { font-size: 16px; margin-bottom: 8px; }
+  .feature-card p { color: var(--muted); font-size: 14px; }
+
+  /* Resilience Layers */
+  .layers {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-width: 500px;
+    margin: 0 auto;
+  }
+  .layer {
+    padding: 16px 20px;
+    border-radius: 10px;
+    font-size: 14px;
+    text-align: center;
+    font-weight: 600;
+    position: relative;
+  }
+  .layer::after {
+    content: '↓';
+    position: absolute;
+    bottom: -20px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 16px;
+    color: var(--muted);
+  }
+  .layer:last-child::after { content: none; }
+  .layer-app { background: rgba(108,92,231,0.15); border: 1px solid rgba(108,92,231,0.3); color: #a78bfa; }
+  .layer-queue { background: rgba(255,165,2,0.12); border: 1px solid rgba(255,165,2,0.25); color: #ffb347; }
+  .layer-cb { background: rgba(255,107,107,0.12); border: 1px solid rgba(255,107,107,0.25); color: #ff6b6b; }
+  .layer-retry { background: rgba(0,210,160,0.12); border: 1px solid rgba(0,210,160,0.25); color: #00d2a0; }
+  .layer-axios { background: rgba(122,122,149,0.1); border: 1px solid rgba(122,122,149,0.2); color: var(--muted); }
+
+  /* Code */
+  .code-block {
+    background: #0d0d1a;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 24px;
+    overflow-x: auto;
+    margin: 16px 0;
+  }
+  .code-block pre {
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--text);
+  }
+  .code-block .kw { color: #a78bfa; }
+  .code-block .str { color: #00d2a0; }
+  .code-block .fn { color: #ffd93d; }
+  .code-block .cm { color: #555; }
+
+  /* Footer */
+  .footer {
+    text-align: center;
+    padding: 40px 0;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  /* Responsive */
+  @media (max-width: 768px) {
+    .hero h1 { font-size: 36px; }
+    .hero .subtitle { font-size: 16px; }
+    .stat-card .value { font-size: 32px; }
+    .compare-label { width: 80px; font-size: 11px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ═══ Hero ═══ -->
+<section class="hero">
+  <div class="logo">🪤</div>
+  <h1>Catcher</h1>
+  <p class="subtitle">Resilient network toolkit for Node.js — catches failures before they reach your business logic.</p>
+  <div class="tagline">npm install @catcher/http @catcher/ws</div>
+  <br>
+  <a href="#quickstart" class="btn btn-primary">Quick Start ↓</a>
+</section>
+
+<!-- ═══ Key Metrics ═══ -->
+<section class="section">
+  <div class="container">
+    <h2>Performance at a Glance</h2>
+    <p class="desc">500 requests · 50 concurrent · localhost benchmark</p>
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="value">+76%</div>
+        <div class="label">Throughput (4808 vs 2732 req/s)</div>
+      </div>
+      <div class="stat-card">
+        <div class="value">−87%</div>
+        <div class="label">p99 Latency (23ms vs 171ms)</div>
+      </div>
+      <div class="stat-card">
+        <div class="value">+19.8pp</div>
+        <div class="label">Success Rate in Extreme Weak Network</div>
+      </div>
+      <div class="stat-card">
+        <div class="value">100%</div>
+        <div class="label">Burst Loss Storm Success Rate</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ Throughput Comparison ═══ -->
+<section class="section" style="padding-top:0">
+  <div class="container">
+    <h2>Throughput &amp; Latency</h2>
+    <p class="desc">500 requests, 50 concurrent — direct connection to local HTTP server</p>
+
+    <div class="compare-row">
+      <span class="compare-label">Throughput</span>
+      <div class="compare-bars">
+        <div class="bar-track"><div class="bar-fill bar-vanilla" style="width:57%">vanilla 2,732 req/s</div></div>
+        <div class="bar-track"><div class="bar-fill bar-catcher" style="width:100%" data-width="100">catcher 4,808 req/s</div></div>
+      </div>
+    </div>
+    <div class="compare-row">
+      <span class="compare-label">p50 Latency</span>
+      <div class="compare-bars">
+        <div class="bar-track"><div class="bar-fill bar-vanilla" style="width:50%">vanilla 9ms</div></div>
+        <div class="bar-track"><div class="bar-fill bar-catcher" style="width:50%">catcher 9ms</div></div>
+      </div>
+    </div>
+    <div class="compare-row">
+      <span class="compare-label">p95 Latency</span>
+      <div class="compare-bars">
+        <div class="bar-track"><div class="bar-fill bar-vanilla" style="width:100%" data-width="100">vanilla 90ms</div></div>
+        <div class="bar-track"><div class="bar-fill bar-catcher" style="width:20%">catcher 18ms</div></div>
+      </div>
+    </div>
+    <div class="compare-row">
+      <span class="compare-label">p99 Latency</span>
+      <div class="compare-bars">
+        <div class="bar-track"><div class="bar-fill bar-vanilla" style="width:100%" data-width="100">vanilla 171ms</div></div>
+        <div class="bar-track"><div class="bar-fill bar-catcher" style="width:13%">catcher 23ms</div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ Success Rate Under Network Damage ═══ -->
+<section class="section">
+  <div class="container">
+    <h2>Resilience Under Fire</h2>
+    <p class="desc">Success rates under simulated real-world network conditions</p>
+    <div class="scenario-grid">
+      <div class="scenario-card">
+        <div class="sc-emoji">🟡</div>
+        <h4>Weak Network (2000ms RTT, 5% loss)</h4>
+        <div class="sc-metric"><span>vanilla</span><span class="lose">89.4%</span></div>
+        <div class="sc-metric"><span>catcher + retry</span><span class="win">99.6% +10.2pp</span></div>
+        <div class="sc-metric"><span>Requests</span><span>500</span></div>
+      </div>
+      <div class="scenario-card">
+        <div class="sc-emoji">🔴</div>
+        <h4>Very Weak (4000ms RTT, 10% loss)</h4>
+        <div class="sc-metric"><span>vanilla</span><span class="lose">77.4%</span></div>
+        <div class="sc-metric"><span>catcher + retry</span><span class="win">97.2% +19.8pp</span></div>
+        <div class="sc-metric"><span>Requests</span><span>500</span></div>
+      </div>
+      <div class="scenario-card">
+        <div class="sc-emoji">📟</div>
+        <h4>GPRS (500ms RTT, 6.25KB/s, 2% loss)</h4>
+        <div class="sc-metric"><span>vanilla</span><span class="lose">80.0%</span></div>
+        <div class="sc-metric"><span>catcher + retry</span><span class="win">96.7% +16.7pp</span></div>
+        <div class="sc-metric"><span>Iterations</span><span>30</span></div>
+      </div>
+      <div class="scenario-card">
+        <div class="sc-emoji">🌪️</div>
+        <h4>Burst Packet Loss Storm</h4>
+        <div class="sc-metric"><span>vanilla</span><span class="lose">91.0%</span></div>
+        <div class="sc-metric"><span>catcher + CB</span><span class="win">100.0% +9.0pp</span></div>
+        <div class="sc-metric"><span>Requests</span><span>100</span></div>
+      </div>
+      <div class="scenario-card">
+        <div class="sc-emoji">🕳️</div>
+        <h4>Route Black Hole (30s)</h4>
+        <div class="sc-metric"><span>During blackhole</span><span class="lose">0/5</span></div>
+        <div class="sc-metric"><span>After recovery</span><span class="win">5/5 ✓</span></div>
+        <div class="sc-metric"><span>CB cycles</span><span>5× correct</span></div>
+      </div>
+      <div class="scenario-card">
+        <div class="sc-emoji">🏊</div>
+        <h4>Connection Pool Exhaustion</h4>
+        <div class="sc-metric"><span>Concurrent requests</span><span>100</span></div>
+        <div class="sc-metric"><span>Pool size</span><span>10 sockets</span></div>
+        <div class="sc-metric"><span>Success</span><span class="win">100/100 in 448ms</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ Resilience Layers ═══ -->
+<section class="section">
+  <div class="container">
+    <h2>How It Works</h2>
+    <p class="desc">Every request passes through four resilience layers before hitting the wire</p>
+    <div class="layers">
+      <div class="layer layer-app">Your App — client.get('/users')</div>
+      <div class="layer layer-queue">Priority Queue — caps concurrency, schedules by priority</div>
+      <div class="layer layer-cb">Circuit Breaker — trips on consecutive failures, auto-recovers</div>
+      <div class="layer layer-retry">Retry — exponential backoff with jitter, evicts stale connections</div>
+      <div class="layer layer-axios">HTTP Engine (axios today, swappable tomorrow)</div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ Quick Start ═══ -->
+<section class="section" id="quickstart">
+  <div class="container">
+    <h2>Quick Start</h2>
+    <p class="desc">Replace axios.create() with one line</p>
+
+    <div class="code-block">
+      <pre><span class="cm">// Install</span>
+<span class="kw">npm</span> install @catcher/http @catcher/ws</pre>
+    </div>
+
+    <div class="code-block">
+      <pre><span class="cm">// HTTP — with retry, circuit breaker &amp; connection pooling</span>
+<span class="kw">import</span> { createHttpClient } <span class="kw">from</span> <span class="str">'@catcher/http'</span>
+
+<span class="kw">const</span> client = <span class="fn">createHttpClient</span>({
+  baseURL: <span class="str">'https://api.example.com'</span>,
+  keepAlive: <span class="kw">true</span>,
+  retry: { attempts: <span class="str">3</span> },
+  circuitBreaker: { failureThreshold: <span class="str">5</span>, resetTimeout: <span class="str">30_000</span> },
+  concurrency: <span class="str">10</span>,
+})
+
+<span class="kw">const</span> data = <span class="kw">await</span> client.<span class="fn">get</span>(<span class="str">'/users/1'</span>)
+<span class="kw">const</span> result = <span class="kw">await</span> client.<span class="fn">post</span>(<span class="str">'/messages'</span>, { text: <span class="str">'hello'</span> })
+
+<span class="cm">// Per-request overrides</span>
+<span class="kw">await</span> client.<span class="fn">get</span>(<span class="str">'/analytics'</span>, { retry: <span class="kw">false</span>, timeout: <span class="str">5000</span> })
+
+<span class="cm">// Dynamic interceptors</span>
+client.interceptors.request.<span class="fn">use</span>(config => {
+  config.headers.Authorization = <span class="str">'Bearer ...'</span>
+  <span class="kw">return</span> config
+})</pre>
+    </div>
+
+    <div class="code-block">
+      <pre><span class="cm">// WebSocket — compression + reconnect + multi-endpoint racing</span>
+<span class="kw">import</span> { createResilientWS } <span class="kw">from</span> <span class="str">'@catcher/ws'</span>
+
+<span class="kw">const</span> ws = <span class="fn">createResilientWS</span>({
+  url: [<span class="str">'wss://cn.example.com'</span>, <span class="str">'wss://sg.example.com'</span>],
+  perMessageDeflate: <span class="kw">true</span>,
+  reconnect: { initialDelay: <span class="str">1000</span>, maxDelay: <span class="str">30_000</span> },
+})
+
+ws.<span class="fn">addEventListener</span>(<span class="str">'message'</span>, e => console.<span class="fn">log</span>(e.data))
+
+<span class="cm">// Binary codec — 2-4× faster than JSON</span>
+<span class="kw">import</span> { pack, unpack } <span class="kw">from</span> <span class="str">'@catcher/ws'</span>
+ws.<span class="fn">send</span>(<span class="fn">pack</span>({ event: <span class="str">'msg'</span>, data }))</pre>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ Features ═══ -->
+<section class="section">
+  <div class="container">
+    <h2>Features</h2>
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="icon">🔄</div>
+        <h4>Auto-Retry</h4>
+        <p>Exponential backoff with ±25% jitter. Destroys stale keepAlive sockets before retry — never reuse a dead connection.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon">⚡</div>
+        <h4>Circuit Breaker</h4>
+        <p>Trips on consecutive failures, auto-recovers after reset timeout. Prevents cascading failure storms in burst loss conditions.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon">🔗</div>
+        <h4>Connection Pooling</h4>
+        <p>Shared HTTPS Agent with keepAlive, DNS caching, idle socket eviction. One agent → 76% more throughput.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon">📶</div>
+        <h4>Resilient WebSocket</h4>
+        <p>perMessageDeflate compression, exponential backoff reconnect, multi-endpoint racing. Survives network interruptions.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon">🗜️</div>
+        <h4>Binary Codec</h4>
+        <p>msgpackr — 2-4× faster than JSON, 47% smaller payloads. Auto-detects binary vs text frames.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon">🎯</div>
+        <h4>Priority Queue</h4>
+        <p>POST before prefetch. Your chat messages go out before avatar images. Concurrency-aware scheduling.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon">✂️</div>
+        <h4>Dynamic Interceptors</h4>
+        <p>use() / eject() / clear() at runtime. LIFO request chain, FIFO response chain. Per-request overrides for retry, timeout, signal.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon">🛡️</div>
+        <h4>Route Black Hole Detection</h4>
+        <p>Silently dropped packets? CB trips, connections evicted, automatic recovery when network returns.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ Packages ═══ -->
+<section class="section">
+  <div class="container">
+    <h2>Packages</h2>
+    <p class="desc">Install only what you need</p>
+    <div class="code-block" style="max-width:500px;margin:0 auto">
+      <pre><span class="cm"># REST API</span>
+<span class="kw">npm</span> i @catcher/http
+
+<span class="cm"># IM / real-time</span>
+<span class="kw">npm</span> i @catcher/http @catcher/ws
+
+<span class="cm"># Full native performance (Rust via napi-rs)</span>
+<span class="kw">npm</span> i @catcher/napi-http @catcher/napi-ws</pre>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ Footer ═══ -->
+<footer class="footer">
+  <div class="container">
+    <p>Catcher 🪤 · MIT License · Benchmarks run on Node.js v24 · Linux x64</p>
+  </div>
+</footer>
+
+</body>
+</html>
