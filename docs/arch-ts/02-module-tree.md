@@ -22,7 +22,8 @@ catcher-http-ts/
     ├── http/
     │   ├── index.ts
     │   ├── client.ts
-    │   └── retry.ts
+    │   ├── retry.ts
+    │   └── interceptors.ts       # 动态拦截器管理器
     ├── agent/
     │   ├── index.ts
     │   └── shared-agent.ts

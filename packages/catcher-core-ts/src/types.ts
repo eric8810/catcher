@@ -53,12 +53,95 @@ export interface HttpClientConfig {
   }
 }
 
+// === Per-request Options ===
+
+export interface RequestConfig {
+  /** Per-request headers, merged with instance defaults */
+  headers?: Record<string, string>
+  /** Override timeout for this request (ms) */
+  timeout?: number
+  /** AbortController signal for cancellation */
+  signal?: AbortSignal
+  /** Override instance-level retry; false = disable retry for this request */
+  retry?: RetryOptions | false
+  /** Response body parsing mode */
+  responseType?: 'json' | 'text' | 'bytes'
+  /** Custom success status code predicate */
+  validateStatus?: (status: number) => boolean
+  /** Override priority (0 = highest) */
+  priority?: number
+  /** Opaque metadata, passed through to response interceptors */
+  meta?: Record<string, unknown>
+  /** Query parameters appended to URL */
+  params?: Record<string, string | number | boolean | (string | number | boolean)[]>
+  /** Custom params serializer */
+  paramsSerializer?: (params: Record<string, any>) => string
+  /** Upload progress callback */
+  onUploadProgress?: (event: ProgressEvent) => void
+  /** Download progress callback */
+  onDownloadProgress?: (event: ProgressEvent) => void
+}
+
+export interface ProgressEvent {
+  loaded: number
+  total?: number
+}
+
+// === Interceptors ===
+
+export interface InterceptorFulfilled<T> {
+  (value: T): T | Promise<T>
+}
+
+export interface InterceptorRejected {
+  (error: any): any
+}
+
+export interface InterceptorHandler<T> {
+  onFulfilled: InterceptorFulfilled<T>
+  onRejected?: InterceptorRejected
+  runWhen?: (config: RequestConfig) => boolean
+  synchronous?: boolean
+}
+
+export interface InterceptorManager<T> {
+  use(
+    onFulfilled: InterceptorFulfilled<T>,
+    onRejected?: InterceptorRejected,
+    options?: { runWhen?: (config: RequestConfig) => boolean; synchronous?: boolean },
+  ): number
+  eject(id: number): void
+  clear(): void
+}
+
+// === HTTP Client ===
+
+/** Response object passed through response interceptors */
+export interface HttpResponse<T = any> {
+  status: number
+  headers: Record<string, string>
+  data: T
+  config: RequestConfig
+}
+
 export interface IHttpClient {
-  get<T = any>(url: string, config?: Record<string, any>): Promise<T>
-  post<T = any>(url: string, body?: any, config?: Record<string, any>): Promise<T>
-  put<T = any>(url: string, body?: any, config?: Record<string, any>): Promise<T>
-  delete<T = any>(url: string, config?: Record<string, any>): Promise<T>
-  patch<T = any>(url: string, body?: any, config?: Record<string, any>): Promise<T>
+  get<T = any>(url: string, config?: RequestConfig): Promise<T>
+  post<T = any>(url: string, body?: any, config?: RequestConfig): Promise<T>
+  put<T = any>(url: string, body?: any, config?: RequestConfig): Promise<T>
+  delete<T = any>(url: string, config?: RequestConfig): Promise<T>
+  patch<T = any>(url: string, body?: any, config?: RequestConfig): Promise<T>
+
+  /** Dynamic interceptor managers */
+  interceptors: {
+    request: InterceptorManager<RequestConfig>
+    response: InterceptorManager<HttpResponse>
+  }
+
+  /** Current circuit breaker state */
+  circuitBreakerState(): 'closed' | 'open' | 'half-open'
+
+  /** Number of requests waiting in the concurrency queue */
+  queueDepth(): number
 }
 
 // === WebSocket ===
@@ -90,7 +173,7 @@ export interface ResilientWSOptions {
 }
 
 export interface ResilientWS extends EventTarget {
-  send(data: string | Buffer): void
+  send(data: string | Uint8Array): void
   close(code?: number, reason?: string): void
   readonly readyState: number
   readonly url: string

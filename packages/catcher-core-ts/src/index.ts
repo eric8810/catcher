@@ -6,4 +6,11 @@ export type {
   ResilientWS,
   PriorityQueueOptions,
   RetryOptions,
+  RequestConfig,
+  ProgressEvent,
+  HttpResponse,
+  InterceptorFulfilled,
+  InterceptorRejected,
+  InterceptorHandler,
+  InterceptorManager,
 } from './types.js'

@@ -24,6 +24,7 @@
 | 05 | [`05-http.md`](./05-http.md) | HTTP 客户端（@catcher/http） |
 | 06 | [`06-ws.md`](./06-ws.md) | WebSocket 客户端 + msgpack 编解码（@catcher/ws） |
 | 08 | [`08-queue.md`](./08-queue.md) | 优先级队列（@catcher/http） |
+| 09 | [`09-interceptors.md`](./09-interceptors.md) | 拦截器系统 + Per-request Options 设计 |
 
 > `07-codec.md` 已移除 — codec 不再是独立包，作为 `@catcher/ws` 的内置能力。
 
