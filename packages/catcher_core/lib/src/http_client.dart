@@ -21,10 +21,12 @@ import 'native_loader.dart';
 /// client.dispose();
 /// ```
 class CatcherHttpClient {
-  late final Pointer<Void> _handle;
+  Pointer<Void>? _handle;
   late final DynamicLibrary _lib;
   late final CatcherHttpClientCreateDart _create;
   late final CatcherHttpClientDestroyDart _destroy;
+  late final CatcherHttpExecuteDart _executeFn;
+  late final CatcherFreeEventDataDart _freeEventDataFn;
 
   CatcherHttpClient(HttpClientConfig config) {
     _lib = loadCatcherLibrary();
@@ -36,6 +38,12 @@ class CatcherHttpClient {
     _destroy = _lib
         .lookupFunction<CatcherHttpClientDestroyNative,
             CatcherHttpClientDestroyDart>('catcher_http_client_destroy');
+
+    _executeFn = _lib.lookupFunction<CatcherHttpExecuteNative,
+        CatcherHttpExecuteDart>('catcher_http_execute');
+
+    _freeEventDataFn = _lib.lookupFunction<CatcherFreeEventDataNative,
+        CatcherFreeEventDataDart>('catcher_free_event_data');
 
     final configJson = jsonEncode(config.toJson()).toNativeUtf8();
     _handle = _create(configJson.cast<Char>());
@@ -79,12 +87,19 @@ class CatcherHttpClient {
 
   /// Release native resources
   void dispose() {
-    if (_handle != nullptr) {
-      _destroy(_handle);
+    if (_handle != null && _handle != nullptr) {
+      _destroy(_handle!);
+      _handle = null;
     }
   }
 
   // ── Internal ──
+
+  void _ensureHandle() {
+    if (_handle == null || _handle == nullptr) {
+      throw StateError('HTTP client has been disposed');
+    }
+  }
 
   /// Build a FfiStringNative on the heap. Caller must call [freeFfiString] when done.
   Pointer<FfiStringNative> _allocFfiString(String dartString) {
@@ -114,6 +129,7 @@ class CatcherHttpClient {
     List<int>? body,
     String? contentType,
   ) async {
+    _ensureHandle();
     final receivePort = ReceivePort();
     final completer = Completer<HttpResponse>();
     bool cleanedUp = false;
@@ -126,9 +142,7 @@ class CatcherHttpClient {
         final jsonStr = utf8.decode(jsonBytes, allowMalformed: true);
 
         // Free the CStrings that Rust leaked via CString::into_raw()
-        final freeFn = _lib.lookupFunction<CatcherFreeEventDataNative,
-            CatcherFreeEventDataDart>('catcher_free_event_data');
-        freeFn(eventType, eventData.cast<Char>());
+        _freeEventDataFn(eventType, eventData.cast<Char>());
 
         final Map<String, dynamic> result;
         try {
@@ -179,10 +193,8 @@ class CatcherHttpClient {
     }
 
     try {
-      final executeFn = _lib.lookupFunction<CatcherHttpExecuteNative,
-          CatcherHttpExecuteDart>('catcher_http_execute');
-      executeFn(
-        _handle,
+      _executeFn(
+        _handle!,
         methodFfi.ref,
         urlFfi.ref,
         bodyPtr,
@@ -214,8 +226,14 @@ class CatcherHttpClient {
       onTimeout: () {
         // Complete with error but do NOT close nativeCallback here —
         // Rust might still invoke it, and closing causes UB.
-        // The callback will be cleaned up by GC or when a late
-        // response arrives and triggers cleanup via the listener above.
+        // Safety-net: schedule a forced cleanup after 60s
+        Future.delayed(const Duration(seconds: 60), () {
+          if (!cleanedUp) {
+            cleanedUp = true;
+            nativeCallback.close();
+            receivePort.close();
+          }
+        });
         if (!completer.isCompleted) {
           completer.completeError(
             TimeoutException('HTTP request timed out after 30s'),

@@ -128,12 +128,15 @@ class CatcherWsClient {
 
   /// Release all resources
   void dispose() {
+    // Close native callback FIRST to prevent Rust from invoking
+    // the function pointer after the handle is destroyed.
+    _nativeCallback?.close();
+    _nativeCallback = null;
+
     if (_handle != null && _handle != nullptr) {
       _destroy(_handle!);
       _handle = null;
     }
-    _nativeCallback?.close();
-    _nativeCallback = null;
     if (!_eventController.isClosed) {
       _eventController.close();
     }

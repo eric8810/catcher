@@ -16,18 +16,41 @@ fn handles() -> std::sync::MutexGuard<'static, Option<HashMap<usize, Arc<HttpTra
     HANDLES.lock().unwrap()
 }
 
+/// Safely read an FfiString as a Rust String. Returns default on null/invalid.
+fn ffi_string_to_string(s: FfiString, default: &str) -> String {
+    if s.data.is_null() || s.len == 0 {
+        return default.to_string();
+    }
+    unsafe {
+        std::str::from_utf8(std::slice::from_raw_parts(s.data as *const u8, s.len))
+            .unwrap_or(default)
+            .to_string()
+    }
+}
+
+/// Safely read body bytes from a raw pointer. Returns empty vec on null.
+fn read_body_bytes(body: *const u8, body_len: usize) -> Vec<u8> {
+    if body.is_null() || body_len == 0 {
+        return Vec::new();
+    }
+    unsafe { std::slice::from_raw_parts(body, body_len).to_vec() }
+}
+
+/// Build a JSON error string safely (no format! injection).
+fn error_json(msg: &str) -> String {
+    serde_json::json!({ "error": msg }).to_string()
+}
+
 /// Invoke an FFI event callback with ownership-transferred CStrings.
-///
-/// Both strings are leaked via `CString::into_raw()`. The Dart side MUST
-/// call `catcher_free_event_data()` after reading to reclaim memory.
 fn invoke_http_callback(
     callback: EventCallback,
     event_name: &str,
     json: String,
     user_data: usize,
 ) {
-    let c_event = CString::new(event_name).unwrap();
-    let c_json = CString::new(json).unwrap();
+    // Replace null bytes to prevent CString::new panic
+    let c_event = CString::new(event_name.replace('\0', "")).unwrap_or_default();
+    let c_json = CString::new(json.replace('\0', "")).unwrap_or_default();
     let json_len = c_json.as_bytes().len();
 
     callback(
@@ -70,9 +93,7 @@ pub unsafe extern "C" fn catcher_http_get(
         return;
     }
     let id = *(handle as *const usize);
-    let url_str = std::str::from_utf8(std::slice::from_raw_parts(url.data as *const u8, url.len))
-        .unwrap_or("/")
-        .to_string();
+    let url_str = ffi_string_to_string(url, "/");
     let ud = user_data as usize;
 
     let transport = handles().as_ref().and_then(|m| m.get(&id)).cloned();
@@ -81,7 +102,7 @@ pub unsafe extern "C" fn catcher_http_get(
             let result = t.get(&url_str).await;
             let json = match result {
                 Ok(resp) => serde_json::to_string(&resp).unwrap_or_default(),
-                Err(e) => format!("{{\"error\":\"{e}\"}}"),
+                Err(e) => error_json(&e.to_string()),
             };
             invoke_http_callback(callback, "http_result", json, ud);
         });
@@ -102,16 +123,9 @@ pub unsafe extern "C" fn catcher_http_post(
         return;
     }
     let id = *(handle as *const usize);
-    let url_str = std::str::from_utf8(std::slice::from_raw_parts(url.data as *const u8, url.len))
-        .unwrap_or("/")
-        .to_string();
-    let body_data = std::slice::from_raw_parts(body, body_len).to_vec();
-    let ct_str = std::str::from_utf8(std::slice::from_raw_parts(
-        content_type.data as *const u8,
-        content_type.len,
-    ))
-    .unwrap_or("application/octet-stream")
-    .to_string();
+    let url_str = ffi_string_to_string(url, "/");
+    let body_data = read_body_bytes(body, body_len);
+    let ct_str = ffi_string_to_string(content_type, "application/octet-stream");
     let ud = user_data as usize;
 
     let transport = handles().as_ref().and_then(|m| m.get(&id)).cloned();
@@ -120,14 +134,14 @@ pub unsafe extern "C" fn catcher_http_post(
             let result = t.post(&url_str, &body_data, &ct_str).await;
             let json = match result {
                 Ok(resp) => serde_json::to_string(&resp).unwrap_or_default(),
-                Err(e) => format!("{{\"error\":\"{e}\"}}"),
+                Err(e) => error_json(&e.to_string()),
             };
             invoke_http_callback(callback, "http_result", json, ud);
         });
     }
 }
 
-/// Generic HTTP request — accepts method as a string (\"GET\", \"POST\", \"PUT\", \"DELETE\", \"PATCH\").
+/// Generic HTTP request — accepts method as a string ("GET", "POST", "PUT", "DELETE", "PATCH").
 /// This is the preferred entry point for FFI consumers that need all HTTP methods.
 #[no_mangle]
 pub unsafe extern "C" fn catcher_http_execute(
@@ -145,31 +159,16 @@ pub unsafe extern "C" fn catcher_http_execute(
     }
     let id = *(handle as *const usize);
 
-    let method_str = std::str::from_utf8(std::slice::from_raw_parts(
-        method.data as *const u8,
-        method.len,
-    ))
-    .unwrap_or("GET")
-    .to_string();
-    let url_str = std::str::from_utf8(std::slice::from_raw_parts(url.data as *const u8, url.len))
-        .unwrap_or("/")
-        .to_string();
+    let method_str = ffi_string_to_string(method, "GET");
+    let url_str = ffi_string_to_string(url, "/");
     let body_data = if !body.is_null() && body_len > 0 {
-        Some(std::slice::from_raw_parts(body, body_len).to_vec())
+        Some(read_body_bytes(body, body_len))
     } else {
         None
     };
-    let ct_str = if !content_type.data.is_null() && content_type.len > 0 {
-        Some(
-            std::str::from_utf8(std::slice::from_raw_parts(
-                content_type.data as *const u8,
-                content_type.len,
-            ))
-            .unwrap_or("application/json")
-            .to_string(),
-        )
-    } else {
-        None
+    let ct_str = {
+        let s = ffi_string_to_string(content_type, "");
+        if s.is_empty() { None } else { Some(s) }
     };
     let ud = user_data as usize;
 
@@ -179,7 +178,12 @@ pub unsafe extern "C" fn catcher_http_execute(
         "PUT" => HttpMethod::PUT,
         "DELETE" => HttpMethod::DELETE,
         "PATCH" => HttpMethod::PATCH,
-        _ => HttpMethod::GET,
+        other => {
+            // Return error for unknown methods instead of silent GET fallback
+            let json = error_json(&format!("Unsupported HTTP method: {other}"));
+            invoke_http_callback(callback, "http_result", json, ud);
+            return;
+        }
     };
 
     let transport = handles().as_ref().and_then(|m| m.get(&id)).cloned();
@@ -196,7 +200,7 @@ pub unsafe extern "C" fn catcher_http_execute(
             let result = t.execute(request).await;
             let json = match result {
                 Ok(resp) => serde_json::to_string(&resp).unwrap_or_default(),
-                Err(e) => format!("{{\"error\":\"{e}\"}}"),
+                Err(e) => error_json(&e.to_string()),
             };
             invoke_http_callback(callback, "http_result", json, ud);
         });

@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
   pull_request:
-    branches: [main]
+    branches: [main, master]
 
 jobs:
   typecheck:
@@ -16,7 +16,7 @@ jobs:
         with:
           node-version: 20
           cache: 'pnpm'
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install
       - run: pnpm typecheck
 
   test:
@@ -29,7 +29,7 @@ jobs:
         with:
           node-version: 20
           cache: 'pnpm'
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install
       - run: pnpm test
 
   rust-check:
@@ -37,4 +37,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cd packages && cargo check
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "packages -> target"
+      - run: cd packages && cargo check --workspace
+      - run: cd packages && cargo test --workspace

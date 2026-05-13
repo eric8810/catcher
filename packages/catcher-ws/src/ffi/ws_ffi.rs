@@ -16,22 +16,34 @@ fn ws_handles() -> std::sync::MutexGuard<'static, Option<HashMap<usize, Arc<WsHa
     WS_HANDLES.lock().unwrap()
 }
 
+/// Safely read an FfiString as a Rust String. Returns default on null/invalid.
+fn ffi_string_to_string(s: FfiString, default: &str) -> String {
+    if s.data.is_null() || s.len == 0 {
+        return default.to_string();
+    }
+    unsafe {
+        std::str::from_utf8(std::slice::from_raw_parts(s.data as *const u8, s.len))
+            .unwrap_or(default)
+            .to_string()
+    }
+}
+
+/// Build a JSON error string safely (no format! injection).
+fn error_json(msg: &str) -> String {
+    serde_json::json!({ "error": msg }).to_string()
+}
+
 /// Invoke an FFI event callback with ownership-transferred CStrings.
-///
-/// Both `c_event` and `json` are converted to `CString` and leaked via
-/// `into_raw()`. The Dart side MUST call `catcher_free_event_data()`
-/// after reading the data to reclaim the memory.
 fn invoke_event_callback(
     cb: EventCallback,
     event_name: &str,
     json: String,
     user_data: usize,
 ) {
-    let c_event = CString::new(event_name).unwrap();
-    let c_json = CString::new(json).unwrap();
+    let c_event = CString::new(event_name.replace('\0', "")).unwrap_or_default();
+    let c_json = CString::new(json.replace('\0', "")).unwrap_or_default();
     let json_len = c_json.as_bytes().len();
 
-    // into_raw() leaks ownership — Dart must call catcher_free_event_data
     cb(
         c_event.into_raw(),
         c_json.into_raw() as *const u8,
@@ -55,10 +67,15 @@ pub unsafe extern "C" fn catcher_ws_create(
         Err(_) => return std::ptr::null_mut(),
     };
     let urls = config.urls.clone();
-    let first_url = urls
-        .first()
-        .cloned()
-        .unwrap_or_else(|| "ws://localhost".into());
+    let first_url = match urls.first().cloned() {
+        Some(u) => u,
+        None => {
+            // Return error via callback instead of silently connecting to localhost
+            let json = error_json("urls cannot be empty");
+            invoke_event_callback(event_callback, "ws_error", json, user_data as usize);
+            return std::ptr::null_mut();
+        }
+    };
 
     let id = WS_NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let cb = event_callback;
@@ -78,7 +95,7 @@ pub unsafe extern "C" fn catcher_ws_create(
                 }
             }
             Err(e) => {
-                let json = format!("{{\"error\":\"{e}\"}}");
+                let json = error_json(&e.to_string());
                 invoke_event_callback(cb, "ws_error", json, ud);
             }
         }
@@ -93,15 +110,11 @@ pub unsafe extern "C" fn catcher_ws_send_text(handle: *mut c_void, message: FfiS
         return FfiResult::error(1, "null handle");
     }
     let id = *(handle as *const usize);
-    let text = std::str::from_utf8(std::slice::from_raw_parts(
-        message.data as *const u8,
-        message.len,
-    ))
-    .unwrap_or("");
+    let text = ffi_string_to_string(message, "");
     let handles = ws_handles();
     if let Some(ref map) = *handles {
         if let Some(h) = map.get(&id) {
-            match h.send_text(text) {
+            match h.send_text(&text) {
                 Ok(()) => FfiResult::ok(std::ptr::null_mut(), 0),
                 Err(e) => FfiResult::error(1, &e.to_string()),
             }
@@ -121,6 +134,9 @@ pub unsafe extern "C" fn catcher_ws_send_binary(
 ) -> FfiResult {
     if handle.is_null() {
         return FfiResult::error(1, "null handle");
+    }
+    if data.is_null() {
+        return FfiResult::error(1, "null data pointer");
     }
     let id = *(handle as *const usize);
     let bytes = std::slice::from_raw_parts(data, len);
@@ -145,15 +161,11 @@ pub unsafe extern "C" fn catcher_ws_close(handle: *mut c_void, code: u16, reason
         return;
     }
     let id = *(handle as *const usize);
-    let reason_str = std::str::from_utf8(std::slice::from_raw_parts(
-        reason.data as *const u8,
-        reason.len,
-    ))
-    .unwrap_or("normal");
+    let reason_str = ffi_string_to_string(reason, "normal");
     let handles = ws_handles();
     if let Some(ref map) = *handles {
         if let Some(h) = map.get(&id) {
-            let _ = h.close(code, reason_str);
+            let _ = h.close(code, &reason_str);
         }
     }
 }
@@ -171,8 +183,7 @@ pub unsafe extern "C" fn catcher_ws_destroy(handle: *mut c_void) {
 /// Free an FfiResult returned by WS FFI functions.
 ///
 /// Dart must call this after every WS FFI call that returns FfiResult.
-/// Takes ownership of the FfiResult — the Drop impl handles freeing
-/// the error_message CString automatically.
+/// Takes ownership — Drop impl handles freeing error_message CString.
 #[no_mangle]
 pub extern "C" fn catcher_free_result(result: FfiResult) {
     drop(result);

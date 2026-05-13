@@ -1,20 +1,31 @@
 use std::ffi::{c_char, c_void};
 
-/// FFI 安全的结果类型
+/// FFI-safe result type.
+///
+/// **Ownership:** Returned by-value from FFI functions. Caller must invoke
+/// `catcher_free_result()` when done (Drop impl frees `error_message`).
 #[repr(C)]
 pub struct FfiResult {
-    pub error_code: i32, // 0 = 成功
+    pub error_code: i32, // 0 = success
     pub error_message: *mut c_char,
     pub data: *mut c_void,
     pub data_len: usize,
 }
 
+/// FFI-safe string view (borrowed, not owned).
+///
+/// **Ownership:** Caller allocates and frees the backing memory.
+/// Rust reads but never frees `data`. Intended for pass-by-value FFI args.
 #[repr(C)]
 pub struct FfiString {
     pub data: *const c_char,
     pub len: usize,
 }
 
+/// FFI-safe byte slice with optional custom deallocator.
+///
+/// **Ownership:** If `free_fn` is Some, caller must call it with `free_ctx`
+/// to reclaim `data`. If None, caller manages the memory externally.
 #[repr(C)]
 pub struct FfiBytes {
     pub data: *const u8,
@@ -41,7 +52,11 @@ impl FfiResult {
     }
 
     pub fn error(code: i32, msg: &str) -> Self {
-        let c_msg = std::ffi::CString::new(msg).unwrap();
+        // Strip null bytes to prevent CString::new panic
+        let safe_msg = msg.replace('\0', "");
+        let c_msg = std::ffi::CString::new(safe_msg).unwrap_or_else(|_| {
+            std::ffi::CString::new("error message contained null bytes").unwrap()
+        });
         Self {
             error_code: code,
             error_message: c_msg.into_raw(),
@@ -61,22 +76,43 @@ impl Drop for FfiResult {
     }
 }
 
+impl Drop for FfiBytes {
+    fn drop(&mut self) {
+        if let Some(free_fn) = self.free_fn {
+            if !self.free_ctx.is_null() {
+                free_fn(self.free_ctx);
+            }
+        }
+    }
+}
+
+/// Free an FfiResult returned by FFI functions.
+/// Takes ownership — Drop impl frees error_message.
+#[no_mangle]
+pub extern "C" fn catcher_free_result(result: FfiResult) {
+    drop(result);
+}
+
 /// Free event data strings allocated by Rust for the FFI callback bridge.
 ///
 /// Rust calls `CString::into_raw()` to transfer ownership of the event type
 /// and event data strings to the Dart callback. Dart must call this function
 /// after reading the data to prevent memory leaks.
+///
+/// Note: `event_data` type is `*mut u8` (matching EventCallback's `*const u8`).
+/// The const-to-mut cast is safe because into_raw() returns a mutable pointer
+/// that was originally passed as const through the callback.
 #[no_mangle]
 pub extern "C" fn catcher_free_event_data(
     event_type: *mut c_char,
-    event_data: *mut c_char,
+    event_data: *mut u8,
 ) {
     unsafe {
         if !event_type.is_null() {
             let _ = std::ffi::CString::from_raw(event_type);
         }
         if !event_data.is_null() {
-            let _ = std::ffi::CString::from_raw(event_data);
+            let _ = std::ffi::CString::from_raw(event_data as *mut c_char);
         }
     }
 }

@@ -1,6 +1,5 @@
 {
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
-  "bootstrap-sha": "<TODO: set to main branch latest commit SHA before first release>",
   "release-type": "node",
   "include-v-in-tag": true,
   "plugins": ["node-workspace"],

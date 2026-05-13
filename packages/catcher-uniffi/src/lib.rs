@@ -3,6 +3,14 @@
 //! Uses UniFFI 0.28 proc-macro mode (no UDL file needed).
 //! Generates Swift (iOS) and Kotlin (Android) bindings from this Rust API.
 //!
+//! # Architecture note on async
+//!
+//! UniFFI 0.28 does not support async methods. All async Rust operations are
+//! bridged synchronously via `block_on_aux_thread()` which dispatches work to
+//! a **separate std thread** with its own tokio runtime. This avoids the
+//! `block_on()` re-entrance panic that would occur if a WsEventObserver
+//! callback (running on a tokio thread) calls back into an HttpClient method.
+//!
 //! Build:
 //!   cargo build --release
 //!
@@ -20,12 +28,30 @@ use catcher_http::{
 use catcher_ws::{
     transport::ws_client::WsTransport,
     types::ws::WsClientConfig,
-    WsHandle,
+    WsEvent, WsHandle,
 };
 
-/// Global tokio runtime for the UniFFI crate.
-/// UniFFI 0.28 does not support async constructors, so we use block_on()
-/// to bridge async Rust work into sync foreign-language calls.
+/// Run an async future synchronously, on a **dedicated auxiliary thread**
+/// with its own tokio runtime. This avoids `block_on()` re-entrance panics
+/// when called from within a tokio worker thread (e.g., WsEventObserver callbacks).
+fn block_on_aux_thread<F, T>(future: F) -> std::thread::JoinHandle<T>
+where
+    F: std::future::Future<Output = T> + Send + 'static,
+    T: Send + 'static,
+{
+    std::thread::spawn(move || {
+        static AUX_RT: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
+        let rt = AUX_RT.get_or_init(|| {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("Failed to create aux tokio runtime")
+        });
+        rt.block_on(future)
+    })
+}
+
+/// Global tokio runtime for spawned tasks (WS event forwarding, etc.)
 fn runtime() -> &'static tokio::runtime::Runtime {
     static RT: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
     RT.get_or_init(|| {
@@ -64,39 +90,38 @@ pub struct HttpResponseDto {
 /// Resilient HTTP client backed by Rust reqwest + retry + circuit breaker
 #[derive(uniffi::Object)]
 pub struct HttpClient {
-    inner: HttpTransport,
+    inner: Arc<HttpTransport>,
 }
 
 #[uniffi::export]
 impl HttpClient {
     /// Create from JSON config string.
-    ///
-    /// Config format matches `HttpClientConfig` in Rust:
-    /// ```json
-    /// {"base_url": "https://api.example.com", "connect_timeout_ms": 10000, ...}
-    /// ```
     #[uniffi::constructor]
     pub fn new(config_json: String) -> Result<Self, CatcherError> {
         let config: HttpClientConfig = serde_json::from_str(&config_json)
             .map_err(|e| CatcherError::Config(e.to_string()))?;
-        let inner = HttpTransport::new(config)
-            .map_err(|e| CatcherError::Network(e.to_string()))?;
+        let inner = Arc::new(HttpTransport::new(config)
+            .map_err(|e| CatcherError::Network(e.to_string()))?);
         Ok(Self { inner })
     }
 
     /// GET request
     #[uniffi::method]
     pub fn get(&self, url: String) -> Result<HttpResponseDto, CatcherError> {
-        let resp = runtime().block_on(
-            self.inner.execute(HttpRequest {
+        let inner = self.inner.clone();
+        let handle = block_on_aux_thread(async move {
+            inner.execute(HttpRequest {
                 method: HttpMethod::GET,
                 url,
                 headers: Default::default(),
                 body: None,
                 content_type: None,
                 timeout_ms: None,
-            })
-        ).map_err(|e| CatcherError::Network(e.to_string()))?;
+            }).await
+        });
+        let resp = handle.join()
+            .map_err(|_| CatcherError::Network("thread panicked".into()))?
+            .map_err(|e| CatcherError::Network(e.to_string()))?;
 
         Ok(HttpResponseDto {
             status: resp.status,
@@ -113,16 +138,20 @@ impl HttpClient {
         body: Vec<u8>,
         content_type: Option<String>,
     ) -> Result<HttpResponseDto, CatcherError> {
-        let resp = runtime().block_on(
-            self.inner.execute(HttpRequest {
+        let inner = self.inner.clone();
+        let handle = block_on_aux_thread(async move {
+            inner.execute(HttpRequest {
                 method: HttpMethod::POST,
                 url,
                 headers: Default::default(),
                 body: Some(body),
                 content_type,
                 timeout_ms: None,
-            })
-        ).map_err(|e| CatcherError::Network(e.to_string()))?;
+            }).await
+        });
+        let resp = handle.join()
+            .map_err(|_| CatcherError::Network("thread panicked".into()))?
+            .map_err(|e| CatcherError::Network(e.to_string()))?;
 
         Ok(HttpResponseDto {
             status: resp.status,
@@ -139,16 +168,20 @@ impl HttpClient {
         body: Vec<u8>,
         content_type: Option<String>,
     ) -> Result<HttpResponseDto, CatcherError> {
-        let resp = runtime().block_on(
-            self.inner.execute(HttpRequest {
+        let inner = self.inner.clone();
+        let handle = block_on_aux_thread(async move {
+            inner.execute(HttpRequest {
                 method: HttpMethod::PUT,
                 url,
                 headers: Default::default(),
                 body: Some(body),
                 content_type,
                 timeout_ms: None,
-            })
-        ).map_err(|e| CatcherError::Network(e.to_string()))?;
+            }).await
+        });
+        let resp = handle.join()
+            .map_err(|_| CatcherError::Network("thread panicked".into()))?
+            .map_err(|e| CatcherError::Network(e.to_string()))?;
 
         Ok(HttpResponseDto {
             status: resp.status,
@@ -160,16 +193,20 @@ impl HttpClient {
     /// DELETE request
     #[uniffi::method]
     pub fn delete(&self, url: String) -> Result<HttpResponseDto, CatcherError> {
-        let resp = runtime().block_on(
-            self.inner.execute(HttpRequest {
+        let inner = self.inner.clone();
+        let handle = block_on_aux_thread(async move {
+            inner.execute(HttpRequest {
                 method: HttpMethod::DELETE,
                 url,
                 headers: Default::default(),
                 body: None,
                 content_type: None,
                 timeout_ms: None,
-            })
-        ).map_err(|e| CatcherError::Network(e.to_string()))?;
+            }).await
+        });
+        let resp = handle.join()
+            .map_err(|_| CatcherError::Network("thread panicked".into()))?
+            .map_err(|e| CatcherError::Network(e.to_string()))?;
 
         Ok(HttpResponseDto {
             status: resp.status,
@@ -186,16 +223,20 @@ impl HttpClient {
         body: Vec<u8>,
         content_type: Option<String>,
     ) -> Result<HttpResponseDto, CatcherError> {
-        let resp = runtime().block_on(
-            self.inner.execute(HttpRequest {
+        let inner = self.inner.clone();
+        let handle = block_on_aux_thread(async move {
+            inner.execute(HttpRequest {
                 method: HttpMethod::PATCH,
                 url,
                 headers: Default::default(),
                 body: Some(body),
                 content_type,
                 timeout_ms: None,
-            })
-        ).map_err(|e| CatcherError::Network(e.to_string()))?;
+            }).await
+        });
+        let resp = handle.join()
+            .map_err(|_| CatcherError::Network("thread panicked".into()))?
+            .map_err(|e| CatcherError::Network(e.to_string()))?;
 
         Ok(HttpResponseDto {
             status: resp.status,
@@ -220,6 +261,20 @@ pub enum WsEventDto {
     HeartbeatRtt { rtt_ms: u64 },
 }
 
+/// Convert internal WsEvent to the UniFFI-safe DTO.
+impl From<WsEvent> for WsEventDto {
+    fn from(event: WsEvent) -> Self {
+        match event {
+            WsEvent::Connected { url, latency_ms } => WsEventDto::Connected { url, latency_ms },
+            WsEvent::Disconnected { code, reason } => WsEventDto::Disconnected { code, reason },
+            WsEvent::Reconnecting { attempt, delay_ms } => WsEventDto::Reconnecting { attempt, delay_ms },
+            WsEvent::Message { data, is_binary } => WsEventDto::Message { data, is_binary },
+            WsEvent::Error { message } => WsEventDto::Error { message },
+            WsEvent::HeartbeatRtt { rtt_ms } => WsEventDto::HeartbeatRtt { rtt_ms },
+        }
+    }
+}
+
 /// Observer interface for receiving WebSocket events.
 ///
 /// Swift/Kotlin implementations register via the constructor.
@@ -232,19 +287,14 @@ pub trait WsEventObserver: Send + Sync {
 #[derive(uniffi::Object)]
 pub struct WsClient {
     handle: Arc<WsHandle>,
+    _event_task: tokio::task::JoinHandle<()>,
 }
 
 #[uniffi::export]
 impl WsClient {
     /// Create a WebSocket client and connect.
     ///
-    /// The `config_json` format matches `WsClientConfig`:
-    /// ```json
-    /// {"urls": ["wss://echo.example.com"], "reconnect": {"initial_delay_ms": 1000}}
-    /// ```
-    ///
     /// Note: Sync because UniFFI 0.28 does not support async constructors.
-    /// Uses block_on() on a dedicated tokio runtime.
     #[uniffi::constructor]
     pub fn new(
         config_json: String,
@@ -259,40 +309,27 @@ impl WsClient {
             .cloned()
             .ok_or_else(|| CatcherError::Config("urls cannot be empty".into()))?;
 
-        // Bridge async connect to sync — UniFFI 0.28 requires sync constructors
-        let (handle, mut rx) = runtime()
-            .block_on(WsTransport::connect(&first_url, &config))
+        // Use aux thread to avoid block_on re-entrance
+        let handle = block_on_aux_thread(async move {
+            WsTransport::connect(&first_url, &config).await
+        });
+        let (ws_handle, mut rx) = handle.join()
+            .map_err(|_| CatcherError::Network("connect thread panicked".into()))?
             .map_err(|e| CatcherError::Network(e.to_string()))?;
 
-        // Spawn event forwarding on the runtime
-        runtime().spawn(async move {
+        let ws_handle = Arc::new(ws_handle);
+
+        // Spawn event forwarding on the main multi-threaded runtime
+        // (not inside block_on, so observer callbacks can safely call HTTP methods)
+        let event_task = runtime().spawn(async move {
             while let Some(event) = rx.recv().await {
-                let dto = match event {
-                    catcher_ws::WsEvent::Connected { url, latency_ms } => {
-                        WsEventDto::Connected { url, latency_ms }
-                    }
-                    catcher_ws::WsEvent::Disconnected { code, reason } => {
-                        WsEventDto::Disconnected { code, reason }
-                    }
-                    catcher_ws::WsEvent::Reconnecting { attempt, delay_ms } => {
-                        WsEventDto::Reconnecting { attempt, delay_ms }
-                    }
-                    catcher_ws::WsEvent::Message { data, is_binary } => {
-                        WsEventDto::Message { data, is_binary }
-                    }
-                    catcher_ws::WsEvent::Error { message } => {
-                        WsEventDto::Error { message }
-                    }
-                    catcher_ws::WsEvent::HeartbeatRtt { rtt_ms } => {
-                        WsEventDto::HeartbeatRtt { rtt_ms }
-                    }
-                };
-                observer.on_event(dto);
+                observer.on_event(event.into());
             }
         });
 
         Ok(Self {
-            handle: Arc::new(handle),
+            handle: ws_handle,
+            _event_task: event_task,
         })
     }
 
@@ -318,6 +355,14 @@ impl WsClient {
         self.handle
             .close(code, &reason)
             .map_err(|e| CatcherError::Network(e.to_string()))
+    }
+}
+
+// When WsClient is dropped, abort the event-forwarding task to prevent
+// callbacks to a GC'd observer.
+impl Drop for WsClient {
+    fn drop(&mut self) {
+        self._event_task.abort();
     }
 }
 
