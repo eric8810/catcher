@@ -163,3 +163,16 @@ pub extern "C" fn catcher_ws_destroy(handle: *mut c_void) {
         drop(Box::from_raw(handle as *mut usize));
     }
 }
+
+/// Free an FfiResult returned by WS FFI functions.
+///
+/// Dart must call this after every WS FFI call that returns FfiResult,
+/// otherwise the `error_message` CString will leak.
+#[no_mangle]
+pub extern "C" fn catcher_free_result(result: FfiResult) {
+    if !result.error_message.is_null() {
+        unsafe {
+            let _ = std::ffi::CString::from_raw(result.error_message);
+        }
+    }
+}

@@ -181,7 +181,11 @@ typedef CatcherWsCloseDart = void Function(
 typedef CatcherWsDestroyNative = Void Function(Pointer<Void> handle);
 typedef CatcherWsDestroyDart = void Function(Pointer<Void> handle);
 
-// ═══════════════════════════════════════════════════════════════
+/// catcher_free_result(result) — frees FfiResult.error_message CString
+typedef CatcherFreeResultNative = Void Function(FfiResultNative result);
+typedef CatcherFreeResultDart = void Function(FfiResultNative result);
+
+// ═════════════════════════════════════════════════════════════════
 // Codec — pack / unpack
 // ═══════════════════════════════════════════════════════════════
 

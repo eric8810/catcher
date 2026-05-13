@@ -163,8 +163,17 @@ class CatcherWsClient {
       final msg = result.errorMessage != nullptr
           ? result.errorMessage.toDartString()
           : 'Unknown error';
+      // Free the error_message CString allocated by Rust FfiResult::error()
+      _freeResult(result);
       throw CatcherWsError(msg);
     }
+  }
+
+  /// Call catcher_freeResult to release the error_message CString
+  void _freeResult(FfiResultNative result) {
+    final freeFn = _lib!.lookupFunction<CatcherFreeResultNative,
+        CatcherFreeResultDart>('catcher_free_result');
+    freeFn(result);
   }
 
   WsEvent _parseWsEvent(Map<String, dynamic> json) {
