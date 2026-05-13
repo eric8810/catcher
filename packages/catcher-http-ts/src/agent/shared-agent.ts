@@ -27,7 +27,7 @@ export function createSharedAgent(options: SharedAgentOptions = {}): https.Agent
     maxSockets = 25,
     maxFreeSockets = 10,
     timeout = 60_000,
-    rejectUnauthorized = false,
+    rejectUnauthorized = true,
     dnsCacheTtl = 300,
   } = options
 

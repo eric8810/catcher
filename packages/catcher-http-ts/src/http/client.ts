@@ -117,7 +117,7 @@ export function createHttpClient(config: HttpClientConfig): IHttpClient {
     baseURL,
     keepAlive = true,
     dnsCacheTtl = 300,
-    rejectUnauthorized = false,
+    rejectUnauthorized = true,
     timeout,
     retry,
     concurrency,

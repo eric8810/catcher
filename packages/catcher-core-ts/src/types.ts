@@ -11,7 +11,7 @@ export interface SharedAgentOptions {
   maxFreeSockets?: number
   /** Socket timeout in ms. Default: 60_000 */
   timeout?: number
-  /** Skip TLS certificate validation. Default: false */
+  /** Reject unauthorized TLS certificates. Default: true (secure). Set to false only for testing/development. */
   rejectUnauthorized?: boolean
   /** DNS cache TTL in seconds. Default: 300 */
   dnsCacheTtl?: number

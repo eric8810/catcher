@@ -12,14 +12,15 @@ use catcher_http::{
 
 use catcher_ws::{
     types::ws::WsClientConfig,
-    WsHandle, WsTransport,
+    WsHandle,
 };
 
 // ═══════════════════════════════════════════════════════════════
 // HTTP Client
 // ═══════════════════════════════════════════════════════════════
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, uniffi::Error)]
+#[uniffi(flat_error)]
 pub enum CatcherError {
     #[error("Network error: {0}")]
     Network(String),
@@ -28,7 +29,7 @@ pub enum CatcherError {
 }
 
 /// Dart/JSON-compatible HTTP response
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, uniffi::Record)]
 pub struct HttpResponseDto {
     pub status: u16,
     pub body: Vec<u8>,
@@ -36,6 +37,7 @@ pub struct HttpResponseDto {
 }
 
 /// Resilient HTTP client
+#[derive(uniffi::Object)]
 pub struct HttpClient {
     inner: HttpTransport,
 }
@@ -144,7 +146,7 @@ impl HttpClient {
 // ═══════════════════════════════════════════════════════════════
 
 /// WebSocket event (JSON-compatible)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, uniffi::Enum)]
 pub enum WsEventDto {
     Connected { url: String, latency_ms: u32 },
     Disconnected { code: u16, reason: String },
@@ -153,6 +155,7 @@ pub enum WsEventDto {
 }
 
 /// Resilient WebSocket client
+#[derive(uniffi::Object)]
 pub struct WsClient {
     handle: Arc<WsHandle>,
 }
@@ -160,7 +163,7 @@ pub struct WsClient {
 /// Create a WebSocket client.
 #[uniffi::export]
 pub fn create_ws_client(config_json: String) -> Result<Arc<WsClient>, CatcherError> {
-    let config: WsClientConfig = serde_json::from_str(&config_json)
+    let _config: WsClientConfig = serde_json::from_str(&config_json)
         .map_err(|e| CatcherError::Config(e.to_string()))?;
 
     // UniFFI limitation: async needs a callback mechanism

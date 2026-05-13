@@ -3,8 +3,11 @@
   "private": true,
   "scripts": {
     "build": "pnpm -r build",
-    "build:ts": "pnpm --filter catcher build",
+    "build:ts": "pnpm --filter @catcher/core --filter @catcher/http --filter @catcher/ws --filter @catcher/web build",
     "test": "vitest run",
+    "test:integration": "vitest run --include 'packages/test/integration/**/*.test.ts'",
+    "test:e2e": "vitest run --include 'packages/test/e2e/**/*.test.ts'",
+    "test:chaos": "vitest run --include 'packages/test/chaos/**/*.test.ts'",
     "test:watch": "vitest",
     "bench": "vitest bench",
     "lint": "pnpm -r lint",

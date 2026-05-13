@@ -1,15 +1,28 @@
 const os = require('os')
 const path = require('path')
 
-let addon
-try {
-  addon = require(`./npm/${os.platform()}-${os.arch()}/catcher-napi-http.node`)
-} catch {
-  try {
-    addon = require(path.join(__dirname, 'catcher-napi-http.node'))
-  } catch {
-    throw new Error('@catcher/napi-http: native addon not found. Run `npm run build`.')
+function tryRequire(...paths) {
+  for (const p of paths) {
+    try { return require(p) } catch {}
   }
+  return null
+}
+
+const platform = os.platform()
+const arch = os.arch()
+const pkg = 'catcher-napi-http'
+const dirname = __dirname
+
+let addon =
+  // 1. npm prebuilt artifacts dir
+  tryRequire(path.join(dirname, 'npm', `${platform}-${arch}`, `${pkg}.node`)) ??
+  // 2. local napi build output
+  tryRequire(path.join(dirname, `${pkg}.node`)) ??
+  // 3. cargo build target (linux .so, handled as .node copy)
+  tryRequire(path.join(dirname, 'target', 'release', `lib${pkg.replace(/-/g, '_')}.so`))
+
+if (!addon) {
+  throw new Error(`@catcher/napi-http: native addon not found. Run \`npm run build\` in packages/${pkg}.`)
 }
 
 const RawClient = addon.JsHttpClient

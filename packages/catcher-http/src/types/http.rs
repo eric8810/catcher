@@ -165,7 +165,7 @@ pub struct HttpClientConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub circuit_breaker: Option<CircuitBreakerConfig>,
 
-    /// 最大并发请求数
+    /// 最大并发请求数 (NOTE: not yet enforced at the transport layer — queuing is handled by TS/UniFFI wrappers)
     #[serde(default = "default_max_concurrency")]
     pub max_concurrency: u32,
 
@@ -174,6 +174,7 @@ pub struct HttpClientConfig {
     pub default_headers: HashMap<String, String>,
 
     /// Hostname 覆写（HTTP DNS 场景：连接 IP 但 Host header 用域名）
+    /// NOTE: not yet wired into reqwest; configure via default_headers "Host" field as workaround.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hostname_override: Option<String>,
 }

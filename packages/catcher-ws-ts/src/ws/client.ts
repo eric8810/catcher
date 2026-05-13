@@ -20,7 +20,7 @@ export function createResilientWS(options: ResilientWSOptions): ResilientWS {
     reconnect: reconnectOpts,
     raceCount = 3,
     headers,
-    rejectUnauthorized = false,
+    rejectUnauthorized = true,
   } = options
 
   const urls = Array.isArray(url) ? url : [url]
@@ -51,6 +51,7 @@ export function createResilientWS(options: ResilientWSOptions): ResilientWS {
   let activeSocket: WebSocket | null = null
   let activeUrl = ''
   let currentStatus: ResilientWS['status'] = 'CLOSED'
+  let closedByUser = false
   const listeners = new Map<string, Set<EventListener>>()
 
   function emit(type: string, event?: Event) {
@@ -58,6 +59,7 @@ export function createResilientWS(options: ResilientWSOptions): ResilientWS {
   }
 
   function connect(): void {
+    if (closedByUser) return
     currentStatus = 'CONNECTING'
     emit('statuschange')
 
@@ -71,8 +73,10 @@ export function createResilientWS(options: ResilientWSOptions): ResilientWS {
         // All failed — schedule reconnect
         currentStatus = 'CLOSED'
         emit('statuschange')
-        const delay = reconnect.nextDelay()
-        setTimeout(connect, delay)
+        if (!closedByUser) {
+          const delay = reconnect.nextDelay()
+          if (delay !== -1) setTimeout(connect, delay)
+        }
       })
     } else {
       // Single endpoint
@@ -113,10 +117,17 @@ export function createResilientWS(options: ResilientWSOptions): ResilientWS {
       clearTimeout(connectTimer)
       currentStatus = 'CLOSED'
       if (activeSocket === socket) {
-        emit('close', new CloseEvent('close', { code, reason: reason.toString() }))
+        // Node.js does not have CloseEvent — use a custom event with code + reason
+        const event = new Event('close') as Event & { code: number; reason: string }
+        ;(event as any).code = code
+        ;(event as any).reason = reason.toString()
+        emit('close', event)
         emit('statuschange')
-        const delay = reconnect.nextDelay()
-        setTimeout(connect, delay)
+        if (!closedByUser) {
+          const delay = reconnect.nextDelay()
+          if (delay === -1) return // maxAttempts exceeded
+          setTimeout(connect, delay)
+        }
       }
     })
 
@@ -139,6 +150,7 @@ export function createResilientWS(options: ResilientWSOptions): ResilientWS {
       }
     },
     close(code, reason) {
+      closedByUser = true
       reconnect.reset()
       activeSocket?.close(code, reason)
     },

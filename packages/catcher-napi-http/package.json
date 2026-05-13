@@ -9,7 +9,7 @@
     "triples": { "defaults": true }
   },
   "scripts": {
-    "build": "cargo build --release && napi artifacts",
+    "build": "napi build --platform --release && napi artifacts",
     "build-debug": "cargo build"
   },
   "devDependencies": {

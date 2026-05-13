@@ -53,6 +53,43 @@ function appendParams(url: string, query: string): string {
   return url + (url.includes('?') ? '&' : '?') + query
 }
 
+/** Create a combined AbortSignal that fires on either user cancel or timeout. */
+function createTimeoutSignal(signal?: AbortSignal, timeoutMs?: number): { signal: AbortSignal; clear: () => void } {
+  if (!timeoutMs && !signal) return { signal: undefined as any, clear: () => {} }
+  const controller = new AbortController()
+  let timeoutId: ReturnType<typeof setTimeout> | null = null
+
+  const onUserAbort = () => controller.abort()
+  signal?.addEventListener('abort', onUserAbort, { once: true })
+
+  if (timeoutMs && timeoutMs > 0) {
+    timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+  }
+
+  return {
+    signal: controller.signal,
+    clear() {
+      if (timeoutId !== null) clearTimeout(timeoutId)
+      signal?.removeEventListener('abort', onUserAbort)
+    },
+  }
+}
+
+/** Parse response body according to responseType. */
+async function parseBody(resp: Response, responseType?: 'json' | 'text' | 'bytes'): Promise<any> {
+  switch (responseType) {
+    case 'text': return resp.text()
+    case 'bytes': return new Uint8Array(await resp.arrayBuffer())
+    case 'json':
+    default:
+      return tryParseJSON(await resp.text())
+  }
+}
+
+function tryParseJSON(text: string): any {
+  try { return JSON.parse(text) } catch { return text }
+}
+
 // ── Main ──────────────────────────────────────────────────────
 
 /**
@@ -62,12 +99,36 @@ function appendParams(url: string, query: string): string {
  *   fetch → retry → circuit breaker → concurrency queue
  */
 export function createWebClient(config: HttpClientConfig): IHttpClient {
-  const { baseURL, retry, concurrency, circuitBreaker } = config
+  const {
+    baseURL,
+    retry,
+    concurrency,
+    circuitBreaker,
+    interceptors: staticInterceptors,
+  } = config
   const resolvedBase = baseURL.replace(/\/$/, '')
 
   // ── interceptors ──
   const reqInterceptors = createInterceptorManager<RequestConfig>()
   const resInterceptors = createInterceptorManager<HttpResponse>()
+
+  // Seed with static interceptors from config
+  if (staticInterceptors?.request) {
+    for (const fn of staticInterceptors.request) {
+      reqInterceptors.use(fn as any)
+    }
+  }
+  if (staticInterceptors?.response) {
+    const [onFulfilled, onRejected] = staticInterceptors.response
+    resInterceptors.use(onFulfilled as any, onRejected as any)
+  }
+
+  // Determine effective retry config for a request
+  const effectiveRetry = (req?: RequestConfig): RetryOptions | null => {
+    if (req?.retry === false) return null
+    if (req?.retry) return req.retry
+    return retry ?? null
+  }
 
   // ── doFetch with interceptor chain ──
   const doFetch = async (method: string, url: string, body: any, reqConfig?: RequestConfig) => {
@@ -75,59 +136,111 @@ export function createWebClient(config: HttpClientConfig): IHttpClient {
     let merged = { ...reqConfig }
     merged = await (reqInterceptors as any)._runRequestChain(merged, merged)
 
-    const init: RequestInit = {
-      method,
-      headers: { 'Content-Type': 'application/json', ...merged.headers },
-      signal: merged.signal,
+    // Build query string from params
+    let finalUrl = resolvedBase + url
+    if (merged.params) {
+      const serializer = merged.paramsSerializer ?? serializeParams
+      const qs = serializer(merged.params)
+      finalUrl = appendParams(finalUrl, qs)
     }
-    if (body !== undefined) init.body = JSON.stringify(body)
 
-    const fullUrl = resolvedBase + url
-    const resp = await fetch(fullUrl, init)
-
-    if (!resp.ok && resp.status >= 500) {
-      const err: any = new Error(`HTTP ${resp.status}`)
-      err.code = 'HTTP_5XX'
-      err.response = { status: resp.status }
+    // Check cancellation before sending
+    if (merged.signal?.aborted) {
+      const err = new Error('Request cancelled') as Error & { code: string }
+      err.code = 'ECANCELED'
       throw err
     }
 
-    const text = await resp.text()
-    const httpResp: HttpResponse = {
-      status: resp.status,
-      headers: Object.fromEntries(resp.headers.entries()),
-      data: tryParseJSON(text),
-      config: merged,
+    // Build timeout + cancellation signal
+    const { signal, clear: clearTimeoutSignal } = createTimeoutSignal(
+      merged.signal,
+      merged.timeout,
+    )
+
+    const headers: Record<string, string> = { ...merged.headers }
+    // Only set default Content-Type when sending a body
+    if (body !== undefined && !headers['Content-Type'] && !headers['content-type']) {
+      headers['Content-Type'] = 'application/json'
     }
 
-    // Run response interceptor chain (FIFO)
-    const final = await (resInterceptors as any)._runResponseChain(httpResp)
-    return final?.data !== undefined ? final.data : final
+    const init: RequestInit = {
+      method,
+      headers,
+      signal,
+    }
+
+    // Handle body: skip for GET/HEAD, allow custom Content-Type to override
+    if (body !== undefined) {
+      init.body = JSON.stringify(body)
+    }
+
+    try {
+      const resp = await fetch(finalUrl, init)
+
+      // validateStatus
+      const isValid = merged.validateStatus
+        ? merged.validateStatus(resp.status)
+        : resp.ok
+
+      if (!isValid && resp.status >= 500) {
+        const err: any = new Error(`HTTP ${resp.status}`)
+        err.code = 'HTTP_5XX'
+        err.response = { status: resp.status }
+        throw err
+      }
+
+      const data = await parseBody(resp, merged.responseType)
+      const httpResp: HttpResponse = {
+        status: resp.status,
+        headers: Object.fromEntries(resp.headers.entries()),
+        data,
+        config: merged,
+      }
+
+      // Run response interceptor chain (FIFO)
+      const final = await (resInterceptors as any)._runResponseChain(httpResp)
+      return final?.data !== undefined ? final.data : final
+    } finally {
+      clearTimeoutSignal()
+    }
   }
 
   // ── retry wrapper ──
-  const rawDoRequest = retry
-    ? (method: string, url: string, body: any, reqConfig?: RequestConfig) =>
-        pRetry(
-          async () => {
-            try { return await doFetch(method, url, body, reqConfig) }
-            catch (error: any) {
-              const isRetryable =
-                error.code === 'HTTP_5XX' ||
-                error.name === 'TypeError' // network error in fetch
-              if (isRetryable) throw error
-              throw new AbortError(error)
-            }
-          },
-          {
-            retries: retry.attempts,
-            factor: retry.backoff === 'exponential' ? 2 : 1,
-            minTimeout: 500,
-            maxTimeout: 30_000,
-          },
-        )
-    : (method: string, url: string, body: any, reqConfig?: RequestConfig) =>
-        doFetch(method, url, body, reqConfig)
+  const rawDoRequest = (
+    method: string,
+    url: string,
+    body: any,
+    reqConfig?: RequestConfig,
+  ) => {
+    const er = effectiveRetry(reqConfig)
+    if (!er) {
+      return doFetch(method, url, body, reqConfig)
+    }
+
+    return pRetry(
+      async () => {
+        try { return await doFetch(method, url, body, reqConfig) }
+        catch (error: any) {
+          const isRetryable =
+            error.code === 'HTTP_5XX' ||
+            error.code === 'ECONNABORTED' ||
+            error.name === 'TypeError' || // network error in fetch
+            error.name === 'AbortError'
+          if (isRetryable) throw error
+          throw new AbortError(error)
+        }
+      },
+      {
+        retries: er.attempts,
+        factor: er.backoff === 'exponential' ? 2 : 1,
+        minTimeout: er.minTimeout ?? 500,
+        maxTimeout: er.maxTimeout ?? 30_000,
+        onFailedAttempt: er.onRetry
+          ? (err) => er.onRetry!(err.attemptNumber)
+          : undefined,
+      },
+    )
+  }
 
   // ── circuit breaker ──
   let breaker: CircuitBreakerPolicy | null = null
@@ -175,17 +288,18 @@ export function createWebClient(config: HttpClientConfig): IHttpClient {
       request: reqInterceptors,
       response: resInterceptors,
     } as any,
-    circuitBreakerState() {
-      return breaker?.state ?? 'closed' as any
+    circuitBreakerState(): 'closed' | 'open' | 'half-open' {
+      if (!breaker) return 'closed'
+      // Cockatiel CircuitState enum: Closed=0, Open=1, HalfOpen=2
+      const s: number = (breaker as any).state
+      if (s === 1) return 'open'
+      if (s === 2) return 'half-open'
+      return 'closed'
     },
     queueDepth() {
       return queue?.size ?? 0
     },
   }
-}
-
-function tryParseJSON(text: string): any {
-  try { return JSON.parse(text) } catch { return text }
 }
 
 export type { IHttpClient, RequestConfig, HttpClientConfig, HttpResponse } from '@catcher/core'

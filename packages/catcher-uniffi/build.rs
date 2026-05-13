@@ -1,1 +1,3 @@
-uniffi::setup_scaffolding!();
+fn main() {
+    uniffi::generate_scaffolding("src/catcher.udl").unwrap();
+}

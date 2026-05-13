@@ -1,6 +1,7 @@
 interface ReconnectStrategy {
   nextDelay: () => number
   reset: () => void
+  get attemptCount(): number
 }
 
 export function createReconnectStrategy(opts?: {
@@ -21,6 +22,8 @@ export function createReconnectStrategy(opts?: {
   return {
     nextDelay(): number {
       attempt++
+      // Enforce maxAttempts — return -1 as sentinel to stop reconnection
+      if (attempt > maxAttempts) return -1
       const exponential = initialDelay * Math.pow(backoffMultiplier, Math.max(0, attempt - 1))
       const delay = Math.min(exponential, maxDelay)
       // Add jitter: ±25%
@@ -29,6 +32,9 @@ export function createReconnectStrategy(opts?: {
     },
     reset(): void {
       attempt = 0
+    },
+    get attemptCount(): number {
+      return attempt
     },
   }
 }

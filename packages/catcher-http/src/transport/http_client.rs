@@ -37,8 +37,11 @@ impl HttpTransport {
 
         reqwest_builder = build_tls_config(reqwest_builder, &config.tls)?;
 
+        // DNS resolution: build_dns_resolver validates config but custom
+        // nameservers are not yet wired into reqwest (requires hickory-dns
+        // feature integration). System DNS is used as fallback.
         if let Some(ref dns) = config.dns {
-            let _ = build_dns_resolver(dns)?;
+            build_dns_resolver(dns)?;
         }
 
         let reqwest_client = reqwest_builder
@@ -110,6 +113,10 @@ impl HttpTransport {
         };
 
         let mut req = self.client.request(method, &url);
+        // Apply default headers from config (per-request headers override)
+        for (k, v) in &self.config.default_headers {
+            req = req.header(k, v);
+        }
         for (k, v) in &request.headers {
             req = req.header(k, v);
         }
