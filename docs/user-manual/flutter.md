@@ -200,16 +200,16 @@ class CatcherHttpClient {
 
 ---
 
-## 九、当前限制
+## 九、当前状态
 
 | 功能 | 状态 |
 |------|------|
-| HTTP GET/POST/PUT/DELETE/PATCH | 📋 规划 |
-| keepAlive + DNS 缓存 | 📋 规划 |
-| retry + 退避 | 📋 规划 |
-| circuitBreaker | 📋 规划 |
-| per-request options | 📋 规划 |
+| HTTP GET/POST/PUT/DELETE/PATCH | ✅ 已实现（Rust crate + Dart wrapper） |
+| keepAlive + DNS 缓存 | ✅ 已实现（Rust crate 支持） |
+| retry + 退避 | ✅ 已实现（Rust crate 支持） |
+| circuitBreaker | ✅ 已实现（Rust crate 支持） |
+| per-request options | ⏳ Dart wrapper 待补 |
 | 动态拦截器 | ❌ 暂不支持（dart:ffi 回调限制） |
-| WebSocket + push 事件 | 📋 规划 |
+| WebSocket + push 事件 | ⏳ Dart wrapper 待补 |
 
-> Flutter 使用方式依赖于 Rust crate 层的实现。Node.js 侧的所有韧性特性最终都会通过 C ABI → dart:ffi 通路在 Flutter 侧可用。
+> Rust crate 已完整实现所有韧性特性。Dart wrapper 覆盖了基础 CRUD，高级特性（per-request options、WebSocket）的 Dart 封装待补。

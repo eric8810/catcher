@@ -62,20 +62,14 @@ client.interceptors.request.use(config => {
 
 ---
 
-## 当前限制
+## 当前状态
 
 | 功能 | 状态 |
 |------|------|
-| HTTP GET/POST/PUT/DELETE/PATCH | ⚠️ 新建包 |
-| retry + 退避 | ⚠️ 复用 p-retry |
-| circuitBreaker | ⚠️ 复用 cockatiel |
-| 优先级队列 | ⚠️ 复用 p-queue |
-| 动态拦截器 | ⚠️ 复用拦截器管理器 |
+| HTTP GET/POST/PUT/DELETE/PATCH | ✅ 已实现（fetch 底层） |
+| retry + 退避 | ✅ 已实现（p-retry） |
+| circuitBreaker | ✅ 已实现（cockatiel） |
+| 优先级队列 | ✅ 已实现（p-queue） |
+| 动态拦截器 | ⏳ stub（待完集成） |
 | keepAlive / DNS 缓存 | ❌ 浏览器不支持 |
-| WebSocket client | ⚠️ 原生 WebSocket + 重连封装 |
-
----
-
-## 优先级
-
-P0 — 在所有平台中，Web 用户量最大、实现成本最低（纯 TS，复用韧性逻辑，仅换网络底层）。建议在 Rust crate 之前先做。
+| WebSocket client | ⏳ 待建（原生 WebSocket 封装） |
