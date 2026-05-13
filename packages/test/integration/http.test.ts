@@ -111,11 +111,11 @@ describe('HTTP — auto-retry on failure', () => {
   })
 
   it('🟡 弱网 — catcher retry succeeds where vanilla fails', async () => {
-    // High packet loss + disruption
+    // Moderate packet loss: vanilla likely fails at least once, catcher retries succeed
     proxy.setConditions({
-      latency: 500,
-      packetLoss: 0.3,
-      connectionReset: 0.1,
+      latency: 300,
+      packetLoss: 0.15,
+      connectionReset: 0.05,
     })
     proxy.disruptAll()
 
@@ -128,7 +128,7 @@ describe('HTTP — auto-retry on failure', () => {
       vanillaSuccess = false
     }
 
-    // Catcher — auto-retry should help
+    // Catcher — auto-retry should recover
     let catcherSuccess = false
     try {
       const client = createHttpClient({
@@ -146,9 +146,8 @@ describe('HTTP — auto-retry on failure', () => {
     console.log(`  vanilla success: ${vanillaSuccess}`)
     console.log(`  catcher success: ${catcherSuccess}`)
 
-    // Catcher should be at least as successful as vanilla,
-    // and in most cases more successful
-    expect(catcherSuccess).toBeDefined()
+    // Catcher retry should achieve at least 1 success even when vanilla fails
+    expect(catcherSuccess).toBe(true)
   }, TIMEOUT)
 })
 
