@@ -2,9 +2,9 @@
   "name": "@catcher/napi-ws",
   "version": "0.1.0",
   "description": "catcher WebSocket native addon for Node.js via napi-rs",
-  "main": "index.js",
-  "types": "index.d.ts",
-  "files": ["index.js", "index.d.ts", "npm/"],
+  "main": "client.js",
+  "types": "client.d.ts",
+  "files": ["client.js", "client.d.ts", "index.js", "index.d.ts", "*.node", "npm/"],
   "napi": {
     "name": "catcher-napi-ws",
     "triples": { "defaults": true }
@@ -12,7 +12,7 @@
   "scripts": {
     "build": "napi build --platform --release && napi artifacts",
     "build-debug": "cargo build",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "node -e \"const fs=require('fs');if(!fs.existsSync('index.js')){console.error('Run npm run build first (requires Rust)');process.exit(1)}\""
   },
   "devDependencies": {
     "@napi-rs/cli": "^2.18.0"
