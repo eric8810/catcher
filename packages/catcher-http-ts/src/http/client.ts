@@ -253,6 +253,10 @@ export function createHttpClient(config: HttpClientConfig): IHttpClient {
     if (processedConfig.onDownloadProgress) {
       axiosConfig.onDownloadProgress = processedConfig.onDownloadProgress
     }
+    // Pass retry override through to rawDoRequest
+    if (processedConfig.retry !== undefined) {
+      axiosConfig.retry = processedConfig.retry
+    }
 
     const priority = processedConfig.priority ?? defaultPriority
 

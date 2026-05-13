@@ -4,8 +4,15 @@
   "scripts": {
     "build": "pnpm -r build",
     "build:ts": "pnpm --filter catcher build",
-    "test": "pnpm -r test",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "bench": "vitest bench",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
   }
 }

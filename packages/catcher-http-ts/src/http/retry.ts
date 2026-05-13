@@ -8,8 +8,7 @@ import type { RetryOptions } from '@catcher/core'
  *
  * Fixes (Issues #1, #3):
  * - On retry, destroys idle keepAlive sockets to force a fresh connection (#1)
- * - Only retries on true network errors (ECONNRESET, ENOTFOUND, 5xx),
- *   NOT on ETIMEDOUT which usually indicates server overload (#3)
+ * - Retries on ECONNRESET, ETIMEDOUT, ENOTFOUND, ECONNREFUSED, and 5xx (#3)
  */
 export function createRetryWrapper(
   instance: AxiosInstance,
@@ -68,11 +67,10 @@ export function createRetryWrapper(
         maxTimeout: maxTimeout ?? 30_000,
         onFailedAttempt: (error) => {
           retriesUsed++
-          ;(options as any).onRetry?.(error.attemptNumber)
+          options.onRetry?.(error.attemptNumber)
           console.warn(
             `[catcher] Attempt ${error.attemptNumber}/${attempts + 1} failed: ${error.message}`
           )
-          options.onRetry?.(error.attemptNumber)
         },
       },
     )
