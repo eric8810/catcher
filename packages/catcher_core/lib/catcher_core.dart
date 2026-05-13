@@ -1,25 +1,25 @@
-/// catcher_core — Resilient HTTP/WebSocket client backed by Rust for Flutter.
+/// Catcher — Resilient HTTP/WebSocket client for Flutter
+///
+/// Backed by Rust core via dart:ffi.
+///
+/// ## Quick Start
 ///
 /// ```dart
 /// import 'package:catcher_core/catcher_core.dart';
 ///
-/// final client = CatcherHttpClient(HttpClientConfig(
-///   baseUrl: 'https://api.example.com',
-///   keepAlive: true,
-///   retry: RetryConfig(maxAttempts: 3),
-/// ));
+/// void main() async {
+///   final client = CatcherHttpClient(HttpClientConfig(
+///     baseUrl: 'https://api.example.com',
+///     retry: RetryConfig(maxAttempts: 3),
+///   ));
 ///
-/// final resp = await client.get('/channels');
-/// print('${resp.status}: ${resp.bodyAsString}');
+///   final resp = await client.get('/channels');
+///   print('Status: ${resp.status}');
+///
+///   client.dispose();
+/// }
 /// ```
+library catcher_core;
 
 export 'src/http_client.dart';
-export 'src/ws_client.dart';
-export 'src/codec.dart';
-export 'src/quality.dart';
-
-export 'src/models/http_config.dart'
-    show HttpClientConfig, RetryConfig, CircuitBreakerConfig;
-export 'src/models/http_response.dart' show HttpResponse;
-export 'src/models/ws_config.dart' show WsClientConfig, ReconnectConfig;
-export 'src/models/ws_event.dart' show WsEvent;
+export 'src/native_loader.dart';

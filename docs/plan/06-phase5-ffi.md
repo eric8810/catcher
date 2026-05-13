@@ -2,7 +2,9 @@
 
 > 对应 arch 文档：`09-ffi.md`
 > 工期：9 人天
-> 目标：C ABI 导出 + napi-rs (Node.js) 绑定 + flutter_rust_bridge (Dart) 绑定 + TS e2e 验证
+> 目标：C ABI 导出 + napi-rs (Node.js) 绑定 + dart:ffi (Dart) 绑定 + TS e2e 验证
+>
+> **⚠️ 更新**：Dart 绑定选型已从 flutter_rust_bridge 切换为 dart:ffi，详见 [`arch-rs/13-dart-ffi.md`](../arch-rs/13-dart-ffi.md)。
 
 ---
 

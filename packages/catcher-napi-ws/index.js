@@ -12,6 +12,21 @@ try {
   }
 }
 
-module.exports = {
-  WsClient: addon.JsWsClient,
+const RawClient = addon.JsWsClient
+
+class WsClient {
+  constructor(config, onEvent) {
+    const configJson = typeof config === 'string' ? config : JSON.stringify(config)
+    this._raw = new RawClient(configJson, onEvent)
+  }
+
+  send(data) {
+    return this._raw.send(data)
+  }
+
+  close() {
+    return this._raw.close()
+  }
 }
+
+module.exports = { WsClient }

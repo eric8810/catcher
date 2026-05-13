@@ -1,0 +1,25 @@
+{
+  "name": "@catcher/web",
+  "version": "0.1.0",
+  "description": "Catcher HTTP client for browsers — fetch-based with retry, circuit breaker & priority queue",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "import": "./src/index.ts",
+      "types": "./src/index.ts"
+    }
+  },
+  "files": ["src"],
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@catcher/core": "workspace:*",
+    "cockatiel": "^3.0.0",
+    "p-retry": "^6.0.0",
+    "p-queue": "^8.0.0"
+  },
+  "license": "MIT"
+}

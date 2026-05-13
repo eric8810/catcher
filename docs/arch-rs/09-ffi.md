@@ -201,48 +201,25 @@ impl JsHttpClient {
 
 ---
 
-## flutter_rust_bridge 绑定层（Dart）
+## dart:ffi 绑定层（Dart / Flutter）
+
+> 决策：dart:ffi ✅, flutter_rust_bridge ❌。详细设计见 [`13-dart-ffi.md`](./13-dart-ffi.md)
 
 ```
 catcher_core/               # pub.dev 包
 ├── pubspec.yaml
 ├── rust/
-│   ├── Cargo.toml
+│   ├── Cargo.toml            # [lib] crate-type = ["cdylib"]
 │   └── src/
-│       ├── api/
-│       └── frb_generated.rs
+│       └── lib.rs            # re-export catcher-rs ffi symbols
 └── lib/
-    └── catcher_core.dart
+    ├── catcher_core.dart
+    └── src/
+        ├── ffi_bindings.dart # dart:ffi C 函数签名绑定
+        ├── native_loader.dart
+        ├── http_client.dart
+        ├── ws_client.dart
+        └── codec.dart
 ```
 
-```rust
-// 函数签名被 flutter_rust_bridge codegen 解析，自动生成 Dart
-
-pub struct HttpClientConfigDto {
-    pub base_url: String,
-    pub connect_timeout_ms: u64,
-    pub retry_max_attempts: u32,
-    // 所有字段平铺（flutter_rust_bridge 不支持 serde flatten）
-}
-
-pub struct HttpResponseDto {
-    pub status: u16,
-    pub headers: Vec<(String, String)>,
-    pub body: Vec<u8>,
-    pub elapsed_ms: u64,
-}
-
-pub struct WsEventDto {
-    pub event_type: String,
-    pub data: Vec<u8>,
-    pub metadata: Option<String>,
-}
-
-pub fn create_http_client(config: HttpClientConfigDto) -> HttpClientHandle { todo!() }
-pub async fn http_get(handle: HttpClientHandle, url: String) -> Result<HttpResponseDto, String> { todo!() }
-
-pub fn create_ws_client(config_json: String, event_sink: StreamSink<WsEventDto>) -> WsClientHandle { todo!() }
-
-pub fn pack_msgpack(value_json: String) -> Vec<u8> { todo!() }
-pub fn unpack_msgpack(data: Vec<u8>) -> String { todo!() }
-```
+Dart 侧通过 `dart:ffi` 直接调用 C ABI，与 napi-rs 共用同一套 `src/ffi/` 接口：

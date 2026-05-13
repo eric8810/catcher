@@ -64,7 +64,7 @@ packages/
 │
 │   └── Cargo.toml                      # deps: catcher-ws
 │
-├── catcher_core/                       # Dart FFI binding (flutter_rust_bridge)
+├── catcher_core/                       # Dart FFI binding (dart:ffi)
 │
 └── catcher-tus/                        # 🔜 TUS 客户端（规划中）
 ```

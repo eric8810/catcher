@@ -1,14 +1,17 @@
 import 'dart:ffi';
 import 'dart:io';
 
-import 'ffi_types.dart';
-
-/// Platform-aware dynamic library loader for catcher_core.
+/// Load the catcher native library.
+///
+/// - Android: libcatcher_core.so (packaged in APK)
+/// - iOS: statically linked via native_assets
+/// - macOS: libcatcher_core.dylib
+/// - Linux: libcatcher_core.so
+/// - Windows: catcher_core.dll
 DynamicLibrary loadCatcherLibrary() {
   if (Platform.isAndroid) {
     return DynamicLibrary.open('libcatcher_core.so');
   } else if (Platform.isIOS) {
-    // iOS: statically linked via Native Assets
     return DynamicLibrary.process();
   } else if (Platform.isMacOS) {
     return DynamicLibrary.open('libcatcher_core.dylib');
@@ -17,7 +20,5 @@ DynamicLibrary loadCatcherLibrary() {
   } else if (Platform.isLinux) {
     return DynamicLibrary.open('libcatcher_core.so');
   }
-  throw UnsupportedError(
-    'Unsupported platform: ${Platform.operatingSystem}',
-  );
+  throw UnsupportedError('Unsupported platform: ${Platform.operatingSystem}');
 }

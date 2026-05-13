@@ -132,7 +132,7 @@ packages/
 │   ├── index.js
 │   └── index.d.ts
 │
-└── catcher_core/                    # pub.dev 包 (flutter_rust_bridge / dart:ffi)
+└── catcher_core/                    # pub.dev 包 (dart:ffi)
     ├── pubspec.yaml
     ├── rust/
     └── lib/

@@ -6,6 +6,7 @@ members = [
     "catcher-ws",
     "catcher-napi-http",
     "catcher-napi-ws",
+    "catcher-uniffi",
 ]
 
 # Planned: "catcher-tus",  (TUS client, to be created)

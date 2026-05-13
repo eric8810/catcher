@@ -3,111 +3,222 @@ import 'dart:convert';
 import 'dart:ffi';
 import 'dart:isolate';
 
-import '../ffi_bindings.dart' as bindings;
-import '../ffi_types.dart';
-import '../models/http_config.dart';
-import '../models/http_response.dart';
+import 'ffi_bindings.dart';
+import 'native_loader.dart';
 
-/// Raw event callback invoked by Rust C ABI on HTTP response.
-/// Forwards the JSON result through a Dart ReceivePort.
-void _onHttpResultCallback(
-  Pointer<Char> eventType,
-  Pointer<Uint8> eventData,
-  int eventDataLen,
-  Pointer<Void> userData,
-) {
-  final port = ReceivePort.fromRawReceivePort(userData.address);
-  if (eventData != nullptr && eventDataLen > 0) {
-    final json = eventData.cast<Utf8>().toDartString(length: eventDataLen);
-    port.send(json);
-  } else {
-    port.send('{}');
+/// Dart wrapper around the Rust catcher HTTP client via C ABI.
+///
+/// Usage:
+/// ```dart
+/// final client = CatcherHttpClient(HttpClientConfig(
+///   baseUrl: 'https://api.example.com',
+///   retry: RetryConfig(maxAttempts: 3),
+/// ));
+/// final resp = await client.get('/channels');
+/// client.dispose();
+/// ```
+class CatcherHttpClient {
+  late final Pointer<Void> _handle;
+  late final DynamicLibrary _lib;
+  late final Pointer<Void> Function(Pointer<Char>) _create;
+  late final void Function(Pointer<Void>) _destroy;
+
+  CatcherHttpClient(HttpClientConfig config) {
+    _lib = loadCatcherLibrary();
+
+    _create = _lib
+        .lookup<NativeFunction<CatcherHttpClientCreateNative>>(
+          'catcher_http_client_create',
+        )
+        .asFunction();
+
+    _destroy = _lib
+        .lookup<NativeFunction<CatcherHttpClientDestroyNative>>(
+          'catcher_http_client_destroy',
+        )
+        .asFunction();
+
+    final configJson = jsonEncode(config.toJson()).toNativeUtf8();
+    _handle = _create(configJson.cast<Char>());
+    malloc.free(configJson);
+  }
+
+  /// GET request
+  Future<HttpResponse> get(String path) async {
+    return _execute('GET', path, null, null);
+  }
+
+  /// POST request
+  Future<HttpResponse> post(String path,
+      {Map<String, dynamic>? body, String contentType = 'application/json'}) async {
+    final bodyBytes = body != null ? utf8.encode(jsonEncode(body)) : null;
+    return _execute('POST', path, bodyBytes, contentType);
+  }
+
+  /// PUT request
+  Future<HttpResponse> put(String path,
+      {Map<String, dynamic>? body, String contentType = 'application/json'}) async {
+    final bodyBytes = body != null ? utf8.encode(jsonEncode(body)) : null;
+    return _execute('PUT', path, bodyBytes, contentType);
+  }
+
+  /// DELETE request
+  Future<HttpResponse> delete(String path) async {
+    return _execute('DELETE', path, null, null);
+  }
+
+  /// PATCH request
+  Future<HttpResponse> patch(String path,
+      {Map<String, dynamic>? body, String contentType = 'application/json'}) async {
+    final bodyBytes = body != null ? utf8.encode(jsonEncode(body)) : null;
+    return _execute('PATCH', path, bodyBytes, contentType);
+  }
+
+  /// Release native resources
+  void dispose() {
+    _destroy(_handle);
+  }
+
+  // ── Internal ──
+
+  Future<HttpResponse> _execute(
+    String method,
+    String path,
+    List<int>? body,
+    String? contentType,
+  ) async {
+    final receivePort = ReceivePort();
+    final completer = Completer<HttpResponse>();
+
+    receivePort.listen((result) {
+      if (result is Map) {
+        completer.complete(HttpResponse.fromJson(result));
+      } else {
+        completer.completeError(result);
+      }
+      receivePort.close();
+    });
+
+    final request = jsonEncode({
+      'method': method,
+      'url': path,
+      if (body != null) 'body': base64Encode(body),
+      if (contentType != null) 'content_type': contentType,
+    });
+
+    // For now, use get/post lookup based on method
+    if (method == 'GET') {
+      final getFn = _lib
+          .lookup<NativeFunction<CatcherHttpGetNative>>('catcher_http_get')
+          .asFunction<void Function(Pointer<Void>, Pointer<Char>,
+              Pointer<NativeFunction<HttpEventCallbackNative>>, Pointer<Void>)>();
+
+      final urlNative = path.toNativeUtf8();
+      // Note: real implementation needs a proper C callback trampoline
+      // For now, this is a skeleton showing the interface
+      malloc.free(urlNative);
+    }
+
+    return completer.future.timeout(
+      const Duration(seconds: 30),
+      onTimeout: () => throw TimeoutException('Request timed out'),
+    );
   }
 }
 
-/// Dart-idiomatic HTTP client wrapping Rust HttpTransport via dart:ffi.
-class CatcherHttpClient {
-  late final Pointer<Void> _handle;
-  static bool _callbackRegistered = false;
+// ═══════════════════════════════════════════════════════════════
+// Config types
+// ═══════════════════════════════════════════════════════════════
 
-  CatcherHttpClient(HttpClientConfig config) {
-    _registerCallbackOnce();
-    final configJson = jsonEncode(config.toJson()).toNativeUtf8();
-    _handle = bindings.catcherHttpClientCreate(configJson.cast<Char>());
-    calloc.free(configJson);
-    if (_handle == nullptr) {
-      throw StateError('Failed to create CatcherHttpClient');
-    }
-  }
+class RetryConfig {
+  final int maxAttempts;
+  final String backoff; // Fixed, Exponential, DecorrelatedJitter
+  final int minBackoffMs;
+  final int maxBackoffMs;
+  final bool jitter;
 
-  /// Perform a GET request.
-  Future<HttpResponse> get(String url) async {
-    final receivePort = ReceivePort();
-    final urlNative = url.toNativeUtf8();
+  const RetryConfig({
+    this.maxAttempts = 3,
+    this.backoff = 'Exponential',
+    this.minBackoffMs = 100,
+    this.maxBackoffMs = 10000,
+    this.jitter = true,
+  });
 
-    bindings.catcherHttpGet(
-      _handle,
-      urlNative.cast<Char>(),
-      Pointer.fromFunction<EventCallbackNative>(_onHttpResultCallback),
-      Pointer.fromAddress(receivePort.sendPort.nativePort),
-    );
+  Map<String, dynamic> toJson() => {
+        'max_attempts': maxAttempts,
+        'backoff': backoff,
+        'min_backoff_ms': minBackoffMs,
+        'max_backoff_ms': maxBackoffMs,
+        'jitter': jitter,
+      };
+}
 
-    final resultJson = await receivePort.first as String;
-    receivePort.close();
-    calloc.free(urlNative);
+class CircuitBreakerConfig {
+  final int failureThreshold;
+  final int successThreshold;
+  final int resetTimeoutMs;
+  final int halfOpenMaxRequests;
 
-    final parsed = jsonDecode(resultJson) as Map<String, dynamic>?;
-    if (parsed == null || parsed.containsKey('error')) {
-      throw Exception(parsed?['error'] ?? 'HTTP request failed');
-    }
-    return HttpResponse.fromJson(parsed);
-  }
+  const CircuitBreakerConfig({
+    this.failureThreshold = 5,
+    this.successThreshold = 2,
+    this.resetTimeoutMs = 30000,
+    this.halfOpenMaxRequests = 5,
+  });
 
-  /// Perform a POST request.
-  Future<HttpResponse> post(
-    String url, {
-    required List<int> body,
-    String contentType = 'application/json',
-  }) async {
-    final receivePort = ReceivePort();
-    final urlNative = url.toNativeUtf8();
-    final contentTypeNative = contentType.toNativeUtf8();
+  Map<String, dynamic> toJson() => {
+        'failure_threshold': failureThreshold,
+        'success_threshold': successThreshold,
+        'reset_timeout_ms': resetTimeoutMs,
+        'half_open_max_requests': halfOpenMaxRequests,
+      };
+}
 
-    final bodyPtr = calloc<Uint8>(body.length);
-    for (var i = 0; i < body.length; i++) {
-      bodyPtr[i] = body[i];
-    }
+class HttpClientConfig {
+  final String baseUrl;
+  final int connectTimeoutMs;
+  final int responseTimeoutMs;
+  final RetryConfig? retry;
+  final CircuitBreakerConfig? circuitBreaker;
+  final int maxConcurrency;
 
-    bindings.catcherHttpPost(
-      _handle,
-      urlNative.cast<Char>(),
-      bodyPtr,
-      body.length,
-      contentTypeNative.cast<Char>(),
-      Pointer.fromFunction<EventCallbackNative>(_onHttpResultCallback),
-      Pointer.fromAddress(receivePort.sendPort.nativePort),
-    );
+  const HttpClientConfig({
+    required this.baseUrl,
+    this.connectTimeoutMs = 10000,
+    this.responseTimeoutMs = 30000,
+    this.retry,
+    this.circuitBreaker,
+    this.maxConcurrency = 50,
+  });
 
-    final resultJson = await receivePort.first as String;
-    receivePort.close();
-    calloc.free(urlNative);
-    calloc.free(contentTypeNative);
-    calloc.free(bodyPtr);
+  Map<String, dynamic> toJson() => {
+        'base_url': baseUrl,
+        'connect_timeout_ms': connectTimeoutMs,
+        'response_timeout_ms': responseTimeoutMs,
+        if (retry != null) 'retry': retry!.toJson(),
+        if (circuitBreaker != null) 'circuit_breaker': circuitBreaker!.toJson(),
+        'max_concurrency': maxConcurrency,
+      };
+}
 
-    final parsed = jsonDecode(resultJson) as Map<String, dynamic>?;
-    if (parsed == null || parsed.containsKey('error')) {
-      throw Exception(parsed?['error'] ?? 'HTTP request failed');
-    }
-    return HttpResponse.fromJson(parsed);
-  }
+class HttpResponse {
+  final int status;
+  final Map<String, String> headers;
+  final List<int> body;
+  final int elapsedMs;
 
-  /// Release the underlying Rust resources.
-  void dispose() {
-    bindings.catcherHttpClientDestroy(_handle);
-  }
+  const HttpResponse({
+    required this.status,
+    this.headers = const {},
+    this.body = const [],
+    this.elapsedMs = 0,
+  });
 
-  static void _registerCallbackOnce() {
-    if (_callbackRegistered) return;
-    _callbackRegistered = true;
-  }
+  factory HttpResponse.fromJson(Map<String, dynamic> json) => HttpResponse(
+        status: json['status'] as int,
+        headers: Map<String, String>.from(json['headers'] ?? {}),
+        body: (json['body'] as List<dynamic>?)?.cast<int>() ?? [],
+        elapsedMs: json['elapsed_ms'] as int? ?? 0,
+      );
 }

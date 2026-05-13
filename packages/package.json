@@ -4,6 +4,7 @@
     "catcher-core-ts",
     "catcher-http-ts",
     "catcher-ws-ts",
+    "catcher-web",
     "test"
   ],
   "scripts": {
