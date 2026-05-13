@@ -291,7 +291,7 @@
   <div class="logo">🪤</div>
   <h1>Catcher</h1>
   <p class="subtitle">Resilient network toolkit — Rust core, cross-platform. Catches failures before they reach your business logic.</p>
-  <div class="tagline">npm install @catcher/napi-http @catcher/web @catcher/http</div>
+  <div class="tagline">npm install @eric8810/catcher-napi-http @eric8810/catcher-web @eric8810/catcher-http</div>
   <br>
   <a href="#quickstart" class="btn btn-primary">Quick Start ↓</a>
   <p class="subtitle" style="font-size:14px;margin-top:16px">Node.js · Browser · Electron · Rust · Flutter · iOS · Android</p>
@@ -422,7 +422,7 @@
       <div class="layer layer-queue">Priority Queue — caps concurrency, schedules by priority</div>
       <div class="layer layer-cb">Circuit Breaker — trips on consecutive failures, auto-recovers</div>
       <div class="layer layer-retry">Retry — exponential backoff with jitter, evicts stale connections</div>
-      <div class="layer layer-axios">HTTP Engine (axios today, swappable tomorrow)</div>
+      <div class="layer layer-axios">HTTP Engine — axios (TS) / reqwest (Rust) / fetch (browser)</div>
     </div>
   </div>
 </section>
@@ -435,12 +435,12 @@
 
     <div class="code-block">
       <pre><span class="cm">// Install</span>
-<span class="kw">npm</span> install @catcher/http @catcher/ws</pre>
+<span class="kw">npm</span> install @eric8810/catcher-http @eric8810/catcher-ws</pre>
     </div>
 
     <div class="code-block">
       <pre><span class="cm">// HTTP — with retry, circuit breaker &amp; connection pooling</span>
-<span class="kw">import</span> { createHttpClient } <span class="kw">from</span> <span class="str">'@catcher/http'</span>
+<span class="kw">import</span> { createHttpClient } <span class="kw">from</span> <span class="str">'@eric8810/catcher-http'</span>
 
 <span class="kw">const</span> client = <span class="fn">createHttpClient</span>({
   baseURL: <span class="str">'https://api.example.com'</span>,
@@ -465,7 +465,7 @@ client.interceptors.request.<span class="fn">use</span>(config => {
 
     <div class="code-block">
       <pre><span class="cm">// WebSocket — compression + reconnect + multi-endpoint racing</span>
-<span class="kw">import</span> { createResilientWS } <span class="kw">from</span> <span class="str">'@catcher/ws'</span>
+<span class="kw">import</span> { createResilientWS } <span class="kw">from</span> <span class="str">'@eric8810/catcher-ws'</span>
 
 <span class="kw">const</span> ws = <span class="fn">createResilientWS</span>({
   url: [<span class="str">'wss://cn.example.com'</span>, <span class="str">'wss://sg.example.com'</span>],
@@ -476,7 +476,7 @@ client.interceptors.request.<span class="fn">use</span>(config => {
 ws.<span class="fn">addEventListener</span>(<span class="str">'message'</span>, e => console.<span class="fn">log</span>(e.data))
 
 <span class="cm">// Binary codec — 2-4× faster than JSON</span>
-<span class="kw">import</span> { pack, unpack } <span class="kw">from</span> <span class="str">'@catcher/ws'</span>
+<span class="kw">import</span> { pack, unpack } <span class="kw">from</span> <span class="str">'@eric8810/catcher-ws'</span>
 ws.<span class="fn">send</span>(<span class="fn">pack</span>({ event: <span class="str">'msg'</span>, data }))</pre>
     </div>
   </div>
@@ -538,10 +538,10 @@ ws.<span class="fn">send</span>(<span class="fn">pack</span>({ event: <span clas
     <p class="desc">Install only what you need — Node.js, Browser, Rust, Flutter, native mobile</p>
     <div class="code-block" style="max-width:600px;margin:0 auto">
       <pre><span class="cm"># Node.js native (Rust via napi-rs)</span>
-<span class="kw">npm</span> i @catcher/napi-http @catcher/napi-ws
+<span class="kw">npm</span> i @eric8810/catcher-napi-http @eric8810/catcher-napi-ws
 
 <span class="cm"># Node.js / Browser (pure TypeScript)</span>
-<span class="kw">npm</span> i @catcher/http @catcher/ws @catcher/web
+<span class="kw">npm</span> i @eric8810/catcher-http @eric8810/catcher-ws @eric8810/catcher-web
 
 <span class="cm"># Rust</span>
 cargo add catcher-http catcher-ws
