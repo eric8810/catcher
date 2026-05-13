@@ -175,14 +175,4 @@ void main() {
       expect(result.connectionType, 'Unknown');
     });
   });
-
-  group('Codec stubs', () {
-    test('pack throws UnsupportedError', () {
-      expect(() => pack({'key': 'value'}), throwsUnsupportedError);
-    });
-
-    test('unpack throws UnsupportedError', () {
-      expect(() => unpack(Uint8List(0)), throwsUnsupportedError);
-    });
-  });
 }

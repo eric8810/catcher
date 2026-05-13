@@ -69,7 +69,7 @@ export 'src/ws_client.dart'
 // Network quality
 export 'src/quality.dart' show NetworkQualityResult, evaluateQuality;
 
-// Binary codec (stub — Rust side not yet implemented)
+// Binary codec
 export 'src/codec.dart' show pack, unpack;
 
 // FFI loader

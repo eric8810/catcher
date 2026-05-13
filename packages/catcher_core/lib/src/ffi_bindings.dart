@@ -213,6 +213,14 @@ typedef CatcherUnpackDart = FfiResultNative Function(
 );
 
 // ═══════════════════════════════════════════════════════════════════
+// Data free — catcher_free_data
+// ═══════════════════════════════════════════════════════════════════
+
+/// catcher_free_data(data, len) — frees data allocated by catcher_pack/unpack
+typedef CatcherFreeDataNative = Void Function(Pointer<Void> data, Size len);
+typedef CatcherFreeDataDart = void Function(Pointer<Void> data, int len);
+
+// ═══════════════════════════════════════════════════════════════════
 // Network quality — evaluate_quality
 // ═══════════════════════════════════════════════════════════════════
 

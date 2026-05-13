@@ -3,22 +3,33 @@ import 'dart:io';
 
 /// Load the catcher native library.
 ///
-/// - Android: libcatcher_core.so (packaged in APK)
-/// - iOS: statically linked via native_assets
-/// - macOS: libcatcher_core.dylib
-/// - Linux: libcatcher_core.so
-/// - Windows: catcher_core.dll
+/// Resolution order:
+/// 1. Android: libcatcher_ffi.so (packaged in APK)
+/// 2. iOS: statically linked via native_assets
+/// 3. macOS: libcatcher_ffi.dylib
+/// 4. Windows: catcher_ffi.dll
+/// 5. Linux: libcatcher_ffi.so
+///
+/// For local development on Linux/macOS, you can also set the
+/// `CATCHER_FFI_PATH` environment variable to the absolute path
+/// of the built library.
 DynamicLibrary loadCatcherLibrary() {
+  // Allow overriding the library path for local testing
+  final envPath = Platform.environment['CATCHER_FFI_PATH'];
+  if (envPath != null && envPath.isNotEmpty) {
+    return DynamicLibrary.open(envPath);
+  }
+
   if (Platform.isAndroid) {
-    return DynamicLibrary.open('libcatcher_core.so');
+    return DynamicLibrary.open('libcatcher_ffi.so');
   } else if (Platform.isIOS) {
     return DynamicLibrary.process();
   } else if (Platform.isMacOS) {
-    return DynamicLibrary.open('libcatcher_core.dylib');
+    return DynamicLibrary.open('libcatcher_ffi.dylib');
   } else if (Platform.isWindows) {
-    return DynamicLibrary.open('catcher_core.dll');
+    return DynamicLibrary.open('catcher_ffi.dll');
   } else if (Platform.isLinux) {
-    return DynamicLibrary.open('libcatcher_core.so');
+    return DynamicLibrary.open('libcatcher_ffi.so');
   }
   throw UnsupportedError('Unsupported platform: ${Platform.operatingSystem}');
 }

@@ -311,6 +311,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "catcher-ffi"
+version = "0.1.0"
+dependencies = [
+ "catcher-core",
+ "catcher-http",
+ "catcher-ws",
+ "serde_json",
+]
+
+[[package]]
 name = "catcher-http"
 version = "0.1.0"
 dependencies = [

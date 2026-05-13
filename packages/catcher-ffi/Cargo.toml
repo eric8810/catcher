@@ -1,0 +1,16 @@
+[package]
+name = "catcher-ffi"
+version = "0.1.0"
+edition = "2021"
+description = "Unified C ABI library for catcher — links HTTP + WS + codec into a single .so/.dylib"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib"]
+name = "catcher_ffi"
+
+[dependencies]
+catcher-core = { path = "../catcher-core" }
+catcher-http = { path = "../catcher-http" }
+catcher-ws = { path = "../catcher-ws" }
+serde_json = "1"
