@@ -4,13 +4,15 @@
   "description": "catcher HTTP native addon for Node.js via napi-rs",
   "main": "index.js",
   "types": "index.d.ts",
+  "files": ["index.js", "index.d.ts", "npm/"],
   "napi": {
     "name": "catcher-napi-http",
     "triples": { "defaults": true }
   },
   "scripts": {
     "build": "napi build --platform --release && napi artifacts",
-    "build-debug": "cargo build"
+    "build-debug": "cargo build",
+    "prepublishOnly": "npm run build"
   },
   "devDependencies": {
     "@napi-rs/cli": "^2.18.0"
