@@ -8,13 +8,13 @@ Resilient network communication toolkit — Rust core, TypeScript wrappers, cros
 
 | Platform | Package | Status |
 |----------|---------|--------|
-| **Node.js (native)** | `@catcher/napi-http` / `napi-ws` | ✅ |
-| **Node.js (TS)** | `@catcher/http` / `ws` | ✅ |
+| **Node.js (native)** | `@catcher/napi-http` / `@catcher/napi-ws` | ✅ |
+| **Node.js (TS)** | `@catcher/http` / `@catcher/ws` | ✅ |
 | **Electron** | same as Node.js | ✅ |
 | **Web** | `@catcher/web` | ✅ |
 | **Rust** | `catcher-http` / `catcher-ws` / `catcher-core` | ✅ |
-| **Flutter** | `catcher_core` (dart:ffi) | ✅ |
-| **Android + iOS** | `catcher-uniffi` (UniFFI) | ✅ |
+| **Flutter** | `catcher_core` (dart:ffi) | ⚠️ WIP (HTTP client wired, WS client skeleton) |
+| **Android + iOS** | `catcher-uniffi` (UniFFI) | ⚠️ WIP (proc-macro mode, needs mobile build verification) |
 
 ## Packages
 
@@ -137,9 +137,9 @@ interceptors → retry → circuit breaker → concurrency queue → HTTP engine
 
 ```bash
 pnpm install          # install all dependencies
-pnpm test             # run all tests (vitest)
+pnpm test             # run integration tests (vitest)
 pnpm typecheck        # type-check all TS packages
-pnpm bench            # run benchmarks
+pnpm bench             # run benchmarks
 
 # Rust
 cd packages && cargo build

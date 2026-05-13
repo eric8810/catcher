@@ -1,0 +1,31 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "bootstrap-sha": "<TODO: set to main branch latest commit SHA before first release>",
+  "release-type": "node",
+  "include-v-in-tag": true,
+  "plugins": ["node-workspace"],
+  "packages": {
+    "packages/catcher-core-ts": {
+      "package-name": "@catcher/core"
+    },
+    "packages/catcher-http-ts": {
+      "package-name": "@catcher/http"
+    },
+    "packages/catcher-ws-ts": {
+      "package-name": "@catcher/ws"
+    },
+    "packages/catcher-web": {
+      "package-name": "@catcher/web"
+    }
+  },
+  "changelog-sections": [
+    { "type": "feat", "section": "Features", "hidden": false },
+    { "type": "fix", "section": "Bug Fixes", "hidden": false },
+    { "type": "perf", "section": "Performance Improvements", "hidden": false },
+    { "type": "docs", "section": "Documentation", "hidden": true },
+    { "type": "chore", "section": "Miscellaneous", "hidden": true },
+    { "type": "refactor", "section": "Code Refactoring", "hidden": true },
+    { "type": "test", "section": "Tests", "hidden": true },
+    { "type": "ci", "section": "CI/CD", "hidden": true }
+  ]
+}

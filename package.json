@@ -1,17 +1,18 @@
 {
   "name": "catcher-monorepo",
   "private": true,
+  "packageManager": "pnpm@10.15.1",
   "scripts": {
     "build": "pnpm build:ts",
     "build:ts": "pnpm --filter @catcher/core --filter @catcher/http --filter @catcher/ws --filter @catcher/web build",
     "test": "vitest run",
     "test:integration": "vitest run",
     "test:napi": "pnpm --filter @catcher/napi-http build && pnpm --filter @catcher/napi-ws build && vitest run --config vitest.napi.config.ts",
-    "test:e2e": "vitest run packages/test/e2e",
-    "test:chaos": "vitest run packages/test/chaos",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "test:chaos": "vitest run --config vitest.chaos.config.ts",
     "test:watch": "vitest",
-    "bench": "vitest bench",
-    "lint": "pnpm -r lint",
+    "bench": "vitest bench --run",
+    "lint": "pnpm typecheck",
     "typecheck": "pnpm -r typecheck"
   },
   "devDependencies": {

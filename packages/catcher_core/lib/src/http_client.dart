@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:ffi';
 import 'dart:isolate';
 
+import 'package:ffi/ffi.dart';
+
 import 'ffi_bindings.dart';
 import 'native_loader.dart';
 
@@ -15,32 +17,33 @@ import 'native_loader.dart';
 ///   retry: RetryConfig(maxAttempts: 3),
 /// ));
 /// final resp = await client.get('/channels');
+/// print('Status: ${resp.status}, Body: ${resp.bodyAsString}');
 /// client.dispose();
 /// ```
 class CatcherHttpClient {
   late final Pointer<Void> _handle;
   late final DynamicLibrary _lib;
-  late final Pointer<Void> Function(Pointer<Char>) _create;
-  late final void Function(Pointer<Void>) _destroy;
+  late final CatcherHttpClientCreateDart _create;
+  late final CatcherHttpClientDestroyDart _destroy;
 
   CatcherHttpClient(HttpClientConfig config) {
     _lib = loadCatcherLibrary();
 
     _create = _lib
-        .lookup<NativeFunction<CatcherHttpClientCreateNative>>(
-          'catcher_http_client_create',
-        )
-        .asFunction();
+        .lookupFunction<CatcherHttpClientCreateNative,
+            CatcherHttpClientCreateDart>('catcher_http_client_create');
 
     _destroy = _lib
-        .lookup<NativeFunction<CatcherHttpClientDestroyNative>>(
-          'catcher_http_client_destroy',
-        )
-        .asFunction();
+        .lookupFunction<CatcherHttpClientDestroyNative,
+            CatcherHttpClientDestroyDart>('catcher_http_client_destroy');
 
     final configJson = jsonEncode(config.toJson()).toNativeUtf8();
     _handle = _create(configJson.cast<Char>());
     malloc.free(configJson);
+
+    if (_handle == nullptr) {
+      throw StateError('Failed to create HTTP client — invalid config or Rust init error');
+    }
   }
 
   /// GET request
@@ -76,11 +79,35 @@ class CatcherHttpClient {
 
   /// Release native resources
   void dispose() {
-    _destroy(_handle);
+    if (_handle != nullptr) {
+      _destroy(_handle);
+    }
   }
 
   // ── Internal ──
 
+  /// Build a FfiStringNative on the heap. Caller must call [freeFfiString] when done.
+  Pointer<FfiStringNative> _allocFfiString(String dartString) {
+    final encoded = utf8.encode(dartString);
+    final native = malloc<Uint8>(encoded.length);
+    for (var i = 0; i < encoded.length; i++) {
+      native[i] = encoded[i];
+    }
+    final ffiStr = calloc<FfiStringNative>();
+    ffiStr.ref.data = native.cast<Char>();
+    ffiStr.ref.len = encoded.length;
+    return ffiStr;
+  }
+
+  void _freeFfiString(Pointer<FfiStringNative> ffiStr) {
+    malloc.free(ffiStr.ref.data);
+    calloc.free(ffiStr);
+  }
+
+  /// Execute an HTTP request via Rust FFI with async callback bridging.
+  ///
+  /// Uses the generic `catcher_http_execute` Rust function which accepts
+  /// the HTTP method as a parameter, supporting GET/POST/PUT/DELETE/PATCH.
   Future<HttpResponse> _execute(
     String method,
     String path,
@@ -90,38 +117,90 @@ class CatcherHttpClient {
     final receivePort = ReceivePort();
     final completer = Completer<HttpResponse>();
 
-    receivePort.listen((result) {
-      if (result is Map) {
-        completer.complete(HttpResponse.fromJson(result));
-      } else {
-        completer.completeError(result);
-      }
+    final nativeCallback = NativeCallable<EventCallbackDart>.listener(
+      (Pointer<Char> eventType, Pointer<Uint8> eventData, int eventDataLen,
+          Pointer<Void> userData) {
+        final jsonStr = utf8.decode(eventData.asTypedList(eventDataLen));
+        final Map<String, dynamic> result;
+        try {
+          result = jsonDecode(jsonStr) as Map<String, dynamic>;
+        } catch (_) {
+          receivePort.sendPort.send({'error': jsonStr});
+          return;
+        }
+        receivePort.sendPort.send(result);
+      },
+    );
+
+    late StreamSubscription sub;
+    sub = receivePort.listen((message) {
+      sub.cancel();
+      nativeCallback.close();
       receivePort.close();
+      if (!completer.isCompleted) {
+        if (message is Map && !message.containsKey('error')) {
+          completer.complete(HttpResponse.fromJson(message));
+        } else if (message is Map) {
+          completer.completeError(CatcherHttpError(
+            message['error']?.toString() ?? 'Unknown error',
+          ));
+        } else {
+          completer.completeError(CatcherHttpError(message.toString()));
+        }
+      }
     });
 
-    final request = jsonEncode({
-      'method': method,
-      'url': path,
-      if (body != null) 'body': base64Encode(body),
-      if (contentType != null) 'content_type': contentType,
-    });
+    // Prepare FFI strings for method, URL, and content type
+    final methodFfi = _allocFfiString(method);
+    final urlFfi = _allocFfiString(path);
+    final ctFfi = contentType != null
+        ? _allocFfiString(contentType)
+        : _allocFfiString('');
 
-    // For now, use get/post lookup based on method
-    if (method == 'GET') {
-      final getFn = _lib
-          .lookup<NativeFunction<CatcherHttpGetNative>>('catcher_http_get')
-          .asFunction<void Function(Pointer<Void>, Pointer<Char>,
-              Pointer<NativeFunction<HttpEventCallbackNative>>, Pointer<Void>)>();
-
-      final urlNative = path.toNativeUtf8();
-      // Note: real implementation needs a proper C callback trampoline
-      // For now, this is a skeleton showing the interface
-      malloc.free(urlNative);
+    final bodyPtr = (body != null && body.isNotEmpty)
+        ? malloc<Uint8>(body.length)
+        : Pointer<Uint8>.fromAddress(0);
+    if (body != null && body.isNotEmpty) {
+      for (var i = 0; i < body.length; i++) {
+        bodyPtr[i] = body[i];
+      }
     }
+
+    try {
+      final executeFn = _lib.lookupFunction<CatcherHttpExecuteNative,
+          CatcherHttpExecuteDart>('catcher_http_execute');
+      executeFn(
+        _handle,
+        methodFfi.ref,
+        urlFfi.ref,
+        bodyPtr,
+        body?.length ?? 0,
+        ctFfi.ref,
+        nativeCallback.nativeFunction,
+        nullptr,
+      );
+    } catch (e) {
+      nativeCallback.close();
+      receivePort.close();
+      _freeFfiString(methodFfi);
+      _freeFfiString(urlFfi);
+      _freeFfiString(ctFfi);
+      if (body != null && body.isNotEmpty) malloc.free(bodyPtr);
+      rethrow;
+    }
+
+    _freeFfiString(methodFfi);
+    _freeFfiString(urlFfi);
+    _freeFfiString(ctFfi);
+    if (body != null && body.isNotEmpty) malloc.free(bodyPtr);
 
     return completer.future.timeout(
       const Duration(seconds: 30),
-      onTimeout: () => throw TimeoutException('Request timed out'),
+      onTimeout: () {
+        nativeCallback.close();
+        receivePort.close();
+        throw TimeoutException('HTTP request timed out after 30s');
+      },
     );
   }
 }
@@ -175,10 +254,33 @@ class CircuitBreakerConfig {
       };
 }
 
+/// Connection pool configuration (matches Rust PoolConfig)
+class PoolConfig {
+  final int maxIdlePerHost;
+  final int idleTimeoutSecs;
+  final bool keepAlive;
+  final int keepAliveIntervalSecs;
+
+  const PoolConfig({
+    this.maxIdlePerHost = 10,
+    this.idleTimeoutSecs = 90,
+    this.keepAlive = true,
+    this.keepAliveIntervalSecs = 60,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'max_idle_per_host': maxIdlePerHost,
+        'idle_timeout_secs': idleTimeoutSecs,
+        'keep_alive': keepAlive,
+        'keep_alive_interval_secs': keepAliveIntervalSecs,
+      };
+}
+
 class HttpClientConfig {
   final String baseUrl;
   final int connectTimeoutMs;
   final int responseTimeoutMs;
+  final PoolConfig pool;
   final RetryConfig? retry;
   final CircuitBreakerConfig? circuitBreaker;
   final int maxConcurrency;
@@ -187,6 +289,7 @@ class HttpClientConfig {
     required this.baseUrl,
     this.connectTimeoutMs = 10000,
     this.responseTimeoutMs = 30000,
+    this.pool = const PoolConfig(),
     this.retry,
     this.circuitBreaker,
     this.maxConcurrency = 50,
@@ -196,8 +299,10 @@ class HttpClientConfig {
         'base_url': baseUrl,
         'connect_timeout_ms': connectTimeoutMs,
         'response_timeout_ms': responseTimeoutMs,
+        'pool': pool.toJson(),
         if (retry != null) 'retry': retry!.toJson(),
-        if (circuitBreaker != null) 'circuit_breaker': circuitBreaker!.toJson(),
+        if (circuitBreaker != null)
+          'circuit_breaker': circuitBreaker!.toJson(),
         'max_concurrency': maxConcurrency,
       };
 }
@@ -215,10 +320,39 @@ class HttpResponse {
     this.elapsedMs = 0,
   });
 
-  factory HttpResponse.fromJson(Map<String, dynamic> json) => HttpResponse(
-        status: json['status'] as int,
-        headers: Map<String, String>.from(json['headers'] ?? {}),
-        body: (json['body'] as List<dynamic>?)?.cast<int>() ?? [],
-        elapsedMs: json['elapsed_ms'] as int? ?? 0,
-      );
+  factory HttpResponse.fromJson(Map<String, dynamic> json) {
+    final rawBody = json['body'];
+    List<int> bodyBytes;
+    if (rawBody is List) {
+      // Rust sends Vec<u8> which serde_json may serialize as base64 or array
+      if (rawBody.isNotEmpty && rawBody.first is int) {
+        bodyBytes = rawBody.cast<int>();
+      } else {
+        bodyBytes = [];
+      }
+    } else if (rawBody is String) {
+      bodyBytes = base64.decode(rawBody);
+    } else {
+      bodyBytes = [];
+    }
+
+    return HttpResponse(
+      status: json['status'] as int,
+      headers: Map<String, String>.from(json['headers'] ?? {}),
+      body: bodyBytes,
+      elapsedMs: json['elapsed_ms'] as int? ?? 0,
+    );
+  }
+
+  /// Convenience: decode body bytes as UTF-8 string
+  String get bodyAsString => utf8.decode(body, allowMalformed: true);
+}
+
+/// Error thrown when the Rust HTTP client returns an error
+class CatcherHttpError implements Exception {
+  final String message;
+  const CatcherHttpError(this.message);
+
+  @override
+  String toString() => 'CatcherHttpError: $message';
 }

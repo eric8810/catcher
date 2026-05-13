@@ -1,3 +1,4 @@
 fn main() {
-    uniffi::generate_scaffolding("src/catcher.udl").unwrap();
+    // Proc-macro mode: no UDL file needed.
+    // uniffi::setup!() in lib.rs handles scaffolding generation.
 }

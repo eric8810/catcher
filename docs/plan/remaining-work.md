@@ -21,13 +21,13 @@
 
 ### P1 — 必须做的
 
-| 序号 | 项目 | 工作内容 | 预估 |
+| 序号 | 项目 | 工作内容 | 状态 |
 |------|------|---------|------|
-| 1 | **重编译 napi .node** | Rust lib.rs 已改（PUT/DELETE/PATCH + RequestOptions + CB state），需 `cargo build` 重新编译 `.node` | 10min |
-| 2 | **@catcher/web 拦截器落地** | 当前 stub → 完整的 interceptor manager（复用 interceptors.ts 逻辑） | 30min |
-| 3 | **@catcher/web WebSocket** | 新建 `ws-client.ts`，原生 WebSocket + 重连封装 | 30min |
-| 4 | **napi-http JS wrapper 补全** | `index.js` 已改但需验证。加 `circuitBreakerState()` 的 JS 调用链路 | 15min |
-| 5 | **Flutter dart:ffi 集成验证** | `pub get` + 验证 Dart 侧能否加载 `.so` + 基础 roundtrip 测试 | 30min |
+| 1 | **重编译 napi .node** | Rust lib.rs 已改（PUT/DELETE/PATCH + RequestOptions + CB state），需 `cargo build` 重新编译 `.node` | ✅ lib.rs + client.js wrapper 已完成（GET/POST/PUT/DELETE/PATCH + circuitBreakerState） |
+| 2 | **@catcher/web 拦截器落地** | 完整的 interceptor manager（复用 interceptors.ts 逻辑） | ✅ `interceptors.ts` 实现 createInterceptorManager（use/eject/clear + LIFO request/FIFO response chain），`client.ts` 已集成 |
+| 3 | **@catcher/web WebSocket** | 原生 WebSocket + 重连封装 | ✅ `ws/client.ts` 实现 createWebSocketClient（exponential backoff 重连、多端点、事件监听） |
+| 4 | **napi-http JS wrapper 补全** | `client.js` wrapper + `circuitBreakerState()` 的 JS 调用链路 | ✅ `client.js` 封装所有方法 + runtime feature check + circuitBreakerState fallback |
+| 5 | **Flutter dart:ffi 集成验证** | 验证 Dart 侧能否加载 `.so` + 基础 roundtrip 测试 | ⚠️ FFI wiring 完成（http_client.dart + ws_client.dart 均已实现），需运行时加载 `.so` 验证 |
 
 ### P2 — 应该做的
 
@@ -51,7 +51,7 @@
 ## 三、执行顺序
 
 ```
-P1:  1(napi重编译) → 4(napi JS补全) → 2(web拦截器) → 3(web WS) → 5(Flutter验证)
+P1:  1(napi重编译) ✅  →  4(napi JS补全) ✅  →  2(web拦截器) ✅  →  3(web WS) ✅  →  5(Flutter验证) ⚠️
 P2:  6(web测试) → 7(UniFFI构建) → 8(retry类型) → 9(napi类型映射)
 P3:  10(proxy补全) → 11(npm发布) → 12(crates.io发布)
 ```
