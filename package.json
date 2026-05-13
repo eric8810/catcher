@@ -6,7 +6,7 @@
     "build:ts": "pnpm --filter @catcher/core --filter @catcher/http --filter @catcher/ws --filter @catcher/web build",
     "test": "vitest run",
     "test:integration": "vitest run",
-    "test:napi": "pnpm --filter @catcher/napi-http build && pnpm --filter @catcher/napi-ws build && vitest run packages/test/integration/napi.test.ts",
+    "test:napi": "pnpm --filter @catcher/napi-http build && pnpm --filter @catcher/napi-ws build && vitest run --config vitest.napi.config.ts",
     "test:e2e": "vitest run packages/test/e2e",
     "test:chaos": "vitest run packages/test/chaos",
     "test:watch": "vitest",
