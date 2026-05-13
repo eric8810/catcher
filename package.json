@@ -4,10 +4,10 @@
   "packageManager": "pnpm@10.15.1",
   "scripts": {
     "build": "pnpm build:ts",
-    "build:ts": "pnpm --filter @eric8810/core --filter @eric8810/http --filter @eric8810/ws --filter @eric8810/web build",
+    "build:ts": "pnpm --filter @eric8810/catcher-core --filter @eric8810/catcher-http --filter @eric8810/catcher-ws --filter @eric8810/catcher-web build",
     "test": "vitest run",
     "test:integration": "vitest run",
-    "test:napi": "pnpm --filter @eric8810/napi-http build && pnpm --filter @eric8810/napi-ws build && vitest run --config vitest.napi.config.ts",
+    "test:napi": "pnpm --filter @eric8810/catcher-napi-http build && pnpm --filter @eric8810/catcher-napi-ws build && vitest run --config vitest.napi.config.ts",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "test:chaos": "vitest run --config vitest.chaos.config.ts",
     "test:watch": "vitest",

@@ -1,7 +1,7 @@
 import https from 'node:https'
 import type { Socket } from 'node:net'
 import CacheableLookup from 'cacheable-lookup'
-import type { SharedAgentOptions } from '@eric8810/core'
+import type { SharedAgentOptions } from '@eric8810/catcher-core'
 
 let _defaultDnsCache: CacheableLookup | null = null
 

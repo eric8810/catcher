@@ -12,8 +12,8 @@ import https from 'node:https'
 import fs from 'node:fs'
 import path from 'node:path'
 import { bench, describe } from 'vitest'
-import { createSharedAgent } from '@eric8810/http'
-import { createHttpClient } from '@eric8810/http'
+import { createSharedAgent } from '@eric8810/catcher-http'
+import { createHttpClient } from '@eric8810/catcher-http'
 
 // ── Generate self-signed cert for local testing ─────────────
 

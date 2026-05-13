@@ -11,11 +11,11 @@
 
 import axios from 'axios'
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { createHttpClient } from '@eric8810/http'
+import { createHttpClient } from '@eric8810/catcher-http'
 import { createHttpTestServer, type TestServer } from '../servers/http-server.js'
 import { createNetworkProxy, type NetworkProxy } from '../network/proxy.js'
 import { NETWORK_PROFILES } from '../network/presets.js'
-import { clearDnsCache } from '@eric8810/http'
+import { clearDnsCache } from '@eric8810/catcher-http'
 
 const TIMEOUT = 120_000 // weak network tests need longer timeout
 

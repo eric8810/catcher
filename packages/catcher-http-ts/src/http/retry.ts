@@ -1,7 +1,7 @@
 import pRetry, { AbortError } from 'p-retry'
 import type { AxiosInstance } from 'axios'
 import type { Socket } from 'node:net'
-import type { RetryOptions } from '@eric8810/core'
+import type { RetryOptions } from '@eric8810/catcher-core'
 
 /**
  * Wrap an axios instance with p-retry.

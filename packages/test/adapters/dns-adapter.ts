@@ -8,7 +8,7 @@
  * internally by reqwest's hickory-dns feature.
  */
 export function clearDnsCache(): void {
-  // TODO: when @eric8810/napi-http exposes a clear_dns_cache() function,
+  // TODO: when @eric8810/catcher-napi-http exposes a clear_dns_cache() function,
   // call it here. For now, DNS caching in Rust is handled transparently
   // by reqwest's connection pooling.
 }

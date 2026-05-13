@@ -1,5 +1,5 @@
 import PQueue from 'p-queue'
-import type { PriorityQueueOptions } from '@eric8810/core'
+import type { PriorityQueueOptions } from '@eric8810/catcher-core'
 
 /**
  * Create a priority queue for request scheduling.

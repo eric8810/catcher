@@ -1,4 +1,4 @@
-declare module '@eric8810/napi-http' {
+declare module '@eric8810/catcher-napi-http' {
   interface HttpClientConfig {
     base_url?: string
     connect_timeout_ms?: number

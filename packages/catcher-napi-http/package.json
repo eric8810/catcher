@@ -1,5 +1,5 @@
 {
-  "name": "@eric8810/napi-http",
+  "name": "@eric8810/catcher-napi-http",
   "version": "0.1.0",
   "description": "catcher HTTP native addon for Node.js via napi-rs",
   "main": "client.js",

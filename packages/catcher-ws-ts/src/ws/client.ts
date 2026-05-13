@@ -1,5 +1,5 @@
 import WebSocket from 'ws'
-import type { ResilientWSOptions, ResilientWS } from '@eric8810/core'
+import type { ResilientWSOptions, ResilientWS } from '@eric8810/catcher-core'
 import { createReconnectStrategy } from './reconnect.js'
 import { raceEndpoints } from './multi-endpoint.js'
 

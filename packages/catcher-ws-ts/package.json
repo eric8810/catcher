@@ -1,5 +1,5 @@
 {
-  "name": "@eric8810/ws",
+  "name": "@eric8810/catcher-ws",
   "version": "0.1.0",
   "description": "Catcher WebSocket client — resilient reconnect, multi-endpoint racing, msgpack codec",
   "type": "module",
@@ -27,7 +27,7 @@
     }
   },
   "dependencies": {
-    "@eric8810/core": "workspace:*"
+    "@eric8810/catcher-core": "workspace:*"
   },
   "peerDependencies": {
     "msgpackr": "^1.10.0",
@@ -38,7 +38,7 @@
     "ws": { "optional": true }
   },
   "devDependencies": {
-    "@eric8810/core": "workspace:*",
+    "@eric8810/catcher-core": "workspace:*",
     "@types/ws": "^8.0.0",
     "msgpackr": "^1.10.0",
     "typescript": "^5.5.0",

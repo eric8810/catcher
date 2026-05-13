@@ -11,4 +11,4 @@ export type {
   InterceptorHandler,
   InterceptorFulfilled,
   InterceptorRejected,
-} from '@eric8810/core'
+} from '@eric8810/catcher-core'

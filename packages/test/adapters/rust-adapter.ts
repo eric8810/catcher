@@ -6,9 +6,9 @@
  * Signatures match the existing TS catcher implementation,
  * so tests can swap imports with minimal changes.
  */
-import { HttpClient } from '@eric8810/napi-http'
-import { WsClient } from '@eric8810/napi-ws'
-import { pack, unpack } from '@eric8810/ws'
+import { HttpClient } from '@eric8810/catcher-napi-http'
+import { WsClient } from '@eric8810/catcher-napi-ws'
+import { pack, unpack } from '@eric8810/catcher-ws'
 import type { IterationResult } from '../harness.js'
 
 // ── HTTP ────────────────────────────────────────────────────

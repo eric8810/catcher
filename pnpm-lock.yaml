@@ -26,7 +26,7 @@ importers:
 
   packages/catcher-http-ts:
     dependencies:
-      '@eric8810/core':
+      '@eric8810/catcher-core':
         specifier: workspace:*
         version: link:../catcher-core-ts
       cacheable-lookup:
@@ -66,7 +66,7 @@ importers:
 
   packages/catcher-web:
     dependencies:
-      '@eric8810/core':
+      '@eric8810/catcher-core':
         specifier: workspace:*
         version: link:../catcher-core-ts
       cockatiel:
@@ -81,7 +81,7 @@ importers:
 
   packages/catcher-ws-ts:
     dependencies:
-      '@eric8810/core':
+      '@eric8810/catcher-core':
         specifier: workspace:*
         version: link:../catcher-core-ts
     devDependencies:
@@ -103,19 +103,19 @@ importers:
 
   packages/test:
     dependencies:
-      '@eric8810/core':
+      '@eric8810/catcher-core':
         specifier: workspace:*
         version: link:../catcher-core-ts
-      '@eric8810/http':
+      '@eric8810/catcher-http':
         specifier: workspace:*
         version: link:../catcher-http-ts
-      '@eric8810/napi-http':
+      '@eric8810/catcher-napi-http':
         specifier: workspace:*
         version: link:../catcher-napi-http
-      '@eric8810/napi-ws':
+      '@eric8810/catcher-napi-ws':
         specifier: workspace:*
         version: link:../catcher-napi-ws
-      '@eric8810/ws':
+      '@eric8810/catcher-ws':
         specifier: workspace:*
         version: link:../catcher-ws-ts
       axios:
