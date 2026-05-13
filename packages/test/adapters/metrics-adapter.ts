@@ -1,7 +1,7 @@
 /**
  * Metrics adapter for Rust napi bindings.
  *
- * When @catcher/napi-http exposes metrics via native functions,
+ * When @eric8810/napi-http exposes metrics via native functions,
  * they will be called here.
  */
 export interface RustMetrics {
@@ -18,7 +18,7 @@ export interface RustMetrics {
 }
 
 export function getRustMetrics(): RustMetrics | null {
-  // TODO: when @catcher/napi-http exposes get_metrics_snapshot(),
+  // TODO: when @eric8810/napi-http exposes get_metrics_snapshot(),
   // call it here. For now, return null.
   return null
 }

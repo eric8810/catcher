@@ -217,7 +217,7 @@ timeout: 30s
 ```typescript
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import axios from 'axios'
-import { createHttpClient } from '@catcher/http'
+import { createHttpClient } from '@eric8810/http'
 import { createHttpTestServer, type TestServer } from '../servers/http-server.js'
 import { createNetworkProxy, type NetworkProxy } from '../network/proxy.js'
 import { NETWORK_PROFILES } from '../network/presets.js'

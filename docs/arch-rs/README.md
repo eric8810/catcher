@@ -13,9 +13,9 @@ catcher 是一个跨平台网络韧性库，覆盖 HTTP、WebSocket、Codec 三�
 
 | 协议 | Rust | TS (纯 JS) | TS (napi 原生) | Dart |
 |------|------|-----------|---------------|------|
-| **types** | `catcher-core` ✅ | `@catcher/core` ✅ | — | `catcher_core` ✅ |
-| **HTTP** | `catcher-http` ✅ | `@catcher/http` ✅ | `@catcher/napi-http` ✅ | `catcher_core` ✅ |
-| **WS** | `catcher-ws` ✅ | `@catcher/ws` ✅ | `@catcher/napi-ws` ✅ | `catcher_core` ✅ |
+| **types** | `catcher-core` ✅ | `@eric8810/core` ✅ | — | `catcher_core` ✅ |
+| **HTTP** | `catcher-http` ✅ | `@eric8810/http` ✅ | `@eric8810/napi-http` ✅ | `catcher_core` ✅ |
+| **WS** | `catcher-ws` ✅ | `@eric8810/ws` ✅ | `@eric8810/napi-ws` ✅ | `catcher_core` ✅ |
 
 > ✅ = 已实现  
 > Codec 已合并到 WS — `catcher-ws` 内置 msgpack 编解码。
@@ -31,21 +31,21 @@ catcher 是一个跨平台网络韧性库，覆盖 HTTP、WebSocket、Codec 三�
 ## 依赖关系图
 
 ```
-                  catcher-core / @catcher/core (零依赖)
+                  catcher-core / @eric8810/core (零依赖)
                  /              \
                 /                \
         catcher-http          catcher-ws
-        @catcher/http         @catcher/ws (内置 codec)
-        @catcher/web          @catcher/napi-http
-        (browser)             @catcher/napi-ws
+        @eric8810/http         @eric8810/ws (内置 codec)
+        @eric8810/web          @eric8810/napi-http
+        (browser)             @eric8810/napi-ws
                               (Node.js native)
              │                      │
         catcher-uniffi        dart:ffi (Flutter)
         (Swift + Kotlin)      catcher_core
 ```
 
-- **Node.js** — TS (`@catcher/http`) 或 native (`@catcher/napi-http`)
-- **Browser** — `@catcher/web` (fetch)
+- **Node.js** — TS (`@eric8810/http`) 或 native (`@eric8810/napi-http`)
+- **Browser** — `@eric8810/web` (fetch)
 - **Rust** — `catcher-http` / `catcher-ws` crate
 - **Flutter** — `catcher_core` (dart:ffi)
 - **Android + iOS** — `catcher-uniffi` (UniFFI → Swift + Kotlin)
@@ -54,13 +54,13 @@ catcher 是一个跨平台网络韧性库，覆盖 HTTP、WebSocket、Codec 三�
 
 ```bash
 # 场景 A: REST API (TS)
-npm i @catcher/http
+npm i @eric8810/http
 
 # 场景 B: IM 实时通信 (TS + native)
-npm i @catcher/http @catcher/ws @catcher/napi-http @catcher/napi-ws
+npm i @eric8810/http @eric8810/ws @eric8810/napi-http @eric8810/napi-ws
 
 # 场景 C: 浏览器
-npm i @catcher/web
+npm i @eric8810/web
 
 # 场景 D: Rust
 cargo add catcher-http catcher-ws

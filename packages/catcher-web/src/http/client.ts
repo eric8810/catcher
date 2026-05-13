@@ -1,10 +1,10 @@
 /**
- * @catcher/web — Resilient HTTP client for browsers.
+ * @eric8810/web — Resilient HTTP client for browsers.
  *
  * Replaces axios with fetch(). Reuses the same resilience stack
- * (p-retry + cockatiel + p-queue) from @catcher/http.
+ * (p-retry + cockatiel + p-queue) from @eric8810/http.
  *
- * API is intentionally identical to @catcher/http.
+ * API is intentionally identical to @eric8810/http.
  */
 
 import { CircuitBreakerPolicy, ConsecutiveBreaker } from 'cockatiel'
@@ -17,7 +17,7 @@ import type {
   RequestConfig,
   HttpResponse,
   RetryOptions,
-} from '@catcher/core'
+} from '@eric8810/core'
 import { createInterceptorManager } from './interceptors.js'
 
 // ── Helpers ───────────────────────────────────────────────────
@@ -302,4 +302,4 @@ export function createWebClient(config: HttpClientConfig): IHttpClient {
   }
 }
 
-export type { IHttpClient, RequestConfig, HttpClientConfig, HttpResponse } from '@catcher/core'
+export type { IHttpClient, RequestConfig, HttpClientConfig, HttpResponse } from '@eric8810/core'

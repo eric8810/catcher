@@ -1,5 +1,5 @@
 {
-  "name": "@catcher/core",
+  "name": "@eric8810/core",
   "version": "0.1.0",
   "description": "Catcher shared type definitions — zero runtime dependencies",
   "type": "module",

@@ -1,4 +1,4 @@
-declare module '@catcher/napi-ws' {
+declare module '@eric8810/napi-ws' {
   interface WsClientConfig {
     urls: string[]
     per_message_deflate?: boolean

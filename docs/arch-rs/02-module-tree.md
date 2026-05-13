@@ -106,7 +106,7 @@ catcher-uniffi/
 ```
 packages/
 ├── catcher-napi-http/               # npm 包 (napi-rs HTTP binding)
-│   ├── package.json                 # @catcher/napi-http
+│   ├── package.json                 # @eric8810/napi-http
 │   ├── Cargo.toml                   # deps: catcher-http
 │   ├── build.rs
 │   ├── src/
@@ -115,7 +115,7 @@ packages/
 │   └── index.d.ts
 │
 ├── catcher-napi-ws/                 # npm 包 (napi-rs WS binding)
-│   ├── package.json                 # @catcher/napi-ws
+│   ├── package.json                 # @eric8810/napi-ws
 │   ├── Cargo.toml                   # deps: catcher-ws
 │   ├── build.rs
 │   ├── src/

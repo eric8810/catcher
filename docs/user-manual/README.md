@@ -8,11 +8,11 @@
 
 | 平台 | 状态 | 方案 |
 |------|------|------|
-| **Node.js (native)** | ✅ 可用 | `@catcher/napi-http` / `@catcher/napi-ws` (Rust via napi-rs) |
-| **Node.js (TS)** | ✅ 可用 | `@catcher/http` / `@catcher/ws` (纯 TS，API 更丰富) |
+| **Node.js (native)** | ✅ 可用 | `@eric8810/napi-http` / `@eric8810/napi-ws` (Rust via napi-rs) |
+| **Node.js (TS)** | ✅ 可用 | `@eric8810/http` / `@eric8810/ws` (纯 TS，API 更丰富) |
 | **Electron** | ✅ 同 Node.js | napi 或 TS 包均可 |
 | **Rust** | ✅ 已实现 | `catcher-http` + `catcher-ws` + `catcher-core` crate |
-| **Web (Browser)** | ✅ 可用 | `@catcher/web` — fetch-based, 纯 TS |
+| **Web (Browser)** | ✅ 可用 | `@eric8810/web` — fetch-based, 纯 TS |
 | **Android + iOS** | ✅ 可用 | UniFFI → Swift + Kotlin |
 | **Flutter** | ✅ 可用 | dart:ffi → C ABI |
 
@@ -37,7 +37,7 @@
       ▼                    ▼                    ▼
   Node.js/Electron     Rust / 移动端         浏览器
       │                    │                    │
- ┌────┴────┐          ┌────┴────┐          @catcher/web
+ ┌────┴────┐          ┌────┴────┐          @eric8810/web
  ▼         ▼          ▼         ▼          (fetch)
 napi     TS版      Rust crate  Flutter
 native   (API更全)  (已实现)    dart:ffi
@@ -48,7 +48,7 @@ native   (API更全)  (已实现)    dart:ffi
 ## 包关系
 
 ```
-catcher-core (Rust)              @catcher/core (TS)
+catcher-core (Rust)              @eric8810/core (TS)
      │                                │
  ┌───┴───┐                        ┌───┴───┐
  ▼       ▼                        ▼       ▼
@@ -58,8 +58,8 @@ catcher  catcher             @catcher  @catcher
  │  │     │  │
  │  └──napi-rs──┐   ┌──napi-rs──┘
  │              ▼   ▼
- │        @catcher/napi-http
- │        @catcher/napi-ws
+ │        @eric8810/napi-http
+ │        @eric8810/napi-ws
  │         (Node.js native)
  │
  ├── UniFFI → Swift + Kotlin (Android/iOS)

@@ -2,8 +2,8 @@
  * napi smoke test: verify native addons load and work
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { HttpClient, JsHttpResponse } from '@catcher/napi-http'
-import { WsClient } from '@catcher/napi-ws'
+import { HttpClient, JsHttpResponse } from '@eric8810/napi-http'
+import { WsClient } from '@eric8810/napi-ws'
 import { createHttpTestServer, type TestServer } from '../servers/http-server.js'
 import { createWSTestServer, type WSTestServer } from '../servers/ws-server.js'
 
@@ -20,7 +20,7 @@ afterAll(async () => {
   await wsServer?.close()
 })
 
-describe('@catcher/napi-http', () => {
+describe('@eric8810/napi-http', () => {
   it('creates HttpClient from JSON config', () => {
     const client = new HttpClient(JSON.stringify({
       base_url: '',
@@ -41,7 +41,7 @@ describe('@catcher/napi-http', () => {
   })
 })
 
-describe('@catcher/napi-ws', () => {
+describe('@eric8810/napi-ws', () => {
   it('creates WsClient from JSON config', () => {
     const ws = new WsClient(JSON.stringify({
       urls: [`ws://localhost:${wsServer.port}`],

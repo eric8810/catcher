@@ -4,7 +4,7 @@ import type {
   InterceptorFulfilled,
   InterceptorRejected,
   RequestConfig,
-} from '@catcher/core'
+} from '@eric8810/core'
 
 interface RegisteredHandler<T> {
   id: number

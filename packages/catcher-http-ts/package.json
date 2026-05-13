@@ -1,5 +1,5 @@
 {
-  "name": "@catcher/http",
+  "name": "@eric8810/http",
   "version": "0.1.0",
   "description": "Catcher HTTP client — resilient transport with retry, circuit breaker, priority scheduling",
   "type": "module",
@@ -27,7 +27,7 @@
     }
   },
   "dependencies": {
-    "@catcher/core": "workspace:*",
+    "@eric8810/core": "workspace:*",
     "cacheable-lookup": "^7.0.0",
     "cockatiel": "^3.0.0",
     "p-queue": "^8.0.0",
@@ -40,7 +40,7 @@
     "axios": { "optional": true }
   },
   "devDependencies": {
-    "@catcher/core": "workspace:*",
+    "@eric8810/core": "workspace:*",
     "axios": "^1.11.0",
     "typescript": "^5.5.0",
     "vitest": "^2.0.0"

@@ -119,13 +119,13 @@ catcher-ws = "0.1"
 
 ```bash
 # Node.js — native
-npm i @catcher/napi-http @catcher/napi-ws
+npm i @eric8810/napi-http @eric8810/napi-ws
 
 # Node.js — TS
-npm i @catcher/http @catcher/ws
+npm i @eric8810/http @eric8810/ws
 
 # Browser
-npm i @catcher/web
+npm i @eric8810/web
 
 # Flutter
 flutter pub add catcher_core

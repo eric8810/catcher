@@ -3,11 +3,11 @@
   "name": "catcher-test",
   "type": "module",
   "dependencies": {
-    "@catcher/core": "workspace:*",
-    "@catcher/http": "workspace:*",
-    "@catcher/ws": "workspace:*",
-    "@catcher/napi-http": "workspace:*",
-    "@catcher/napi-ws": "workspace:*",
+    "@eric8810/core": "workspace:*",
+    "@eric8810/http": "workspace:*",
+    "@eric8810/ws": "workspace:*",
+    "@eric8810/napi-http": "workspace:*",
+    "@eric8810/napi-ws": "workspace:*",
     "axios": "^1.11.0",
     "ws": "^8.18.0"
   },

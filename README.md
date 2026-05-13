@@ -8,10 +8,10 @@ Resilient network communication toolkit — Rust core, TypeScript wrappers, cros
 
 | Platform | Package | Status |
 |----------|---------|--------|
-| **Node.js (native)** | `@catcher/napi-http` / `@catcher/napi-ws` | ✅ |
-| **Node.js (TS)** | `@catcher/http` / `@catcher/ws` | ✅ |
+| **Node.js (native)** | `@eric8810/napi-http` / `@eric8810/napi-ws` | ✅ |
+| **Node.js (TS)** | `@eric8810/http` / `@eric8810/ws` | ✅ |
 | **Electron** | same as Node.js | ✅ |
-| **Web** | `@catcher/web` | ✅ |
+| **Web** | `@eric8810/web` | ✅ |
 | **Rust** | `catcher-http` / `catcher-ws` / `catcher-core` | ✅ |
 | **Flutter** | `catcher_core` (dart:ffi) | ⚠️ WIP (HTTP client wired, WS client skeleton) |
 | **Android + iOS** | `catcher-uniffi` (UniFFI) | ⚠️ WIP (proc-macro mode, needs mobile build verification) |
@@ -19,7 +19,7 @@ Resilient network communication toolkit — Rust core, TypeScript wrappers, cros
 ## Packages
 
 ```
-catcher-core (Rust)              @catcher/core (TS)
+catcher-core (Rust)              @eric8810/core (TS)
      │                                │
  ┌───┴───┐                        ┌───┴───┐
  ▼       ▼                        ▼       ▼
@@ -29,8 +29,8 @@ catcher  catcher             @catcher  @catcher  @catcher
  │  │     │  │
  │  └──napi-rs──┐   ┌──napi-rs──┘
  │              ▼   ▼
- │        @catcher/napi-http
- │        @catcher/napi-ws
+ │        @eric8810/napi-http
+ │        @eric8810/napi-ws
  │
  ├── UniFFI → Swift + Kotlin
  └── C ABI  → dart:ffi (Flutter)
@@ -38,12 +38,12 @@ catcher  catcher             @catcher  @catcher  @catcher
 
 | Package | Path | Description |
 |---------|------|-------------|
-| `@catcher/core` | `packages/catcher-core-ts` | Shared TS type definitions |
-| `@catcher/http` | `packages/catcher-http-ts` | HTTP client — retry, CB, queue, interceptors |
-| `@catcher/ws` | `packages/catcher-ws-ts` | WebSocket — reconnect, multi-endpoint, codec |
-| `@catcher/web` | `packages/catcher-web` | Browser HTTP client — fetch-based |
-| `@catcher/napi-http` | `packages/catcher-napi-http` | Rust native via napi-rs |
-| `@catcher/napi-ws` | `packages/catcher-napi-ws` | Rust native via napi-rs |
+| `@eric8810/core` | `packages/catcher-core-ts` | Shared TS type definitions |
+| `@eric8810/http` | `packages/catcher-http-ts` | HTTP client — retry, CB, queue, interceptors |
+| `@eric8810/ws` | `packages/catcher-ws-ts` | WebSocket — reconnect, multi-endpoint, codec |
+| `@eric8810/web` | `packages/catcher-web` | Browser HTTP client — fetch-based |
+| `@eric8810/napi-http` | `packages/catcher-napi-http` | Rust native via napi-rs |
+| `@eric8810/napi-ws` | `packages/catcher-napi-ws` | Rust native via napi-rs |
 | `catcher-core` | `packages/catcher-core` | Rust shared types & errors |
 | `catcher-http` | `packages/catcher-http` | Rust HTTP — reqwest, retry, CB |
 | `catcher-ws` | `packages/catcher-ws` | Rust WS — tokio-tungstenite, codec |
@@ -66,18 +66,18 @@ catcher  catcher             @catcher  @catcher  @catcher
 
 ```bash
 # Node.js (native — Rust via napi-rs)
-npm install @catcher/napi-http @catcher/napi-ws
+npm install @eric8810/napi-http @eric8810/napi-ws
 
 # Node.js (TS — more API features)
-npm install @catcher/http @catcher/ws
+npm install @eric8810/http @eric8810/ws
 
 # Browser
-npm install @catcher/web
+npm install @eric8810/web
 ```
 
 ```typescript
 // HTTP — one line to replace axios.create()
-import { createHttpClient } from '@catcher/http'
+import { createHttpClient } from '@eric8810/http'
 
 const client = createHttpClient({
   baseURL: 'https://api.example.com',
@@ -102,7 +102,7 @@ client.interceptors.request.use(config => {
 
 ```typescript
 // WebSocket — compression + reconnect + multi-endpoint
-import { createResilientWS, pack, decodeWSMessage } from '@catcher/ws'
+import { createResilientWS, pack, decodeWSMessage } from '@eric8810/ws'
 
 const ws = createResilientWS({
   url: ['wss://cn.example.com', 'wss://sg.example.com'],

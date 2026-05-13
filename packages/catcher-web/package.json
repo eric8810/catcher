@@ -1,5 +1,5 @@
 {
-  "name": "@catcher/web",
+  "name": "@eric8810/web",
   "version": "0.1.0",
   "description": "Catcher HTTP client for browsers — fetch-based with retry, circuit breaker & priority queue",
   "type": "module",
@@ -27,7 +27,7 @@
     }
   },
   "dependencies": {
-    "@catcher/core": "workspace:*",
+    "@eric8810/core": "workspace:*",
     "cockatiel": "^3.0.0",
     "p-retry": "^6.0.0",
     "p-queue": "^8.0.0"

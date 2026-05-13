@@ -131,16 +131,16 @@ WASM **不能直接访问网络**。编译到 WASM 的 Rust 代码没有 socket 
 **方案 A：TS 纯实现**（推荐）
 
 ```
-@catcher/web 包
-  ├── 复用 @catcher/core 类型
+@eric8810/web 包
+  ├── 复用 @eric8810/core 类型
   ├── fetch-based HTTP 客户端（替代 axios）
   ├── 内建 retry / CB / queue（纯 TS，复用 p-retry / cockatiel）
   └── WebSocket 基于浏览器 WebSocket API
 ```
 
 ```typescript
-// @catcher/web
-import { createWebClient } from '@catcher/web'
+// @eric8810/web
+import { createWebClient } from '@eric8810/web'
 
 const client = createWebClient({
   baseURL: 'https://api.example.com',
@@ -148,7 +148,7 @@ const client = createWebClient({
   circuitBreaker: { failureThreshold: 5, resetTimeout: 30_000 },
 })
 
-// 底层是 fetch()，API 与 @catcher/http 一致
+// 底层是 fetch()，API 与 @eric8810/http 一致
 const data = await client.get('/users/1')
 ```
 
@@ -168,7 +168,7 @@ Rust (WASM)
 ```
 
 ```typescript
-import init, { pack, unpack, RetryCalculator } from '@catcher/wasm'
+import init, { pack, unpack, RetryCalculator } from '@eric8810/wasm'
 
 await init()
 const retry = new RetryCalculator({ maxAttempts: 3, backoff: 'exponential' })
@@ -191,7 +191,7 @@ const delay = retry.nextDelay()  // 指数退避计算在 WASM 内
 | 复杂度 | 低 | 高 |
 | **推荐** | ✅ | 🟡 仅 codec 场景 |
 
-**结论**：Web 平台推荐**纯 TS 方案**。@catcher/http 的 axios 替换为 fetch，韧性层（retry/CB/queue）直接复用 p-retry + cockatiel，不引入 Rust/WASM。
+**结论**：Web 平台推荐**纯 TS 方案**。@eric8810/http 的 axios 替换为 fetch，韧性层（retry/CB/queue）直接复用 p-retry + cockatiel，不引入 Rust/WASM。
 
 ---
 
@@ -199,13 +199,13 @@ const delay = retry.nextDelay()  // 指数退避计算在 WASM 内
 
 | 平台 | 网络层 | 韧性层 | 编解码 | 方案 | 优先级 |
 |------|--------|--------|--------|------|--------|
-| **Node.js (native)** | reqwest | catcher-rs | msgpack | ✅ `@catcher/napi-http` — Rust via napi-rs, 已编译 | P0 |
-| **Node.js (TS)** | axios | p-retry/cockatiel | msgpackr | ✅ `@catcher/http` — API 更丰富（拦截器等） | P0 |
+| **Node.js (native)** | reqwest | catcher-rs | msgpack | ✅ `@eric8810/napi-http` — Rust via napi-rs, 已编译 | P0 |
+| **Node.js (TS)** | axios | p-retry/cockatiel | msgpackr | ✅ `@eric8810/http` — API 更丰富（拦截器等） | P0 |
 | **Rust crate** | reqwest | catcher-rs | msgpack | ✅ catcher-http/ws/core, 34 源文件, 未发布 | P0 |
 | **Electron** | 同 Node.js | 同 Node.js | 同 Node.js | ✅ 直接用 | P0 |
 | **Android + iOS** | reqwest | catcher-rs | msgpack | 📋 UniFFI → Swift + Kotlin | P1 |
 | **Flutter** | reqwest | catcher-rs | msgpack | 📋 dart:ffi → C ABI（已实现，绑定待写）| P2 |
-| **Web** | fetch (TS) | p-retry/cockatiel | msgpackr | ⚠️ `@catcher/web` — **唯一缺失的平台** | P1 |
+| **Web** | fetch (TS) | p-retry/cockatiel | msgpackr | ⚠️ `@eric8810/web` — **唯一缺失的平台** | P1 |
 
 > **Node.js**：双轨。napi native 是生产方案，TS 版提供更丰富的 API（拦截器、per-request options）。  
 > **Rust crate**：已实现但未发布到 crates.io。  
@@ -218,6 +218,6 @@ const delay = retry.nextDelay()  // 指数退避计算在 WASM 内
 |--------|------|------|
 | P0 | Node.js ✅ | napi native + TS 双轨均已完成 |
 | P0 | Rust crate ✅ | catcher-core/http/ws 已实现 |
-| P1 | Web (`@catcher/web`) | 唯一缺失的平台，TS + fetch |
+| P1 | Web (`@eric8810/web`) | 唯一缺失的平台，TS + fetch |
 | P1 | UniFFI (Android + iOS) | Rust 核心已有，加 proc-macro 即可 |
 | P2 | Flutter (dart:ffi) | C ABI 已有，dart:ffi 绑定层待写 |

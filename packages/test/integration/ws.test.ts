@@ -9,7 +9,7 @@
 
 import WebSocket from 'ws'
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { createResilientWS } from '@catcher/ws'
+import { createResilientWS } from '@eric8810/ws'
 import { createWSTestServer, type WSTestServer } from '../servers/ws-server.js'
 import { createNetworkProxy, type NetworkProxy } from '../network/proxy.js'
 import { NETWORK_PROFILES } from '../network/presets.js'

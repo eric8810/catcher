@@ -8,7 +8,7 @@ import type {
   RequestConfig,
   HttpResponse,
   RetryOptions,
-} from '@catcher/core'
+} from '@eric8810/core'
 import { createRetryWrapper } from './retry.js'
 import { createPriorityQueue } from '../queue/priority-queue.js'
 import { createInterceptorManager } from './interceptors.js'

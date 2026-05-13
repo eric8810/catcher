@@ -10,7 +10,7 @@
  */
 
 import { bench, describe } from 'vitest'
-import { pack, unpack } from '@catcher/ws'
+import { pack, unpack } from '@eric8810/ws'
 
 // ── Test data ──────────────────────────────────────────────
 

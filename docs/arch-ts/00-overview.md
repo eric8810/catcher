@@ -5,10 +5,10 @@
 ## 依赖关系
 
 ```
-            @catcher/core (zero deps)
+            @eric8810/core (zero deps)
             /         |         \
            /          |          \
-  @catcher/http  @catcher/ws  @catcher/web
+  @eric8810/http  @eric8810/ws  @eric8810/web
   (axios, Node)  (ws, msgpack) (fetch, Browser)
 ```
 
@@ -16,27 +16,27 @@
 
 ```bash
 # REST API (Node.js)
-npm i @catcher/http
+npm i @eric8810/http
 
 # IM + 实时通信 (Node.js)
-npm i @catcher/http @catcher/ws
+npm i @eric8810/http @eric8810/ws
 
 # 浏览器
-npm i @catcher/web
+npm i @eric8810/web
 
 # Node.js native (Rust via napi-rs)
-npm i @catcher/napi-http @catcher/napi-ws
+npm i @eric8810/napi-http @eric8810/napi-ws
 ```
 
 ## 使用方式
 
 ```typescript
 // HTTP
-import { createHttpClient } from '@catcher/http'
+import { createHttpClient } from '@eric8810/http'
 const client = createHttpClient({ baseURL: 'https://api.example.com' })
 
 // WebSocket
-import { createResilientWS } from '@catcher/ws'
+import { createResilientWS } from '@eric8810/ws'
 const ws = createResilientWS({
   url: 'wss://ws.example.com',
   codec: 'msgpack',  // 开关：'json' (默认) | 'msgpack'
@@ -44,5 +44,5 @@ const ws = createResilientWS({
 ws.send({ event: 'message', data: 'hello' })  // 内部自动 pack
 
 // 类型
-import type { HttpClientConfig, ResilientWSOptions } from '@catcher/core'
+import type { HttpClientConfig, ResilientWSOptions } from '@eric8810/core'
 ```

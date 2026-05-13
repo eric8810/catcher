@@ -1,12 +1,12 @@
 /**
  * E2E: Rust (via napi-rs) vs Vanilla (axios/ws) Comparison
  *
- * Mirrors the existing scenarios.test.ts but uses @catcher/napi-http + @catcher/napi-ws
+ * Mirrors the existing scenarios.test.ts but uses @eric8810/napi-http + @eric8810/napi-ws
  * instead of the TS catcher implementation. Tests S1-S8 with
  * concurrent comparison against vanilla axios / raw WebSocket.
  *
  * Prerequisites:
- *   1. Build @catcher/napi-http + @catcher/napi-ws: cd packages/@catcher/napi-http + @catcher/napi-ws && cargo build --release
+ *   1. Build @eric8810/napi-http + @eric8810/napi-ws: cd packages/@eric8810/napi-http + @eric8810/napi-ws && cargo build --release
  *   2. Link: cd packages/catcher-ts && pnpm install
  *
  * Run:

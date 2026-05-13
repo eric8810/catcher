@@ -19,7 +19,7 @@
 
 import axios from 'axios'
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { createHttpClient, clearDnsCache } from '@catcher/http'
+import { createHttpClient, clearDnsCache } from '@eric8810/http'
 import { createHttpTestServer, type TestServer } from '../servers/http-server.js'
 import { createNetworkProxy, type NetworkProxy } from '../network/proxy.js'
 import { NETWORK_PROFILES } from '../network/presets.js'

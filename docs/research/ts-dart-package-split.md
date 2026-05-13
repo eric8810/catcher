@@ -49,21 +49,21 @@ sub-path exports 解决了**代码引用**层面的隔离，但**没有解决包
 
 ```
 packages/
-├── catcher-core-ts/       # @catcher/core    — 纯 types，零运行时依赖
+├── catcher-core-ts/       # @eric8810/core    — 纯 types，零运行时依赖
 │   exports: HttpClientConfig, RetryConfig, CircuitBreakerConfig, WsClientConfig, ...
 │   deps: (none)
 │
-├── catcher-http-ts/       # @catcher/http    — HTTP 客户端
+├── catcher-http-ts/       # @eric8810/http    — HTTP 客户端
 │   exports: createHttpClient, createRetryWrapper, createSharedAgent, createPriorityQueue
-│   deps: @catcher/core, cockatiel, p-retry, p-queue, cacheable-lookup
+│   deps: @eric8810/core, cockatiel, p-retry, p-queue, cacheable-lookup
 │   peerDeps: axios
 │
-├── catcher-ws-ts/         # @catcher/ws      — WebSocket 客户端
+├── catcher-ws-ts/         # @eric8810/ws      — WebSocket 客户端
 │   exports: createResilientWS, createReconnectStrategy, raceEndpoints
-│   deps: @catcher/core
+│   deps: @eric8810/core
 │   peerDeps: ws
 │
-└── catcher-codec-ts/      # @catcher/codec   — 编解码
+└── catcher-codec-ts/      # @eric8810/codec   — 编解码
     exports: pack, unpack, isBinary, decodeWSMessage
     deps: msgpackr
 ```
@@ -72,13 +72,13 @@ packages/
 
 ```bash
 # 场景 A: 纯 HTTP API
-npm i @catcher/http
+npm i @eric8810/http
 
 # 场景 B: IM 实时通信
-npm i @catcher/http @catcher/ws @catcher/codec
+npm i @eric8810/http @eric8810/ws @eric8810/codec
 
 # 场景 C: 文件上传
-npm i @catcher/http
+npm i @eric8810/http
 ```
 
 ### 不拆的代价
@@ -129,9 +129,9 @@ final ws = CatcherWsClient(config);
 | 层 | 当前 | 目标 |
 |----|------|------|
 | **Rust** | ✅ `catcher-core` + `catcher-http` + `catcher-ws` + `catcher-codec` | 已完成 |
-| **TS** | ⚠️ 单包 `catcher`，sub-path exports | `@catcher/core` + `@catcher/http` + `@catcher/ws` + `@catcher/codec` |
+| **TS** | ⚠️ 单包 `catcher`，sub-path exports | `@eric8810/core` + `@eric8810/http` + `@eric8810/ws` + `@eric8810/codec` |
 | **Dart** | ⚠️ 单包 `catcher_core` | `catcher_http` + `catcher_ws` + `catcher_codec` |
-| **napi-rs** | ✅ `@catcher/napi-http` + `@catcher/napi-ws` + `@catcher/napi-codec` | 已完成 |
+| **napi-rs** | ✅ `@eric8810/napi-http` + `@eric8810/napi-ws` + `@eric8810/napi-codec` | 已完成 |
 
 ---
 
@@ -139,7 +139,7 @@ final ws = CatcherWsClient(config);
 
 | 优先级 | 动作 | 理由 |
 |--------|------|------|
-| **P0** | 创建 `@catcher/core` | 纯 types，零运行时依赖，所有子包的基础 |
-| **P0** | 创建 `@catcher/http` + `@catcher/ws` + `@catcher/codec` | 三个子包，各自仅带必要依赖 |
+| **P0** | 创建 `@eric8810/core` | 纯 types，零运行时依赖，所有子包的基础 |
+| **P0** | 创建 `@eric8810/http` + `@eric8810/ws` + `@eric8810/codec` | 三个子包，各自仅带必要依赖 |
 | **P1** | 保留 `catcher` umbrella 兼容 | 存量用户 `import from 'catcher'` 不 break |
 | **P2** | 移除 umbrella | catacher 成熟后，用户直接用子包 |

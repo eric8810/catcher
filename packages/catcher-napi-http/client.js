@@ -33,7 +33,7 @@ if (napiJs) {
 
   if (!addon) {
     throw new Error(
-      `@catcher/napi-http: native addon not found.\n` +
+      `@eric8810/napi-http: native addon not found.\n` +
       `Run \`npm run build\` in packages/${pkg} (requires Rust).`
     )
   }

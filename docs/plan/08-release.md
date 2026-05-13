@@ -11,17 +11,17 @@
 
 | 包名 | 路径 | 类型 |
 |------|------|------|
-| `@catcher/core` | `packages/catcher-core-ts` | TS 纯类型定义 |
-| `@catcher/http` | `packages/catcher-http-ts` | TS HTTP 客户端 |
-| `@catcher/ws` | `packages/catcher-ws-ts` | TS WebSocket 客户端 |
-| `@catcher/web` | `packages/catcher-web` | Browser HTTP 客户端 |
+| `@eric8810/core` | `packages/catcher-core-ts` | TS 纯类型定义 |
+| `@eric8810/http` | `packages/catcher-http-ts` | TS HTTP 客户端 |
+| `@eric8810/ws` | `packages/catcher-ws-ts` | TS WebSocket 客户端 |
+| `@eric8810/web` | `packages/catcher-web` | Browser HTTP 客户端 |
 
 ### 后续发布（Phase 2）
 
 | 包名 | 路径 | 说明 |
 |------|------|------|
-| `@catcher/napi-http` | `packages/catcher-napi-http` | Rust 原生 HTTP，需多平台 prebuild |
-| `@catcher/napi-ws` | `packages/catcher-napi-ws` | Rust 原生 WS，需多平台 prebuild |
+| `@eric8810/napi-http` | `packages/catcher-napi-http` | Rust 原生 HTTP，需多平台 prebuild |
+| `@eric8810/napi-ws` | `packages/catcher-napi-ws` | Rust 原生 WS，需多平台 prebuild |
 | `catcher-core` / `catcher-http` / `catcher-ws` | `packages/` (Rust) | 发布到 crates.io |
 
 ### 版本号
@@ -43,9 +43,9 @@
 现有配置适合 monorepo 内部 workspace 引用（直接引 TS 源码，无需构建），
 但发布到 npm 后，消费者拿到的包里不应有 `.ts` 源码作为入口。
 
-### 问题 2：@catcher/web 缺少 build 脚本
+### 问题 2：@eric8810/web 缺少 build 脚本
 
-其他三个包有 `build: tsc`，@catcher/web 只有 `typecheck`。
+其他三个包有 `build: tsc`，@eric8810/web 只有 `typecheck`。
 
 ### 问题 3：files 字段未包含 dist
 
@@ -90,7 +90,7 @@
 
 ### 3.2 四个包改动清单
 
-| 改动项 | @catcher/core | @catcher/http | @catcher/ws | @catcher/web |
+| 改动项 | @eric8810/core | @eric8810/http | @eric8810/ws | @eric8810/web |
 |--------|:---:|:---:|:---:|:---:|
 | `files` 改为 `["dist"]` | ✅ | ✅ | ✅ | ✅ |
 | 添加 `publishConfig` | ✅ | ✅ | ✅ | ✅ |
@@ -99,7 +99,7 @@
 | 更新 devDependencies 加 typescript | — | — | — | ✅ |
 | 确认 tsconfig outDir: ./dist | ✅ | ✅ | ✅ | ✅ |
 
-### 3.3 文件结构（以 @catcher/web 为例）
+### 3.3 文件结构（以 @eric8810/web 为例）
 
 ```
 packages/catcher-web/
@@ -146,16 +146,16 @@ packages/catcher-web/
   "plugins": ["node-workspace"],
   "packages": {
     "packages/catcher-core-ts": {
-      "package-name": "@catcher/core"
+      "package-name": "@eric8810/core"
     },
     "packages/catcher-http-ts": {
-      "package-name": "@catcher/http"
+      "package-name": "@eric8810/http"
     },
     "packages/catcher-ws-ts": {
-      "package-name": "@catcher/ws"
+      "package-name": "@eric8810/ws"
     },
     "packages/catcher-web": {
-      "package-name": "@catcher/web"
+      "package-name": "@eric8810/web"
     }
   },
   "changelog-sections": [
@@ -386,7 +386,7 @@ jobs:
 
 ### 文档检查
 
-- [ ] `README.md` 中 install 命令正确（`npm install @catcher/http`）
+- [ ] `README.md` 中 install 命令正确（`npm install @eric8810/http`）
 - [ ] root `README.md` 中的 Quick Start 代码可运行
 - [ ] 每个包的 `description` 字段准确
 
@@ -448,7 +448,7 @@ cd packages/catcher-web && pnpm publish --access public
 
 ### 核心挑战
 
-`@catcher/napi-http` 和 `@catcher/napi-ws` 包含 Rust 编译的 `.node` 原生二进制。
+`@eric8810/napi-http` 和 `@eric8810/napi-ws` 包含 Rust 编译的 `.node` 原生二进制。
 发布到 npm 需要为每个目标平台预编译：
 
 | 平台 | arch |

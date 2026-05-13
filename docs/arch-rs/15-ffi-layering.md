@@ -166,7 +166,7 @@ pub fn on_upload_progress(&self, callback: JsFunction) {
 
 ```typescript
 // ❌ napi-http 直接暴露给用户
-import { HttpClient } from '@catcher/napi-http'
+import { HttpClient } from '@eric8810/napi-http'
 
 const client = new HttpClient({ baseURL: '...' })
 // 问题：没有拦截器、没有信号、没有 query 参数、没有错误包装
@@ -176,10 +176,10 @@ const client = new HttpClient({ baseURL: '...' })
 ### 正面：TS 薄封装包一层
 
 ```typescript
-// ✅ @catcher/http 内部使用 napi 作为底层传输
+// ✅ @eric8810/http 内部使用 napi 作为底层传输
 // packages/catcher-http-ts/src/http/native-client.ts
 
-import { HttpClient as NativeHttpClient } from '@catcher/napi-http'
+import { HttpClient as NativeHttpClient } from '@eric8810/napi-http'
 
 export function createNativeHttpClient(config: HttpClientConfig): IHttpClient {
   const native = new NativeHttpClient({
@@ -233,7 +233,7 @@ export function createNativeHttpClient(config: HttpClientConfig): IHttpClient {
 ### 架构图
 
 ```
-@catcher/http (用户直接安装)
+@eric8810/http (用户直接安装)
  ├── interceptors     ← TS 纯逻辑
  ├── query params     ← TS 纯逻辑
  ├── config merge     ← TS 纯逻辑
@@ -242,9 +242,9 @@ export function createNativeHttpClient(config: HttpClientConfig): IHttpClient {
  ├── retry            ← p-retry (TS)
  ├── circuit breaker  ← cockatiel (TS)
  ├── priority queue   ← p-queue (TS)
- └── native client    ← @catcher/napi-http (唯一 FFI 调用点)
+ └── native client    ← @eric8810/napi-http (唯一 FFI 调用点)
 
-@catcher/napi-http (薄封装，用户不直接安装)
+@eric8810/napi-http (薄封装，用户不直接安装)
  └── napi-rs bindings → catcher-http crate (Rust)
 ```
 
