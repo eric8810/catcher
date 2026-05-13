@@ -294,5 +294,5 @@ impl WsClient {
     }
 }
 
-// UniFFI proc-macro mode setup (no UDL file needed)
-uniffi::setup!();
+// UniFFI proc-macro mode scaffolding (no UDL file needed)
+uniffi::setup_scaffolding!();
