@@ -1,6 +1,6 @@
 # 00 — TS 包概览
 
-> v0.2.0 — 与 Rust workspace 对齐，codec 合并到 WS
+> v0.3.0 — 新增 SSE 支持，面向 AI 流式响应场景
 
 ## 依赖关系
 
@@ -9,7 +9,7 @@
             /         |         \
            /          |          \
   @eric8810/catcher-http  @eric8810/catcher-ws  @eric8810/catcher-web
-  (axios, Node)  (ws, msgpack) (fetch, Browser)
+  (axios + SSE, Node)  (ws, msgpack) (fetch + SSE, Browser)
 ```
 
 ## 按场景安装
@@ -43,6 +43,29 @@ const ws = createResilientWS({
 })
 ws.send({ event: 'message', data: 'hello' })  // 内部自动 pack
 
+// SSE — AI 流式响应（一次性消费）
+import { createSSEStream } from '@eric8810/catcher-http'
+const stream = createSSEStream({
+  url: 'https://api.openai.com/v1/chat/completions',
+  method: 'POST',
+  headers: { Authorization: `Bearer ${apiKey}` },
+  body: { model: 'gpt-4', messages: [{ role: 'user', content: 'Hello' }], stream: true },
+})
+for await (const event of stream) {
+  if (event.data === '[DONE]') break
+  const chunk = JSON.parse(event.data)
+  process.stdout.write(chunk.choices[0]?.delta?.content ?? '')
+}
+
+// SSE — 长连接推送（自动重连 + 断点续传）
+import { createSSEClient } from '@eric8810/catcher-http'
+const sse = createSSEClient({
+  url: 'https://api.example.com/events',
+  headers: { Authorization: 'Bearer xxx' },
+  reconnect: { initialDelay: 1000, maxDelay: 30_000 },
+})
+sse.addEventListener('message', (e) => console.log(e.data))
+
 // 类型
-import type { HttpClientConfig, ResilientWSOptions } from '@eric8810/catcher-core'
+import type { HttpClientConfig, ResilientWSOptions, SSEClientConfig, SSEStreamOptions } from '@eric8810/catcher-core'
 ```

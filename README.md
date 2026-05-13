@@ -33,6 +33,7 @@ catcher  catcher              @eric8810  @eric8810
 -http    -ws                  /catcher-  /catcher-
  │  │     │  │                http       ws
  │  │     │  │               (axios)    (ws)
+ │  │     │  │               (+SSE)
  │  └──napi-rs──┐   ┌──napi-rs──┘
  │              ▼   ▼
  │        @eric8810/catcher-napi-http
@@ -49,6 +50,12 @@ catcher  catcher              @eric8810  @eric8810
  │          │          │
  │   catcher_core  catcher-uniffi
  └─────────────────────────────────┘
+
+                          ┌─────────────────────┐
+                          │ @eric8810/catcher-web│
+                          │  (Browser, fetch)    │
+                          │  HTTP + SSE          │
+                          └─────────────────────┘
 ```
 
 ## Packages
@@ -148,6 +155,33 @@ ws.send(pack({ event: 'message', data: msg }))
 ws.addEventListener('message', e => console.log(decodeWSMessage(e.data)))
 ```
 
+```typescript
+// SSE — AI streaming (OpenAI compatible)
+import { createSSEStream } from '@eric8810/catcher-http'
+
+const stream = createSSEStream({
+  url: 'https://api.openai.com/v1/chat/completions',
+  method: 'POST',
+  headers: { Authorization: `Bearer ${apiKey}` },
+  body: { model: 'gpt-4', messages: [{ role: 'user', content: 'Hello' }], stream: true },
+})
+for await (const event of stream) {
+  if (event.data === '[DONE]') break
+  const chunk = JSON.parse(event.data)
+  process.stdout.write(chunk.choices[0]?.delta?.content ?? '')
+}
+
+// SSE — long-lived push with auto-reconnect
+import { createSSEClient } from '@eric8810/catcher-http'
+
+const sse = createSSEClient({
+  url: 'https://api.example.com/events',
+  headers: { Authorization: 'Bearer xxx' },
+  reconnect: { initialDelay: 1000, maxDelay: 30_000 },
+})
+sse.addEventListener('message', e => console.log(e.data))
+```
+
 ```dart
 // Flutter — HTTP via Rust FFI
 import 'package:catcher_core/catcher_core.dart';
@@ -164,6 +198,7 @@ await client.close();
 - **Auto-retry** — exponential backoff with jitter, destroys stale keepAlive sockets on retry
 - **Circuit Breaker** — trips on consecutive failures, auto-recovers, prevents retry storms
 - **Resilient WebSocket** — perMessageDeflate compression, exponential reconnect, multi-endpoint racing
+- **Server-Sent Events (SSE)** — AI streaming (OpenAI/Anthropic compatible), auto-reconnect, `Last-Event-ID` resume, `AsyncIterable` API
 - **Binary codec** — msgpack / msgpackr (2-4x faster than JSON, ~47% smaller)
 - **Priority queue** — POST before prefetch, concurrency-aware scheduling
 - **Dynamic interceptors** — use/eject/clear at runtime, per-request retry/timeout/signal overrides
