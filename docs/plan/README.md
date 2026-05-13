@@ -14,6 +14,7 @@
 | `05-phase4-scheduler-observability.md` | Phase 4：priority queue + concurrency + network quality |
 | `06-phase5-ffi.md` | Phase 5：C ABI + napi-rs + flutter_rust_bridge |
 | `07-test-reuse.md` | TS e2e 测试复用方案（S1-S8 + chaos） |
+| `08-release.md` | 对外发包 Release 方案 — CI/CD, release-please, publish 流程 |
 
 ## 与 arch-rs 的关系
 
