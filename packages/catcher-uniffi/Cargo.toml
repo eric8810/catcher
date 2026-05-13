@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "UniFFI bindings for catcher — auto-generates Swift + Kotlin from Rust API"
 license = "MIT"
+repository = "https://github.com/eric8810/catcher"
 
 [lib]
 crate-type = ["cdylib", "staticlib"]

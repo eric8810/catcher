@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "Unified C ABI library for catcher — links HTTP + WS + codec into a single .so/.dylib"
 license = "MIT"
+repository = "https://github.com/eric8810/catcher"
 
 [lib]
 crate-type = ["cdylib"]

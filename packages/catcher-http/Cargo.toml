@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "HTTP client for catcher — resilient transport with retry, circuit breaker, priority scheduling"
 license = "MIT"
+repository = "https://github.com/eric8810/catcher"
 
 [features]
 default = ["rustls-tls", "hickory-dns"]

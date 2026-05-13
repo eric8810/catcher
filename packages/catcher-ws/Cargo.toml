@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "WebSocket client for catcher — resilient reconnect, heartbeat, multi-endpoint racing"
 license = "MIT"
+repository = "https://github.com/eric8810/catcher"
 
 [dependencies]
 catcher-core = { path = "../catcher-core" }
