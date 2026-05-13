@@ -2,6 +2,7 @@
 
 [![npm version](https://img.shields.io/npm/v/@eric8810/catcher-http.svg)](https://www.npmjs.com/package/@eric8810/catcher-http)
 [![pub version](https://img.shields.io/pub/v/catcher_core.svg)](https://pub.dev/packages/catcher_core)
+[![crates.io](https://img.shields.io/crates/v/catcher-http.svg)](https://crates.io/crates/catcher-http)
 [![CI](https://github.com/eric8810/catcher/actions/workflows/ci.yml/badge.svg)](https://github.com/eric8810/catcher/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -17,7 +18,7 @@ Resilient network communication toolkit — Rust core, TypeScript wrappers, Flut
 | **Node.js (TS)** | `@eric8810/catcher-http` / `@eric8810/catcher-ws` | ✅ Published |
 | **Electron** | same as Node.js | ✅ |
 | **Web** | `@eric8810/catcher-web` | ✅ Published |
-| **Rust** | `catcher-http` / `catcher-ws` / `catcher-core` | ✅ |
+| **Rust** | `catcher-http` / `catcher-ws` / `catcher-core` | ✅ Published |
 | **Flutter** | `catcher_core` (dart:ffi) | ✅ Published |
 | **Android + iOS** | `catcher-uniffi` (UniFFI) | ⚠️ WIP |
 
@@ -71,13 +72,13 @@ catcher  catcher              @eric8810  @eric8810
 
 ### Rust (crates.io)
 
-| Crate | Path | Description |
-|-------|------|-------------|
-| `catcher-core` | `crates/catcher-core` | Shared types & errors |
-| `catcher-http` | `crates/catcher-http` | HTTP — reqwest, retry, CB |
-| `catcher-ws` | `crates/catcher-ws` | WS — tokio-tungstenite, codec |
-| `catcher-ffi` | `crates/catcher-ffi` | cdylib umbrella — 16 C ABI symbols |
-| `catcher-uniffi` | `crates/catcher-uniffi` | UniFFI → Swift + Kotlin (WIP) |
+| Crate | Version | Description |
+|-------|---------|-------------|
+| [`catcher-core`](https://crates.io/crates/catcher-core) | [![crates.io](https://img.shields.io/crates/v/catcher-core.svg)](https://crates.io/crates/catcher-core) | Shared types & errors |
+| [`catcher-http`](https://crates.io/crates/catcher-http) | [![crates.io](https://img.shields.io/crates/v/catcher-http.svg)](https://crates.io/crates/catcher-http) | HTTP — reqwest, retry, CB |
+| [`catcher-ws`](https://crates.io/crates/catcher-ws) | [![crates.io](https://img.shields.io/crates/v/catcher-ws.svg)](https://crates.io/crates/catcher-ws) | WS — tokio-tungstenite, codec |
+| [`catcher-ffi`](https://crates.io/crates/catcher-ffi) | [![crates.io](https://img.shields.io/crates/v/catcher-ffi.svg)](https://crates.io/crates/catcher-ffi) | cdylib umbrella — 16 C ABI symbols |
+| `catcher-uniffi` | — | UniFFI → Swift + Kotlin (WIP) |
 
 ## Quick Start
 

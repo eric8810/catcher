@@ -13,10 +13,10 @@ catcher 是一个跨平台网络韧性库，覆盖 HTTP、WebSocket、Codec 三�
 
 | 协议 | Rust | TS (纯 JS) | TS (napi 原生) | Dart |
 |------|------|-----------|---------------|------|
-| **types** | `catcher-core` ✅ | `@eric8810/catcher-core` ✅ | — | `catcher_core` ✅ |
-| **HTTP** | `catcher-http` ✅ | `@eric8810/catcher-http` ✅ | `@eric8810/catcher-napi-http` ✅ | `catcher_core` ✅ |
-| **WS** | `catcher-ws` ✅ | `@eric8810/catcher-ws` ✅ | `@eric8810/catcher-napi-ws` ✅ | `catcher_core` ✅ |
-| **FFI** | `catcher-ffi` ✅ (cdylib umbrella) | — | — | (通过 catcher_ffi) |
+| **types** | `catcher-core` ✅ Published | `@eric8810/catcher-core` ✅ Published | — | `catcher_core` ✅ Published |
+| **HTTP** | `catcher-http` ✅ Published | `@eric8810/catcher-http` ✅ Published | `@eric8810/catcher-napi-http` ✅ Published | `catcher_core` ✅ Published |
+| **WS** | `catcher-ws` ✅ Published | `@eric8810/catcher-ws` ✅ Published | `@eric8810/catcher-napi-ws` ✅ Published | `catcher_core` ✅ Published |
+| **FFI** | `catcher-ffi` ✅ Published (cdylib umbrella) | — | — | (通过 catcher_ffi) |
 
 > ✅ = 已实现  
 > Codec 已合并到 WS — `catcher-ws` 内置 msgpack 编解码。
