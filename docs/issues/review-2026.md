@@ -58,7 +58,7 @@ JSDoc 写"NOT on ETIMEDOUT"，但代码 line 52 包含 `error.code === 'ETIMEDOU
 
 **文件**：`packages/catcher-napi-http/index.d.ts`
 
-TS 类型用 `max_attempts`，但 `@eric8810/http` 的 `RetryOptions` 用 `attempts`。应统一。
+TS 类型用 `max_attempts`，但 `@eric8810/catcher-http` 的 `RetryOptions` 用 `attempts`。应统一。
 
 ### 7. 拦截器 eject() 不校验 id
 
@@ -66,7 +66,7 @@ TS 类型用 `max_attempts`，但 `@eric8810/http` 的 `RetryOptions` 用 `attem
 
 `eject(id)` 无论 id 是否存在都静默返回。axios 行为相同（设计如此），但值得文档说明。
 
-### 8. @eric8810/web 缺少 tsconfig
+### 8. @eric8810/catcher-web 缺少 tsconfig
 
 **文件**：`packages/catcher-web/`
 

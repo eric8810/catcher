@@ -1,6 +1,6 @@
 # Flutter 使用指南
 
-> 状态：✅ 已实现 — `catcher_core` pub 包 + dart:ffi 绑定层  
+> 状态：✅ 已发布 — `catcher_core` [pub.dev](https://pub.dev/packages/catcher_core) v0.1.0 + dart:ffi 绑定层  
 > 代码位置：`packages/catcher_core/`  
 > 架构文档：[`arch-rs/13-dart-ffi.md`](../arch-rs/13-dart-ffi.md)
 
@@ -12,10 +12,10 @@
 Flutter App (Dart)
       │ dart:ffi — 直接调用 C ABI
       ▼
-libcatcher_core.so / .dylib (Rust cdylib)
-      │ 复用 src/ffi/ — 与 napi-rs 同一套 C ABI
+libcatcher_ffi.so / .dylib (catcher-ffi cdylib umbrella)
+      │ 16 C ABI symbols — HTTP + WS + pack/unpack
       ▼
-catcher-rs (Rust 核心)
+catcher-http + catcher-ws (Rust)
 ```
 
 **为什么是 dart:ffi 而不是 flutter_rust_bridge？**
@@ -144,11 +144,11 @@ final unpacked = unpack(packed);  // Map<String, dynamic>
 
 | 平台 | Rust target | 产物 |
 |------|------------|------|
-| Android arm64 | `aarch64-linux-android` | `libcatcher_core.so` |
+| Android arm64 | `aarch64-linux-android` | `libcatcher_ffi.so` |
 | iOS arm64 | `aarch64-apple-ios` | static linking |
-| macOS arm64 | `aarch64-apple-darwin` | `libcatcher_core.dylib` |
-| Windows x86_64 | `x86_64-pc-windows-msvc` | `catcher_core.dll` |
-| Linux x86_64 | `x86_64-unknown-linux-gnu` | `libcatcher_core.so` |
+| macOS arm64 | `aarch64-apple-darwin` | `libcatcher_ffi.dylib` |
+| Windows x86_64 | `x86_64-pc-windows-msvc` | `catcher_ffi.dll` |
+| Linux x86_64 | `x86_64-unknown-linux-gnu` | `libcatcher_ffi.so` |
 
 ### Flutter 3.38+ native_assets
 
@@ -210,6 +210,8 @@ class CatcherHttpClient {
 | circuitBreaker | ✅ 已实现（Rust crate 支持） |
 | per-request options | ⏳ Dart wrapper 待补 |
 | 动态拦截器 | ❌ 暂不支持（dart:ffi 回调限制） |
-| WebSocket + push 事件 | ⏳ Dart wrapper 待补 |
+| WebSocket + push 事件 | ✅ 已实现（Dart wrapper + Rust FFI） |
+| 二进制编解码 (pack/unpack) | ✅ 已实现（Rust codec via FFI） |
 
-> Rust crate 已完整实现所有韧性特性。Dart wrapper 覆盖了基础 CRUD，高级特性（per-request options、WebSocket）的 Dart 封装待补。
+> Rust crate 已完整实现所有韧性特性。Dart wrapper 覆盖了 HTTP CRUD、WebSocket 和二进制编解码。
+> 测试：20/20 单元测试 + 8/8 集成测试（真实 FFI + httpbin.org）全部通过。

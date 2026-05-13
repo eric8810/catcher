@@ -94,10 +94,10 @@ catcher-ts (单 npm 包)
 
 | 场景 | 当前 | 拆分后 |
 |------|------|--------|
-| A: REST API | `npm i catcher` (全量依赖: ws, msgpackr, ...) | `npm i @eric8810/http` (仅 reqwest) |
-| B: IM 实时 | `npm i catcher` | `npm i @eric8810/http @eric8810/ws` |
-| C: 文件上传 | `npm i catcher` | `npm i @eric8810/http @eric8810/tus` |
-| D: 全功能 | `npm i catcher` | `npm i @eric8810/http @eric8810/ws @eric8810/tus` 或 `npm i catcher` (umbrella) |
+| A: REST API | `npm i catcher` (全量依赖: ws, msgpackr, ...) | `npm i @eric8810/catcher-http` (仅 reqwest) |
+| B: IM 实时 | `npm i catcher` | `npm i @eric8810/catcher-http @eric8810/catcher-ws` |
+| C: 文件上传 | `npm i catcher` | `npm i @eric8810/catcher-http @eric8810/tus` |
+| D: 全功能 | `npm i catcher` | `npm i @eric8810/catcher-http @eric8810/catcher-ws @eric8810/tus` 或 `npm i catcher` (umbrella) |
 
 ---
 
@@ -144,7 +144,7 @@ catcher-ts (单 npm 包)
 |------|--------|
 | **按需安装**：用户只装需要的部分，减少依赖膨胀 | ⭐⭐⭐⭐ |
 | **独立版本号**：WS 可以快速迭代修 bug 而不影响 HTTP 的稳定版本 | ⭐⭐⭐⭐ |
-| **独立依赖树**：`@eric8810/http` 不需要 `tokio-tungstenite`，`@eric8810/tus` 不需要 `stream-tungstenite` | ⭐⭐⭐⭐⭐ |
+| **独立依赖树**：`@eric8810/catcher-http` 不需要 `tokio-tungstenite`，`@eric8810/tus` 不需要 `stream-tungstenite` | ⭐⭐⭐⭐⭐ |
 | **独立测试范围**：每个包只测自己的生命周期，CI 更快 | ⭐⭐⭐ |
 | **独立文档**：每个包有自己清晰的 use case，文档更聚焦 | ⭐⭐⭐ |
 | **独立安全审计**：WS 的 CVE 不影响 HTTP 用户 | ⭐⭐⭐ |
@@ -230,17 +230,17 @@ TypeScript 侧对应：
 
 ```
 packages/
-├── catcher-core-ts/                 # @eric8810/core: 共享类型
+├── catcher-core-ts/                 # @eric8810/catcher-core: 共享类型
 │   exports: types, errors, MetricsCollector port
 │
-├── catcher-http-ts/                 # @eric8810/http
-│   deps: @eric8810/core, axios, p-retry, cockatiel, p-queue
+├── catcher-http-ts/                 # @eric8810/catcher-http
+│   deps: @eric8810/catcher-core, axios, p-retry, cockatiel, p-queue
 │
-├── catcher-ws-ts/                   # @eric8810/ws
-│   deps: @eric8810/core, ws
+├── catcher-ws-ts/                   # @eric8810/catcher-ws
+│   deps: @eric8810/catcher-core, ws
 │
 ├── catcher-tus-ts/                  # @eric8810/tus
-│   deps: @eric8810/core, @eric8810/http
+│   deps: @eric8810/catcher-core, @eric8810/catcher-http
 │
 ├── catcher-codec-ts/                # @eric8810/codec
 │   deps: msgpackr
@@ -370,7 +370,7 @@ Phase 5 (FFI Bindings) 已经开发完成。对照此前提出的触发条件：
 | **6** | catcher-rs 更新为 umbrella crate，re-export 所有子 crate | 对外 API 不变 | 低 |
 | **7** | 更新 `catcher-rs-napi/Cargo.toml` deps | Node.js 绑定指向子 crate | 低 |
 | **8** | 更新 `catcher_core/` Dart 侧 deps（如有需要） | Dart 绑定，实际仅改 Cargo.toml | 低 |
-| **9** | TS 侧同步拆分：`@eric8810/core` → `@eric8810/http` / `@eric8810/ws` / `@eric8810/codec` | 独立 npm 包 | 中，需改 package.json exports |
+| **9** | TS 侧同步拆分：`@eric8810/catcher-core` → `@eric8810/catcher-http` / `@eric8810/catcher-ws` / `@eric8810/codec` | 独立 npm 包 | 中，需改 package.json exports |
 | **10** | 创建 `crates/catcher-tus/`（全新 crate，依赖 catcher-http） | TUS 从零在新 crate 中建设 | 低，全新代码 |
 
 ---

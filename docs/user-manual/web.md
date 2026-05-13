@@ -1,20 +1,20 @@
 # Web 浏览器使用指南
 
-> 状态：✅ 已实现 — `@eric8810/web` 包，fetch-based，纯 TS  
+> 状态：✅ 已实现 — `@eric8810/catcher-web` 包，fetch-based，纯 TS  
 > 代码位置：`packages/catcher-web/`
 
 ---
 
 ## 为什么需要独立包
 
-`@eric8810/http` 基于 axios → `node:http`，不兼容浏览器。`@eric8810/web` 将韧性层（retry / CB / queue / interceptors）完整保留，底层换为 `fetch()`。
+`@eric8810/catcher-http` 基于 axios → `node:http`，不兼容浏览器。`@eric8810/catcher-web` 将韧性层（retry / CB / queue / interceptors）完整保留，底层换为 `fetch()`。
 
 ```
-@eric8810/http (Node.js)        @eric8810/web (Browser)
+@eric8810/catcher-http (Node.js)        @eric8810/catcher-web (Browser)
 ─────────────────────          ────────────────────
 axios → node:http              fetch() → browser HTTP
 p-retry + cockatiel            p-retry + cockatiel (相同)
-@eric8810/core (types)          @eric8810/core (types) (相同)
+@eric8810/catcher-core (types)          @eric8810/catcher-core (types) (相同)
 ```
 
 ---
@@ -22,7 +22,7 @@ p-retry + cockatiel            p-retry + cockatiel (相同)
 ## API（目标）
 
 ```typescript
-import { createWebClient } from '@eric8810/web'
+import { createWebClient } from '@eric8810/catcher-web'
 
 const client = createWebClient({
   baseURL: 'https://api.example.com',
@@ -31,7 +31,7 @@ const client = createWebClient({
   concurrency: 10,
 })
 
-// 与 @eric8810/http 完全一致的 API
+// 与 @eric8810/catcher-http 完全一致的 API
 const data = await client.get('/users/1')
 await client.post('/messages', { text: 'hello' })
 
@@ -50,7 +50,7 @@ client.interceptors.request.use(config => {
 
 ## 浏览器特有差异
 
-| | @eric8810/http (Node.js) | @eric8810/web (Browser) |
+| | @eric8810/catcher-http (Node.js) | @eric8810/catcher-web (Browser) |
 |--|------------------------|----------------------|
 | HTTP 底层 | axios → node:http | fetch() |
 | keepAlive | ✅ Node.js Agent 连接池 | ❌ 浏览器自动管理 |

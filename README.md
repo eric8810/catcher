@@ -1,6 +1,11 @@
 # Catcher 🪤
 
-Resilient network communication toolkit — Rust core, TypeScript wrappers, cross-platform.
+[![npm version](https://img.shields.io/npm/v/@eric8810/catcher-http.svg)](https://www.npmjs.com/package/@eric8810/catcher-http)
+[![pub version](https://img.shields.io/pub/v/catcher_core.svg)](https://pub.dev/packages/catcher_core)
+[![CI](https://github.com/eric8810/catcher/actions/workflows/ci.yml/badge.svg)](https://github.com/eric8810/catcher/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+Resilient network communication toolkit — Rust core, TypeScript wrappers, Flutter bindings, cross-platform.
 
 > "Catcher" — catches network failures before they reach your business logic.
 
@@ -8,76 +13,104 @@ Resilient network communication toolkit — Rust core, TypeScript wrappers, cros
 
 | Platform | Package | Status |
 |----------|---------|--------|
-| **Node.js (native)** | `@eric8810/napi-http` / `@eric8810/napi-ws` | ✅ |
-| **Node.js (TS)** | `@eric8810/http` / `@eric8810/ws` | ✅ |
+| **Node.js (native)** | `@eric8810/catcher-napi-http` / `@eric8810/catcher-napi-ws` | ✅ Published |
+| **Node.js (TS)** | `@eric8810/catcher-http` / `@eric8810/catcher-ws` | ✅ Published |
 | **Electron** | same as Node.js | ✅ |
-| **Web** | `@eric8810/web` | ✅ |
+| **Web** | `@eric8810/catcher-web` | ✅ Published |
 | **Rust** | `catcher-http` / `catcher-ws` / `catcher-core` | ✅ |
-| **Flutter** | `catcher_core` (dart:ffi) | ⚠️ WIP (HTTP client wired, WS client skeleton) |
-| **Android + iOS** | `catcher-uniffi` (UniFFI) | ⚠️ WIP (proc-macro mode, needs mobile build verification) |
+| **Flutter** | `catcher_core` (dart:ffi) | ✅ Published |
+| **Android + iOS** | `catcher-uniffi` (UniFFI) | ⚠️ WIP |
 
-## Packages
+## Architecture
 
 ```
-catcher-core (Rust)              @eric8810/core (TS)
+catcher-core (Rust)              @eric8810/catcher-core (TS)
      │                                │
  ┌───┴───┐                        ┌───┴───┐
  ▼       ▼                        ▼       ▼
-catcher  catcher             @catcher  @catcher  @catcher
--http    -ws                 /http     /ws       /web
- │  │     │  │               (axios)   (ws)     (fetch)
- │  │     │  │
+catcher  catcher              @eric8810  @eric8810
+-http    -ws                  /catcher-  /catcher-
+ │  │     │  │                http       ws
+ │  │     │  │               (axios)    (ws)
  │  └──napi-rs──┐   ┌──napi-rs──┘
  │              ▼   ▼
- │        @eric8810/napi-http
- │        @eric8810/napi-ws
+ │        @eric8810/catcher-napi-http
+ │        @eric8810/catcher-napi-ws
  │
- ├── UniFFI → Swift + Kotlin
- └── C ABI  → dart:ffi (Flutter)
+ │   ┌─────────────────────────────────┐
+ ├───┤ catcher-ffi (cdylib umbrella)   │
+ │   │  bridges catcher-http + ws      │
+ │   │  exports 16 C ABI symbols       │
+ │   └──────┬──────────┬───────────────┘
+ │          ▼          ▼
+ │    dart:ffi      UniFFI
+ │    (Flutter)   (Kotlin/Swift)
+ │          │          │
+ │   catcher_core  catcher-uniffi
+ └─────────────────────────────────┘
 ```
 
-| Package | Path | Description |
-|---------|------|-------------|
-| `@eric8810/core` | `packages/catcher-core-ts` | Shared TS type definitions |
-| `@eric8810/http` | `packages/catcher-http-ts` | HTTP client — retry, CB, queue, interceptors |
-| `@eric8810/ws` | `packages/catcher-ws-ts` | WebSocket — reconnect, multi-endpoint, codec |
-| `@eric8810/web` | `packages/catcher-web` | Browser HTTP client — fetch-based |
-| `@eric8810/napi-http` | `packages/catcher-napi-http` | Rust native via napi-rs |
-| `@eric8810/napi-ws` | `packages/catcher-napi-ws` | Rust native via napi-rs |
-| `catcher-core` | `packages/catcher-core` | Rust shared types & errors |
-| `catcher-http` | `packages/catcher-http` | Rust HTTP — reqwest, retry, CB |
-| `catcher-ws` | `packages/catcher-ws` | Rust WS — tokio-tungstenite, codec |
-| `catcher-uniffi` | `packages/catcher-uniffi` | UniFFI → Swift + Kotlin |
-| `catcher_core` | `packages/catcher_core` | Flutter dart:ffi bindings |
+## Packages
 
-> pnpm monorepo + Cargo workspace. See `pnpm-workspace.yaml` and `packages/Cargo.toml`.
+### npm (@eric8810 scope)
 
-## Features
+| Package | Version | Description |
+|---------|---------|-------------|
+| [`@eric8810/catcher-core`](https://www.npmjs.com/package/@eric8810/catcher-core) | [![npm](https://img.shields.io/npm/v/@eric8810/catcher-core.svg)](https://www.npmjs.com/package/@eric8810/catcher-core) | Shared TS type definitions |
+| [`@eric8810/catcher-http`](https://www.npmjs.com/package/@eric8810/catcher-http) | [![npm](https://img.shields.io/npm/v/@eric8810/catcher-http.svg)](https://www.npmjs.com/package/@eric8810/catcher-http) | HTTP client — retry, CB, queue, interceptors |
+| [`@eric8810/catcher-ws`](https://www.npmjs.com/package/@eric8810/catcher-ws) | [![npm](https://img.shields.io/npm/v/@eric8810/catcher-ws.svg)](https://www.npmjs.com/package/@eric8810/catcher-ws) | WebSocket — reconnect, multi-endpoint, codec |
+| [`@eric8810/catcher-web`](https://www.npmjs.com/package/@eric8810/catcher-web) | [![npm](https://img.shields.io/npm/v/@eric8810/catcher-web.svg)](https://www.npmjs.com/package/@eric8810/catcher-web) | Browser HTTP client — fetch-based |
+| [`@eric8810/catcher-napi-http`](https://www.npmjs.com/package/@eric8810/catcher-napi-http) | [![npm](https://img.shields.io/npm/v/@eric8810/catcher-napi-http.svg)](https://www.npmjs.com/package/@eric8810/catcher-napi-http) | Rust native via napi-rs |
+| [`@eric8810/catcher-napi-ws`](https://www.npmjs.com/package/@eric8810/catcher-napi-ws) | [![npm](https://img.shields.io/npm/v/@eric8810/catcher-napi-ws.svg)](https://www.npmjs.com/package/@eric8810/catcher-napi-ws) | Rust native via napi-rs |
 
-- **Shared HTTP Agent** — TCP keep-alive, DNS caching, TLS session reuse, idle socket eviction
-- **Auto-retry** — exponential backoff with jitter, destroys stale keepAlive sockets on retry
-- **Circuit Breaker** — trips on consecutive failures, auto-recovers, prevents retry storms
-- **Resilient WebSocket** — perMessageDeflate compression, exponential reconnect, multi-endpoint racing
-- **Binary codec** — msgpack / msgpackr (2-4x faster than JSON, ~47% smaller)
-- **Priority queue** — POST before prefetch, concurrency-aware scheduling
-- **Dynamic interceptors** — use/eject/clear at runtime, per-request retry/timeout/signal overrides
+### pub.dev
+
+| Package | Version | Description |
+|---------|---------|-------------|
+| [`catcher_core`](https://pub.dev/packages/catcher_core) | [![pub](https://img.shields.io/pub/v/catcher_core.svg)](https://pub.dev/packages/catcher_core) | Flutter dart:ffi bindings |
+
+### Rust (crates.io)
+
+| Crate | Path | Description |
+|-------|------|-------------|
+| `catcher-core` | `crates/catcher-core` | Shared types & errors |
+| `catcher-http` | `crates/catcher-http` | HTTP — reqwest, retry, CB |
+| `catcher-ws` | `crates/catcher-ws` | WS — tokio-tungstenite, codec |
+| `catcher-ffi` | `crates/catcher-ffi` | cdylib umbrella — 16 C ABI symbols |
+| `catcher-uniffi` | `crates/catcher-uniffi` | UniFFI → Swift + Kotlin (WIP) |
 
 ## Quick Start
 
+### Node.js (native — Rust via napi-rs)
+
 ```bash
-# Node.js (native — Rust via napi-rs)
-npm install @eric8810/napi-http @eric8810/napi-ws
-
-# Node.js (TS — more API features)
-npm install @eric8810/http @eric8810/ws
-
-# Browser
-npm install @eric8810/web
+npm install @eric8810/catcher-napi-http @eric8810/catcher-napi-ws
 ```
+
+### Node.js (TS — full API)
+
+```bash
+npm install @eric8810/catcher-http @eric8810/catcher-ws
+```
+
+### Browser
+
+```bash
+npm install @eric8810/catcher-web
+```
+
+### Flutter
+
+```yaml
+dependencies:
+  catcher_core: ^0.1.0
+```
+
+### Usage
 
 ```typescript
 // HTTP — one line to replace axios.create()
-import { createHttpClient } from '@eric8810/http'
+import { createHttpClient } from '@eric8810/catcher-http'
 
 const client = createHttpClient({
   baseURL: 'https://api.example.com',
@@ -102,7 +135,7 @@ client.interceptors.request.use(config => {
 
 ```typescript
 // WebSocket — compression + reconnect + multi-endpoint
-import { createResilientWS, pack, decodeWSMessage } from '@eric8810/ws'
+import { createResilientWS, pack, decodeWSMessage } from '@eric8810/catcher-ws'
 
 const ws = createResilientWS({
   url: ['wss://cn.example.com', 'wss://sg.example.com'],
@@ -114,11 +147,41 @@ ws.send(pack({ event: 'message', data: msg }))
 ws.addEventListener('message', e => console.log(decodeWSMessage(e.data)))
 ```
 
+```dart
+// Flutter — HTTP via Rust FFI
+import 'package:catcher_core/catcher_core.dart';
+
+final client = CatcherHttpClient();
+final resp = await client.get('https://httpbin.org/get');
+print(resp.body);
+await client.close();
+```
+
+## Features
+
+- **Shared HTTP Agent** — TCP keep-alive, DNS caching, TLS session reuse, idle socket eviction
+- **Auto-retry** — exponential backoff with jitter, destroys stale keepAlive sockets on retry
+- **Circuit Breaker** — trips on consecutive failures, auto-recovers, prevents retry storms
+- **Resilient WebSocket** — perMessageDeflate compression, exponential reconnect, multi-endpoint racing
+- **Binary codec** — msgpack / msgpackr (2-4x faster than JSON, ~47% smaller)
+- **Priority queue** — POST before prefetch, concurrency-aware scheduling
+- **Dynamic interceptors** — use/eject/clear at runtime, per-request retry/timeout/signal overrides
+
 ## Resilience Layers
 
 ```
 interceptors → retry → circuit breaker → concurrency queue → HTTP engine
 ```
+
+## Test Results
+
+| Suite | Count | Status |
+|-------|-------|--------|
+| TS E2E (scenarios + rust-vs-vanilla) | 38/38 | ✅ |
+| TS Integration (http + ws + chaos) | 12/12 | ✅ |
+| Dart Unit Tests | 20/20 | ✅ |
+| Dart Integration (real FFI + httpbin.org) | 8/8 | ✅ |
+| Rust catcher-ffi FFI tests | 8/8 | ✅ |
 
 ## Documentation
 
@@ -137,12 +200,14 @@ interceptors → retry → circuit breaker → concurrency queue → HTTP engine
 
 ```bash
 pnpm install          # install all dependencies
+pnpm build            # build all TS packages
 pnpm test             # run integration tests (vitest)
 pnpm typecheck        # type-check all TS packages
-pnpm bench             # run benchmarks
+pnpm bench            # run benchmarks
 
 # Rust
-cd packages && cargo build
+cd crates && cargo build
+cd crates && cargo test
 ```
 
 ## License

@@ -2,7 +2,7 @@
 
 > 代码位置：`packages/catcher-*-ts/`
 
-## @eric8810/core
+## @eric8810/catcher-core
 
 ```
 catcher-core-ts/
@@ -12,7 +12,7 @@ catcher-core-ts/
     └── types.ts
 ```
 
-## @eric8810/http
+## @eric8810/catcher-http
 
 ```
 catcher-http-ts/
@@ -32,7 +32,7 @@ catcher-http-ts/
         └── priority-queue.ts
 ```
 
-## @eric8810/ws
+## @eric8810/catcher-ws
 
 ```
 catcher-ws-ts/
@@ -47,7 +47,7 @@ catcher-ws-ts/
         └── multi-endpoint.ts
 ```
 
-## @eric8810/web
+## @eric8810/catcher-web
 
 ```
 catcher-web/

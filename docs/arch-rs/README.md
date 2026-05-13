@@ -13,9 +13,10 @@ catcher 是一个跨平台网络韧性库，覆盖 HTTP、WebSocket、Codec 三�
 
 | 协议 | Rust | TS (纯 JS) | TS (napi 原生) | Dart |
 |------|------|-----------|---------------|------|
-| **types** | `catcher-core` ✅ | `@eric8810/core` ✅ | — | `catcher_core` ✅ |
-| **HTTP** | `catcher-http` ✅ | `@eric8810/http` ✅ | `@eric8810/napi-http` ✅ | `catcher_core` ✅ |
-| **WS** | `catcher-ws` ✅ | `@eric8810/ws` ✅ | `@eric8810/napi-ws` ✅ | `catcher_core` ✅ |
+| **types** | `catcher-core` ✅ | `@eric8810/catcher-core` ✅ | — | `catcher_core` ✅ |
+| **HTTP** | `catcher-http` ✅ | `@eric8810/catcher-http` ✅ | `@eric8810/catcher-napi-http` ✅ | `catcher_core` ✅ |
+| **WS** | `catcher-ws` ✅ | `@eric8810/catcher-ws` ✅ | `@eric8810/catcher-napi-ws` ✅ | `catcher_core` ✅ |
+| **FFI** | `catcher-ffi` ✅ (cdylib umbrella) | — | — | (通过 catcher_ffi) |
 
 > ✅ = 已实现  
 > Codec 已合并到 WS — `catcher-ws` 内置 msgpack 编解码。
@@ -24,28 +25,28 @@ catcher 是一个跨平台网络韧性库，覆盖 HTTP、WebSocket、Codec 三�
 
 | 文档 | 内容 |
 |------|------|
-| [`arch-rs/`](./arch-rs/) | Rust workspace 架构（4 个 lib crate + 2 个 napi-rs + 1 个 uniffi） |
+| [`arch-rs/`](./arch-rs/) | Rust workspace 架构（4 个 lib crate + 1 个 cdylib + 2 个 napi-rs + 1 个 uniffi） |
 | [`arch-ts/`](./arch-ts/) | TypeScript 包架构（5 个 npm 包） |
 | [`research/`](./research/) | 调研与决策分析 |
 
 ## 依赖关系图
 
 ```
-                  catcher-core / @eric8810/core (零依赖)
+                  catcher-core / @eric8810/catcher-core (零依赖)
                  /              \
                 /                \
         catcher-http          catcher-ws
-        @eric8810/http         @eric8810/ws (内置 codec)
-        @eric8810/web          @eric8810/napi-http
-        (browser)             @eric8810/napi-ws
+        @eric8810/catcher-http         @eric8810/catcher-ws (内置 codec)
+        @eric8810/catcher-web          @eric8810/catcher-napi-http
+        (browser)             @eric8810/catcher-napi-ws
                               (Node.js native)
              │                      │
         catcher-uniffi        dart:ffi (Flutter)
         (Swift + Kotlin)      catcher_core
 ```
 
-- **Node.js** — TS (`@eric8810/http`) 或 native (`@eric8810/napi-http`)
-- **Browser** — `@eric8810/web` (fetch)
+- **Node.js** — TS (`@eric8810/catcher-http`) 或 native (`@eric8810/catcher-napi-http`)
+- **Browser** — `@eric8810/catcher-web` (fetch)
 - **Rust** — `catcher-http` / `catcher-ws` crate
 - **Flutter** — `catcher_core` (dart:ffi)
 - **Android + iOS** — `catcher-uniffi` (UniFFI → Swift + Kotlin)
@@ -54,13 +55,13 @@ catcher 是一个跨平台网络韧性库，覆盖 HTTP、WebSocket、Codec 三�
 
 ```bash
 # 场景 A: REST API (TS)
-npm i @eric8810/http
+npm i @eric8810/catcher-http
 
 # 场景 B: IM 实时通信 (TS + native)
-npm i @eric8810/http @eric8810/ws @eric8810/napi-http @eric8810/napi-ws
+npm i @eric8810/catcher-http @eric8810/catcher-ws @eric8810/catcher-napi-http @eric8810/catcher-napi-ws
 
 # 场景 C: 浏览器
-npm i @eric8810/web
+npm i @eric8810/catcher-web
 
 # 场景 D: Rust
 cargo add catcher-http catcher-ws

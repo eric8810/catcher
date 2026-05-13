@@ -1,6 +1,6 @@
 # 09 — FFI 接口契约
 
-> 对应源文件：`src/ffi/`，以及 napi-rs / flutter_rust_bridge 绑定包
+> 对应源文件：`crates/catcher-ffi/` (cdylib umbrella)，以及 napi-rs / dart:ffi 绑定包
 
 ---
 
@@ -54,7 +54,7 @@ pub type EventCallback = extern "C" fn(
 
 ---
 
-## HTTP C ABI (`src/ffi/http_ffi.rs`)
+## HTTP C ABI (`catcher-ffi/src/`)
 
 ```rust
 #[no_mangle]
@@ -86,7 +86,7 @@ pub extern "C" fn catcher_http_client_destroy(handle: *mut c_void) { todo!() }
 
 ---
 
-## WebSocket C ABI (`src/ffi/ws_ffi.rs`)
+## WebSocket C ABI (`catcher-ffi/src/`)
 
 ```rust
 #[no_mangle]
@@ -122,7 +122,7 @@ pub extern "C" fn catcher_ws_destroy(handle: *mut c_void) { todo!() }
 
 ---
 
-## Codec C ABI (`src/ffi/codec_ffi.rs`)
+## Codec C ABI (`catcher-ffi/src/`)
 
 ```rust
 #[no_mangle]
@@ -138,7 +138,7 @@ pub extern "C" fn catcher_unpack(
 
 ---
 
-## Network Quality C ABI (`src/ffi/quality_ffi.rs`)
+## Network Quality C ABI (`catcher-ffi/src/`)
 
 ```rust
 #[no_mangle]
@@ -206,20 +206,20 @@ impl JsHttpClient {
 > 决策：dart:ffi ✅, flutter_rust_bridge ❌。详细设计见 [`13-dart-ffi.md`](./13-dart-ffi.md)
 
 ```
-catcher_core/               # pub.dev 包
+catcher_core/               # pub.dev 包 (已发布 v0.1.0)
 ├── pubspec.yaml
 ├── rust/
-│   ├── Cargo.toml            # [lib] crate-type = ["cdylib"]
+│   ├── Cargo.toml            # depends on catcher-ffi
 │   └── src/
-│       └── lib.rs            # re-export catcher-rs ffi symbols
+│       └── lib.rs            # re-export catcher-ffi cdylib symbols
 └── lib/
     ├── catcher_core.dart
     └── src/
-        ├── ffi_bindings.dart # dart:ffi C 函数签名绑定
+        ├── ffi_bindings.dart # dart:ffi C 函数签名绑定 (16 symbols)
         ├── native_loader.dart
         ├── http_client.dart
         ├── ws_client.dart
         └── codec.dart
 ```
 
-Dart 侧通过 `dart:ffi` 直接调用 C ABI，与 napi-rs 共用同一套 `src/ffi/` 接口：
+Dart 侧通过 `dart:ffi` 直接调用 C ABI。Rust 侧由 `catcher-ffi` cdylib umbrella crate 统一导出全部 16 个 C ABI 符号（HTTP + WS + pack/unpack + quality）：

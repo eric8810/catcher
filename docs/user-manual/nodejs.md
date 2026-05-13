@@ -4,7 +4,7 @@
 
 ## 双轨策略
 
-| | `@eric8810/napi-*` (推荐) | `@eric8810/http` (备选) |
+| | `@eric8810/napi-*` (推荐) | `@eric8810/catcher-http` (备选) |
 |--|:--:|:--:|
 | 实现 | Rust via napi-rs | 纯 TypeScript |
 | 网络层 | reqwest (Rust) | axios → node:http |
@@ -17,13 +17,13 @@
 ## 一、Rust Native 版本
 
 ```bash
-npm install @eric8810/napi-http @eric8810/napi-ws
+npm install @eric8810/catcher-napi-http @eric8810/catcher-napi-ws
 ```
 
 ### HTTP
 
 ```javascript
-const { HttpClient } = require('@eric8810/napi-http')
+const { HttpClient } = require('@eric8810/catcher-napi-http')
 
 const client = new HttpClient(JSON.stringify({
   base_url: 'https://api.example.com',
@@ -43,7 +43,7 @@ await client.post('/messages', Buffer.from('hello'), 'text/plain')
 ### WebSocket
 
 ```javascript
-const { WsClient } = require('@eric8810/napi-ws')
+const { WsClient } = require('@eric8810/catcher-napi-ws')
 
 const ws = new WsClient(JSON.stringify({
   urls: ['wss://cn.example.com', 'wss://sg.example.com'],
@@ -63,13 +63,13 @@ ws.close()
 ## 二、TypeScript 版本
 
 ```bash
-npm install @eric8810/http @eric8810/ws
+npm install @eric8810/catcher-http @eric8810/catcher-ws
 ```
 
 ### HTTP
 
 ```typescript
-import { createHttpClient } from '@eric8810/http'
+import { createHttpClient } from '@eric8810/catcher-http'
 
 const client = createHttpClient({
   baseURL: 'https://api.example.com',
@@ -96,7 +96,7 @@ await client.post('/upload', formData, { onUploadProgress: e => console.log(e) }
 ### WebSocket
 
 ```typescript
-import { createResilientWS, pack, decodeWSMessage } from '@eric8810/ws'
+import { createResilientWS, pack, decodeWSMessage } from '@eric8810/catcher-ws'
 
 const ws = createResilientWS({
   url: ['wss://cn.example.com', 'wss://sg.example.com'],
@@ -114,8 +114,8 @@ ws.send(pack({ event: 'message', data: { text: 'hi' } }))
 ### 独立组件
 
 ```typescript
-import { createSharedAgent, clearDnsCache } from '@eric8810/http'
-import { createPriorityQueue, enqueueWithPriority } from '@eric8810/http'
+import { createSharedAgent, clearDnsCache } from '@eric8810/catcher-http'
+import { createPriorityQueue, enqueueWithPriority } from '@eric8810/catcher-http'
 
 // 共享连接池
 const agent = createSharedAgent({ keepAlive: true, dnsCacheTtl: 300 })
@@ -134,9 +134,9 @@ Main process 直接引用，两种包均可用：
 
 ```typescript
 // main.ts — native 版
-import { HttpClient } from '@eric8810/napi-http'
+import { HttpClient } from '@eric8810/catcher-napi-http'
 // 或 TS 版
-import { createHttpClient } from '@eric8810/http'
+import { createHttpClient } from '@eric8810/catcher-http'
 
 ipcMain.handle('api:get', async (_e, url) => {
   return await client.get(url)

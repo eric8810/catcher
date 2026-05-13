@@ -1,7 +1,7 @@
 # 13 — Dart FFI 绑定层架构
 
 > 代码位置：`packages/catcher_core/`
-> 依赖：`packages/catcher-rs/src/ffi/`（C ABI 接口层）
+> Rust FFI：`crates/catcher-ffi/`（cdylib umbrella，桥接 catcher-http + catcher-ws）
 > 目标平台：Android / iOS / macOS / Windows / Linux
 
 ---
@@ -62,14 +62,14 @@
 └──────────────────────────┬──────────────────────────────────┘
                            │ dart:ffi
 ┌──────────────────────────┴──────────────────────────────────┐
-│         libcatcher_core.so / .dylib / .dll (Rust)           │
+│         libcatcher_ffi.so / .dylib / .dll (Rust)           │
 │                                                              │
-│  packages/catcher-rs/src/ffi/                                 │
-│  ├── types_ffi.rs       # FfiResult, FfiString, FfiBytes     │
-│  ├── http_ffi.rs        # catcher_http_*                     │
-│  ├── ws_ffi.rs          # catcher_ws_*                       │
-│  ├── codec_ffi.rs       # catcher_pack / catcher_unpack      │
-│  └── quality_ffi.rs     # catcher_evaluate_quality           │
+│  crates/catcher-ffi/src/                                     │
+│  ├── types.rs           # FfiResult, FfiString, FfiBytes     │
+│  ├── http.rs            # catcher_http_*                     │
+│  ├── ws.rs              # catcher_ws_*                       │
+│  ├── codec.rs           # catcher_pack / catcher_unpack      │
+│  └── quality.rs         # catcher_evaluate_quality           │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -123,16 +123,16 @@ import 'dart:io';
 
 DynamicLibrary loadCatcherLibrary() {
   if (Platform.isAndroid) {
-    return DynamicLibrary.open('libcatcher_core.so');
+    return DynamicLibrary.open('libcatcher_ffi.so');
   } else if (Platform.isIOS) {
     // iOS: static linking via Native Assets
     return DynamicLibrary.process();
   } else if (Platform.isMacOS) {
-    return DynamicLibrary.open('libcatcher_core.dylib');
+    return DynamicLibrary.open('libcatcher_ffi.dylib');
   } else if (Platform.isWindows) {
-    return DynamicLibrary.open('catcher_core.dll');
+    return DynamicLibrary.open('catcher_ffi.dll');
   } else if (Platform.isLinux) {
-    return DynamicLibrary.open('libcatcher_core.so');
+    return DynamicLibrary.open('libcatcher_ffi.so');
   }
   throw UnsupportedError('Unsupported platform: ${Platform.operatingSystem}');
 }
@@ -357,7 +357,7 @@ packages/catcher_core/
 name: catcher_core
 version: 0.1.0
 description: Resilient HTTP/WebSocket client backed by Rust core for Flutter
-repository: https://github.com/xxx/catcher
+repository: https://github.com/eric8810/catcher
 platforms:
   android:
   ios:
@@ -374,30 +374,36 @@ environment:
 
 ## Rust 动态库 crate
 
-`rust/Cargo.toml` 只需将 catcher-rs 的 ffi 符号编译为 cdylib：
+`catcher-ffi` 是 cdylib umbrella crate，桥接 `catcher-http` + `catcher-ws`，导出全部 16 个 C ABI 符号：
 
 ```toml
+# crates/catcher-ffi/Cargo.toml
 [package]
-name = "catcher_core_ffi"
+name = "catcher-ffi"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
 crate-type = ["cdylib"]
-name = "catcher_core"
 
 [dependencies]
-catcher-rs = { path = "../../catcher-rs" }
+catcher-http = { path = "../catcher-http" }
+catcher-ws = { path = "../catcher-ws" }
+catcher-core = { path = "../catcher-core" }
+tokio = { version = "1", features = ["rt-multi-thread"] }
 ```
 
-`rust/src/lib.rs` — 重新导出所有 ffi 符号：
+`crates/catcher-ffi/src/lib.rs` — 使用 `block_on_aux_thread` 避免 tokio re-entrance：
 
 ```rust
-// Re-export all C ABI symbols so they appear in the cdylib
-pub use catcher_rs::ffi::codec_ffi::*;
-pub use catcher_rs::ffi::http_ffi::*;
-pub use catcher_rs::ffi::ws_ffi::*;
-pub use catcher_rs::ffi::quality_ffi::*;
+// All 16 C ABI symbols exported:
+// - catcher_http_client_create/destroy
+// - catcher_http_get/post/put/delete/patch
+// - catcher_ws_create/destroy
+// - catcher_ws_send_text/send_binary/close
+// - catcher_pack/catcher_unpack
+// - catcher_evaluate_quality
+// - catcher_free_result
 ```
 
 ---
@@ -411,7 +417,7 @@ flutter create --template=package_ffi catcher_core
 编译流程：
 
 ```
-1. cargo build --release  →  rust/target/<triple>/release/libcatcher_core.so
+1. cargo build --release  →  target/<triple>/release/libcatcher_ffi.so
 2. Flutter native_assets   →  自动打包到 app bundle
 3. dart:ffi 加载           →  DynamicLibrary.process() (iOS) / DynamicLibrary.open() (Android)
 ```
@@ -420,13 +426,13 @@ flutter create --template=package_ffi catcher_core
 
 | 平台 | Rust target | 产物 |
 |------|------------|------|
-| Android arm64 | `aarch64-linux-android` | `libcatcher_core.so` |
-| Android x86_64 | `x86_64-linux-android` | `libcatcher_core.so` |
+| Android arm64 | `aarch64-linux-android` | `libcatcher_ffi.so` |
+| Android x86_64 | `x86_64-linux-android` | `libcatcher_ffi.so` |
 | iOS arm64 | `aarch64-apple-ios` | static (嵌入) |
 | iOS simulator | `aarch64-apple-ios-sim` | static (嵌入) |
-| macOS arm64 | `aarch64-apple-darwin` | `libcatcher_core.dylib` |
-| Windows x86_64 | `x86_64-pc-windows-msvc` | `catcher_core.dll` |
-| Linux x86_64 | `x86_64-unknown-linux-gnu` | `libcatcher_core.so` |
+| macOS arm64 | `aarch64-apple-darwin` | `libcatcher_ffi.dylib` |
+| Windows x86_64 | `x86_64-pc-windows-msvc` | `catcher_ffi.dll` |
+| Linux x86_64 | `x86_64-unknown-linux-gnu` | `libcatcher_ffi.so` |
 
 ---
 
@@ -489,8 +495,8 @@ void main() async {
 | 层级 | 框架 | 内容 |
 |------|------|------|
 | Rust 核心 | `cargo test` | 已有 96 tests，保持不变 |
-| Dart 单元 | `flutter test` | ffi_bindings 加载 + codec roundtrip + 模型序列化 |
-| Dart 集成 | `flutter test --platform=linux` | 加载真实 .so，HTTP GET 本地 mock server |
+| Dart 单元 | `dart test` | 20/20 通过 — ffi_bindings 加载 + codec roundtrip + 模型序列化 |
+| Dart 集成 | `dart test` | 8/8 通过 — 加载真实 .so，HTTP GET httpbin.org |
 | Flutter 集成 | `integration_test` | 完整 Flutter app 中加载 Rust 核心 |
 
 ---
