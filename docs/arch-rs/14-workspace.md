@@ -1,7 +1,7 @@
-# 14 — Workspace 结构 (v0.2 最终形态)
+# 14 — Workspace 结构
 
 > 代码位置：`packages/`
-> 四个独立 crate，无 umbrella
+> 4 个 lib crate + 3 个 binding crate
 
 ---
 
@@ -9,7 +9,7 @@
 
 | 原则 | 说明 |
 |------|------|
-| **按协议分层** | HTTP / WS / Codec 各自独立 crate，互不依赖 |
+| **按协议分层** | HTTP / WS 各自独立 crate，互不依赖 |
 | **最小依赖** | `catcher-core` 零 I/O，`catcher-ws` 不带 reqwest |
 | **直接引用** | 调用方按需 depend 子 crate，无 umbrella 中间层 |
 
@@ -17,25 +17,24 @@
 
 ```
 packages/
-├── Cargo.toml                          # [workspace] members: core, http, ws, codec
+├── Cargo.toml                          # [workspace] 7 members
 │
 ├── catcher-core/                       # 共享核心（零 I/O）
 │   ├── Cargo.toml                      # deps: thiserror, serde, serde_json
 │   └── src/
 │       ├── lib.rs
-│       ├── error.rs                    # CatcherError, ErrorCategory
-│       ├── ffi_types.rs                # FfiResult, FfiString, FfiBytes, EventCallback
+│       ├── error.rs
+│       ├── ffi_types.rs
 │       └── types/
-│           ├── mod.rs
-│           ├── resilience.rs           # RetryConfig, CircuitBreakerConfig, BackoffKind
-│           ├── observability.rs        # NetworkQualityLevel, RttSnapshot, Priority, ConnectionType
-│           └── scheduler.rs            # QueueConfig, ConcurrencyMode
+│           ├── resilience.rs
+│           ├── observability.rs
+│           └── scheduler.rs
 │
 ├── catcher-http/                       # HTTP 客户端
 │   ├── Cargo.toml                      # deps: catcher-core, reqwest, reqwest-middleware, reqwest-retry, backon
 │   └── src/
 │       ├── lib.rs
-│       ├── types/http.rs               # HttpClientConfig, HttpRequest, HttpResponse, HttpMethod
+│       ├── types/http.rs
 │       ├── transport/                  # http_client, tls, dns
 │       ├── resilience/                 # retry, circuit_breaker, backoff, timeout
 │       ├── scheduler/                  # priority_queue, concurrency
@@ -46,68 +45,88 @@ packages/
 │   ├── Cargo.toml                      # deps: catcher-core, tokio-tungstenite, futures-util, backon
 │   └── src/
 │       ├── lib.rs
-│       ├── types/ws.rs                 # WsClientConfig, WsState, WsEvent, ReconnectConfig, etc.
-│       ├── transport/ws_client.rs      # WsTransport, WsHandle
+│       ├── codec.rs                    # msgpack pack/unpack (内置)
+│       ├── types/ws.rs
+│       ├── transport/ws_client.rs
 │       ├── ws/                         # reconnect, heartbeat, multi_endpoint, compression
-│       └── ffi/ws_ffi.rs               # WS C ABI
+│       └── ffi/ws_ffi.rs
 │
-│   ├── Cargo.toml                      # deps: catcher-core, rmp-serde, rmpv
-│   └── src/
-│       ├── lib.rs
-│       ├── msgpack.rs                  # pack / unpack / unpack_value
-│       └── ffi/mod.rs                  # Codec C ABI
+├── catcher-napi-http/                  # Node.js napi-rs HTTP
+│   ├── Cargo.toml                      # deps: catcher-http, napi, napi-derive
+│   ├── build.rs
+│   ├── src/lib.rs
+│   ├── index.js
+│   └── index.d.ts
 │
-├── catcher-rs-napi/                    # ❌ 已删除（拆为三个独立包）
+├── catcher-napi-ws/                    # Node.js napi-rs WS
+│   ├── Cargo.toml                      # deps: catcher-ws, napi, napi-derive
+│   ├── build.rs
+│   ├── src/lib.rs
+│   ├── index.js
+│   └── index.d.ts
 │
-├── catcher-napi-http/                  # Node.js napi-rs — HTTP only
-│   └── Cargo.toml                      # deps: catcher-http
+├── catcher-uniffi/                     # UniFFI → Swift + Kotlin
+│   ├── Cargo.toml                      # deps: catcher-http, catcher-ws, uniffi
+│   ├── build.rs
+│   └── src/lib.rs                      # #[uniffi::export]
 │
-│   └── Cargo.toml                      # deps: catcher-ws
-│
-├── catcher_core/                       # Dart FFI binding (dart:ffi)
-│
-└── catcher-tus/                        # 🔜 TUS 客户端（规划中）
+└── catcher_core/                       # pub.dev 包 (dart:ffi)
+    ├── pubspec.yaml
+    └── lib/
+        ├── catcher_core.dart
+        └── src/
+            ├── native_loader.dart
+            ├── ffi_bindings.dart
+            └── http_client.dart
 ```
 
 ## 依赖关系图
 
 ```
                 catcher-core (零 I/O)
-               /         |          \
-              /          |           \
+               /              \
+              /                \
+      catcher-http          catcher-ws
+       |       |             |       |
+  napi-http  uniffi     napi-ws   uniffi
+ (Node.js)  (Swift+     (Node.js) (Swift+
+            Kotlin)                Kotlin)
+       |
+  dart:ffi (Flutter)
+  catcher_core
 ```
-
-## 各 crate 变更记录
-
-| crate | 来源 | 变更 |
-|-------|------|------|
-| `catcher-core` | 新建 | 从原 catcher-rs 移入 error.rs, types/{resilience, observability, scheduler}.rs, ffi/types_ffi.rs |
-| `catcher-http` | 新建 | 从原 catcher-rs 移入 types/http.rs, transport/{http_client, tls, dns}.rs, resilience/, scheduler/, observability/, ffi/{http, quality}_ffi.rs |
-| `catcher-ws` | 新建 | 从原 catcher-rs 移入 types/ws.rs, transport/ws_client.rs, ws/, ffi/ws_ffi.rs |
-| `catcher-rs` | **已删除** | 原单 crate 和 umbrella 均不再保留 |
 
 ## FFI 绑定映射
 
-| 绑定 | 目录 | 依赖 |
-|------|------|------|
-| Node.js HTTP | `catcher-napi-http/` | `catcher-http` |
+| 绑定 | 目录 | 依赖 | 状态 |
+|------|------|------|------|
+| Node.js HTTP | `catcher-napi-http/` | `catcher-http` | ✅ |
+| Node.js WS | `catcher-napi-ws/` | `catcher-ws` | ✅ |
+| Swift + Kotlin | `catcher-uniffi/` | `catcher-http`, `catcher-ws` | ✅ |
+| Flutter | `catcher_core/` | C ABI → dart:ffi | ✅ |
 
-## 按需安装示例
+## 按需安装
 
 ```toml
-# 只需要 HTTP 客户端
+# Rust — HTTP
 [dependencies]
 catcher-http = "0.1"
 
-# 只需要 WebSocket
+# Rust — WebSocket (codec 内置)
 [dependencies]
 catcher-ws = "0.1"
+```
 
-# 只需要编解码
-[dependencies]
+```bash
+# Node.js — native
+npm i @catcher/napi-http @catcher/napi-ws
 
-# 全要
-[dependencies]
-catcher-http = "0.1"
-catcher-ws = "0.1"
+# Node.js — TS
+npm i @catcher/http @catcher/ws
+
+# Browser
+npm i @catcher/web
+
+# Flutter
+flutter pub add catcher_core
 ```

@@ -91,17 +91,15 @@ catcher-ws/
 
 依赖：`catcher-core`, `tokio-tungstenite`, `futures-util`, `backon`
 
+## catcher-uniffi (UniFFI bindings)
 
 ```
-├── Cargo.toml
+catcher-uniffi/
+├── Cargo.toml                      # deps: catcher-http, catcher-ws, uniffi
+├── build.rs
 └── src/
-    ├── lib.rs
-    ├── msgpack.rs                  # pack() / unpack()
-    └── ffi/
-        └── codec_ffi.rs            # Codec C ABI
+    └── lib.rs                      # #[uniffi::export] — 自动生成 Swift + Kotlin
 ```
-
-依赖：`catcher-core`, `rmp-serde`, `rmpv`
 
 ## bindings
 
@@ -125,16 +123,18 @@ packages/
 │   ├── index.js
 │   └── index.d.ts
 │
-│   ├── package.json                 # @catcher/napi-codec
+├── catcher-uniffi/                  # UniFFI crate → Swift + Kotlin
+│   ├── Cargo.toml
 │   ├── build.rs
-│   ├── src/
-│   │   └── lib.rs                   # pack(), unpack()
-│   ├── index.js
-│   └── index.d.ts
+│   └── src/
+│       └── lib.rs
 │
 └── catcher_core/                    # pub.dev 包 (dart:ffi)
     ├── pubspec.yaml
-    ├── rust/
     └── lib/
-        └── catcher_core.dart
+        ├── catcher_core.dart
+        └── src/
+            ├── native_loader.dart
+            ├── ffi_bindings.dart
+            └── http_client.dart
 ```

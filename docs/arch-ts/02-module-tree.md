@@ -46,3 +46,15 @@ catcher-ws-ts/
         ├── reconnect.ts
         └── multi-endpoint.ts
 ```
+
+## @catcher/web
+
+```
+catcher-web/
+├── package.json
+├── tsconfig.json
+└── src/
+    ├── index.ts
+    └── http/
+        └── client.ts               # fetch-based HTTP client
+```

@@ -6,23 +6,26 @@
 
 ```
             @catcher/core (zero deps)
-            /            \
-           /              \
-  @catcher/http      @catcher/ws
-                     (内置 msgpack)
+            /         |         \
+           /          |          \
+  @catcher/http  @catcher/ws  @catcher/web
+  (axios, Node)  (ws, msgpack) (fetch, Browser)
 ```
 
 ## 按场景安装
 
 ```bash
-# REST API
+# REST API (Node.js)
 npm i @catcher/http
 
-# IM 实时通信
+# IM + 实时通信 (Node.js)
 npm i @catcher/http @catcher/ws
 
-# 文件上传
-npm i @catcher/http
+# 浏览器
+npm i @catcher/web
+
+# Node.js native (Rust via napi-rs)
+npm i @catcher/napi-http @catcher/napi-ws
 ```
 
 ## 使用方式

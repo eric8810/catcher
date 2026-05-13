@@ -1,7 +1,7 @@
 # catcher-ts 架构文档
 
-> TypeScript 网络韧性库 — 三个独立 npm 包
-> 代码位置：`packages/catcher-*-ts/`
+> TypeScript 网络韧性库 — 四个独立 npm 包（+ 一个 Rust native 绑定包）
+> 代码位置：`packages/catcher-*-ts/` + `packages/catcher-web/`
 
 ---
 
@@ -12,6 +12,7 @@
 | `@catcher/core` | `catcher-core-ts/` | 纯类型定义 | 无 |
 | `@catcher/http` | `catcher-http-ts/` | HTTP 客户端 + Agent + 队列 | axios (peer), cockatiel, p-retry, p-queue, cacheable-lookup |
 | `@catcher/ws` | `catcher-ws-ts/` | WebSocket 客户端 + msgpack 编解码 | ws (peer), msgpackr (optional peer) |
+| `@catcher/web` | `catcher-web/` | 浏览器 HTTP 客户端（fetch-based） | cockatiel, p-retry, p-queue |
 
 ## 文档索引
 
@@ -33,5 +34,6 @@
 | TS 包 | Rust crate |
 |-------|-----------|
 | `@catcher/core` | `catcher-core` |
-| `@catcher/http` | `catcher-http` |
-| `@catcher/ws` | `catcher-ws`（内置 codec） |
+| `@catcher/http` | `catcher-http` / `catcher-napi-http` (napi-rs) |
+| `@catcher/ws` | `catcher-ws` / `catcher-napi-ws` (napi-rs) |
+| `@catcher/web` | — (纯 TS, fetch-based) |
