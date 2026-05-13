@@ -1,8 +1,7 @@
 //! HTTP C ABI — create / get / post / execute / destroy
-#![allow(clippy::not_unsafe_ptr_arg_deref)]
 
 use std::collections::HashMap;
-use std::ffi::{c_char, c_void, CStr};
+use std::ffi::{c_char, c_void, CStr, CString};
 use std::sync::{Arc, Mutex};
 
 use crate::transport::http_client::HttpTransport;
@@ -17,12 +16,34 @@ fn handles() -> std::sync::MutexGuard<'static, Option<HashMap<usize, Arc<HttpTra
     HANDLES.lock().unwrap()
 }
 
+/// Invoke an FFI event callback with ownership-transferred CStrings.
+///
+/// Both strings are leaked via `CString::into_raw()`. The Dart side MUST
+/// call `catcher_free_event_data()` after reading to reclaim memory.
+fn invoke_http_callback(
+    callback: EventCallback,
+    event_name: &str,
+    json: String,
+    user_data: usize,
+) {
+    let c_event = CString::new(event_name).unwrap();
+    let c_json = CString::new(json).unwrap();
+    let json_len = c_json.as_bytes().len();
+
+    callback(
+        c_event.into_raw(),
+        c_json.into_raw() as *const u8,
+        json_len,
+        user_data as *mut c_void,
+    );
+}
+
 #[no_mangle]
-pub extern "C" fn catcher_http_client_create(config_json: *const c_char) -> *mut c_void {
+pub unsafe extern "C" fn catcher_http_client_create(config_json: *const c_char) -> *mut c_void {
     if config_json.is_null() {
         return std::ptr::null_mut();
     }
-    let json = unsafe { CStr::from_ptr(config_json) };
+    let json = CStr::from_ptr(config_json);
     let config: HttpClientConfig = match serde_json::from_str(json.to_str().unwrap_or("")) {
         Ok(c) => c,
         Err(_) => return std::ptr::null_mut(),
@@ -39,7 +60,7 @@ pub extern "C" fn catcher_http_client_create(config_json: *const c_char) -> *mut
 }
 
 #[no_mangle]
-pub extern "C" fn catcher_http_get(
+pub unsafe extern "C" fn catcher_http_get(
     handle: *mut c_void,
     url: FfiString,
     callback: EventCallback,
@@ -48,12 +69,10 @@ pub extern "C" fn catcher_http_get(
     if handle.is_null() {
         return;
     }
-    let id = unsafe { *(handle as *const usize) };
-    let url_str = unsafe {
-        std::str::from_utf8(std::slice::from_raw_parts(url.data as *const u8, url.len))
-            .unwrap_or("/")
-    }
-    .to_string();
+    let id = *(handle as *const usize);
+    let url_str = std::str::from_utf8(std::slice::from_raw_parts(url.data as *const u8, url.len))
+        .unwrap_or("/")
+        .to_string();
     let ud = user_data as usize;
 
     let transport = handles().as_ref().and_then(|m| m.get(&id)).cloned();
@@ -64,19 +83,13 @@ pub extern "C" fn catcher_http_get(
                 Ok(resp) => serde_json::to_string(&resp).unwrap_or_default(),
                 Err(e) => format!("{{\"error\":\"{e}\"}}"),
             };
-            let c_event = std::ffi::CString::new("http_result").unwrap();
-            callback(
-                c_event.as_ptr(),
-                json.as_ptr(),
-                json.len(),
-                ud as *mut c_void,
-            );
+            invoke_http_callback(callback, "http_result", json, ud);
         });
     }
 }
 
 #[no_mangle]
-pub extern "C" fn catcher_http_post(
+pub unsafe extern "C" fn catcher_http_post(
     handle: *mut c_void,
     url: FfiString,
     body: *const u8,
@@ -88,20 +101,16 @@ pub extern "C" fn catcher_http_post(
     if handle.is_null() {
         return;
     }
-    let id = unsafe { *(handle as *const usize) };
-    let url_str = unsafe {
-        std::str::from_utf8(std::slice::from_raw_parts(url.data as *const u8, url.len))
-            .unwrap_or("/")
-    }
-    .to_string();
-    let body_data = unsafe { std::slice::from_raw_parts(body, body_len) }.to_vec();
-    let ct_str = unsafe {
-        std::str::from_utf8(std::slice::from_raw_parts(
-            content_type.data as *const u8,
-            content_type.len,
-        ))
-        .unwrap_or("application/octet-stream")
-    }
+    let id = *(handle as *const usize);
+    let url_str = std::str::from_utf8(std::slice::from_raw_parts(url.data as *const u8, url.len))
+        .unwrap_or("/")
+        .to_string();
+    let body_data = std::slice::from_raw_parts(body, body_len).to_vec();
+    let ct_str = std::str::from_utf8(std::slice::from_raw_parts(
+        content_type.data as *const u8,
+        content_type.len,
+    ))
+    .unwrap_or("application/octet-stream")
     .to_string();
     let ud = user_data as usize;
 
@@ -113,21 +122,15 @@ pub extern "C" fn catcher_http_post(
                 Ok(resp) => serde_json::to_string(&resp).unwrap_or_default(),
                 Err(e) => format!("{{\"error\":\"{e}\"}}"),
             };
-            let c_event = std::ffi::CString::new("http_result").unwrap();
-            callback(
-                c_event.as_ptr(),
-                json.as_ptr(),
-                json.len(),
-                ud as *mut c_void,
-            );
+            invoke_http_callback(callback, "http_result", json, ud);
         });
     }
 }
 
-/// Generic HTTP request — accepts method as a string ("GET", "POST", "PUT", "DELETE", "PATCH").
+/// Generic HTTP request — accepts method as a string (\"GET\", \"POST\", \"PUT\", \"DELETE\", \"PATCH\").
 /// This is the preferred entry point for FFI consumers that need all HTTP methods.
 #[no_mangle]
-pub extern "C" fn catcher_http_execute(
+pub unsafe extern "C" fn catcher_http_execute(
     handle: *mut c_void,
     method: FfiString,
     url: FfiString,
@@ -140,31 +143,28 @@ pub extern "C" fn catcher_http_execute(
     if handle.is_null() {
         return;
     }
-    let id = unsafe { *(handle as *const usize) };
+    let id = *(handle as *const usize);
 
-    let method_str = unsafe {
-        std::str::from_utf8(std::slice::from_raw_parts(method.data as *const u8, method.len))
-            .unwrap_or("GET")
-    }
+    let method_str = std::str::from_utf8(std::slice::from_raw_parts(
+        method.data as *const u8,
+        method.len,
+    ))
+    .unwrap_or("GET")
     .to_string();
-    let url_str = unsafe {
-        std::str::from_utf8(std::slice::from_raw_parts(url.data as *const u8, url.len))
-            .unwrap_or("/")
-    }
-    .to_string();
+    let url_str = std::str::from_utf8(std::slice::from_raw_parts(url.data as *const u8, url.len))
+        .unwrap_or("/")
+        .to_string();
     let body_data = if !body.is_null() && body_len > 0 {
-        Some(unsafe { std::slice::from_raw_parts(body, body_len) }.to_vec())
+        Some(std::slice::from_raw_parts(body, body_len).to_vec())
     } else {
         None
     };
     let ct_str = if !content_type.data.is_null() && content_type.len > 0 {
         Some(
-            unsafe {
-                std::str::from_utf8(std::slice::from_raw_parts(
-                    content_type.data as *const u8,
-                    content_type.len,
-                ))
-            }
+            std::str::from_utf8(std::slice::from_raw_parts(
+                content_type.data as *const u8,
+                content_type.len,
+            ))
             .unwrap_or("application/json")
             .to_string(),
         )
@@ -198,25 +198,17 @@ pub extern "C" fn catcher_http_execute(
                 Ok(resp) => serde_json::to_string(&resp).unwrap_or_default(),
                 Err(e) => format!("{{\"error\":\"{e}\"}}"),
             };
-            let c_event = std::ffi::CString::new("http_result").unwrap();
-            callback(
-                c_event.as_ptr(),
-                json.as_ptr(),
-                json.len(),
-                ud as *mut c_void,
-            );
+            invoke_http_callback(callback, "http_result", json, ud);
         });
     }
 }
 
 #[no_mangle]
-pub extern "C" fn catcher_http_client_destroy(handle: *mut c_void) {
+pub unsafe extern "C" fn catcher_http_client_destroy(handle: *mut c_void) {
     if handle.is_null() {
         return;
     }
-    let id = unsafe { *(handle as *const usize) };
+    let id = *(handle as *const usize);
     handles().as_mut().map(|m| m.remove(&id));
-    unsafe {
-        drop(Box::from_raw(handle as *mut usize));
-    }
+    drop(Box::from_raw(handle as *mut usize));
 }

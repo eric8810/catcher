@@ -61,6 +61,26 @@ impl Drop for FfiResult {
     }
 }
 
+/// Free event data strings allocated by Rust for the FFI callback bridge.
+///
+/// Rust calls `CString::into_raw()` to transfer ownership of the event type
+/// and event data strings to the Dart callback. Dart must call this function
+/// after reading the data to prevent memory leaks.
+#[no_mangle]
+pub extern "C" fn catcher_free_event_data(
+    event_type: *mut c_char,
+    event_data: *mut c_char,
+) {
+    unsafe {
+        if !event_type.is_null() {
+            let _ = std::ffi::CString::from_raw(event_type);
+        }
+        if !event_data.is_null() {
+            let _ = std::ffi::CString::from_raw(event_data);
+        }
+    }
+}
+
 // Safety: FfiResult, FfiString, FfiBytes are all #[repr(C)] and contain
 // only FFI-safe primitive types or function pointers.
 unsafe impl Send for FfiResult {}

@@ -1,8 +1,7 @@
 //! WebSocket C ABI — create / send / close / destroy
-#![allow(clippy::not_unsafe_ptr_arg_deref)]
 
 use std::collections::HashMap;
-use std::ffi::{c_char, c_void, CStr};
+use std::ffi::{c_char, c_void, CStr, CString};
 use std::sync::{Arc, Mutex};
 
 use crate::transport::ws_client::{WsHandle, WsTransport};
@@ -17,8 +16,32 @@ fn ws_handles() -> std::sync::MutexGuard<'static, Option<HashMap<usize, Arc<WsHa
     WS_HANDLES.lock().unwrap()
 }
 
+/// Invoke an FFI event callback with ownership-transferred CStrings.
+///
+/// Both `c_event` and `json` are converted to `CString` and leaked via
+/// `into_raw()`. The Dart side MUST call `catcher_free_event_data()`
+/// after reading the data to reclaim the memory.
+fn invoke_event_callback(
+    cb: EventCallback,
+    event_name: &str,
+    json: String,
+    user_data: usize,
+) {
+    let c_event = CString::new(event_name).unwrap();
+    let c_json = CString::new(json).unwrap();
+    let json_len = c_json.as_bytes().len();
+
+    // into_raw() leaks ownership — Dart must call catcher_free_event_data
+    cb(
+        c_event.into_raw(),
+        c_json.into_raw() as *const u8,
+        json_len,
+        user_data as *mut c_void,
+    );
+}
+
 #[no_mangle]
-pub extern "C" fn catcher_ws_create(
+pub unsafe extern "C" fn catcher_ws_create(
     config_json: *const c_char,
     event_callback: EventCallback,
     user_data: *mut c_void,
@@ -26,7 +49,7 @@ pub extern "C" fn catcher_ws_create(
     if config_json.is_null() {
         return std::ptr::null_mut();
     }
-    let json = unsafe { CStr::from_ptr(config_json) };
+    let json = CStr::from_ptr(config_json);
     let config: WsClientConfig = match serde_json::from_str(json.to_str().unwrap_or("")) {
         Ok(c) => c,
         Err(_) => return std::ptr::null_mut(),
@@ -49,27 +72,14 @@ pub extern "C" fn catcher_ws_create(
                     .get_or_insert_with(HashMap::new)
                     .insert(id, ws_handle);
 
-                // Forward events directly (not behind lock)
                 while let Some(event) = rx.recv().await {
                     let json = serde_json::to_string(&event).unwrap_or_default();
-                    let c_event = std::ffi::CString::new("ws_event").unwrap();
-                    cb(
-                        c_event.as_ptr(),
-                        json.as_ptr(),
-                        json.len(),
-                        ud as *mut c_void,
-                    );
+                    invoke_event_callback(cb, "ws_event", json, ud);
                 }
             }
             Err(e) => {
                 let json = format!("{{\"error\":\"{e}\"}}");
-                let c_event = std::ffi::CString::new("ws_error").unwrap();
-                cb(
-                    c_event.as_ptr(),
-                    json.as_ptr(),
-                    json.len(),
-                    ud as *mut c_void,
-                );
+                invoke_event_callback(cb, "ws_error", json, ud);
             }
         }
     });
@@ -78,18 +88,16 @@ pub extern "C" fn catcher_ws_create(
 }
 
 #[no_mangle]
-pub extern "C" fn catcher_ws_send_text(handle: *mut c_void, message: FfiString) -> FfiResult {
+pub unsafe extern "C" fn catcher_ws_send_text(handle: *mut c_void, message: FfiString) -> FfiResult {
     if handle.is_null() {
         return FfiResult::error(1, "null handle");
     }
-    let id = unsafe { *(handle as *const usize) };
-    let text = unsafe {
-        std::str::from_utf8(std::slice::from_raw_parts(
-            message.data as *const u8,
-            message.len,
-        ))
-        .unwrap_or("")
-    };
+    let id = *(handle as *const usize);
+    let text = std::str::from_utf8(std::slice::from_raw_parts(
+        message.data as *const u8,
+        message.len,
+    ))
+    .unwrap_or("");
     let handles = ws_handles();
     if let Some(ref map) = *handles {
         if let Some(h) = map.get(&id) {
@@ -106,7 +114,7 @@ pub extern "C" fn catcher_ws_send_text(handle: *mut c_void, message: FfiString) 
 }
 
 #[no_mangle]
-pub extern "C" fn catcher_ws_send_binary(
+pub unsafe extern "C" fn catcher_ws_send_binary(
     handle: *mut c_void,
     data: *const u8,
     len: usize,
@@ -114,8 +122,8 @@ pub extern "C" fn catcher_ws_send_binary(
     if handle.is_null() {
         return FfiResult::error(1, "null handle");
     }
-    let id = unsafe { *(handle as *const usize) };
-    let bytes = unsafe { std::slice::from_raw_parts(data, len) };
+    let id = *(handle as *const usize);
+    let bytes = std::slice::from_raw_parts(data, len);
     let handles = ws_handles();
     if let Some(ref map) = *handles {
         if let Some(h) = map.get(&id) {
@@ -132,18 +140,16 @@ pub extern "C" fn catcher_ws_send_binary(
 }
 
 #[no_mangle]
-pub extern "C" fn catcher_ws_close(handle: *mut c_void, code: u16, reason: FfiString) {
+pub unsafe extern "C" fn catcher_ws_close(handle: *mut c_void, code: u16, reason: FfiString) {
     if handle.is_null() {
         return;
     }
-    let id = unsafe { *(handle as *const usize) };
-    let reason_str = unsafe {
-        std::str::from_utf8(std::slice::from_raw_parts(
-            reason.data as *const u8,
-            reason.len,
-        ))
-        .unwrap_or("normal")
-    };
+    let id = *(handle as *const usize);
+    let reason_str = std::str::from_utf8(std::slice::from_raw_parts(
+        reason.data as *const u8,
+        reason.len,
+    ))
+    .unwrap_or("normal");
     let handles = ws_handles();
     if let Some(ref map) = *handles {
         if let Some(h) = map.get(&id) {
@@ -153,15 +159,13 @@ pub extern "C" fn catcher_ws_close(handle: *mut c_void, code: u16, reason: FfiSt
 }
 
 #[no_mangle]
-pub extern "C" fn catcher_ws_destroy(handle: *mut c_void) {
+pub unsafe extern "C" fn catcher_ws_destroy(handle: *mut c_void) {
     if handle.is_null() {
         return;
     }
-    let id = unsafe { *(handle as *const usize) };
+    let id = *(handle as *const usize);
     ws_handles().as_mut().map(|m| m.remove(&id));
-    unsafe {
-        drop(Box::from_raw(handle as *mut usize));
-    }
+    drop(Box::from_raw(handle as *mut usize));
 }
 
 /// Free an FfiResult returned by WS FFI functions.
@@ -171,8 +175,5 @@ pub extern "C" fn catcher_ws_destroy(handle: *mut c_void) {
 /// the error_message CString automatically.
 #[no_mangle]
 pub extern "C" fn catcher_free_result(result: FfiResult) {
-    // Just take ownership and let Drop handle cleanup.
-    // Do NOT manually free error_message here — Drop impl already does it,
-    // and doing both would be a double-free.
     drop(result);
 }

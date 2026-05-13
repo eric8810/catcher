@@ -10,7 +10,7 @@
 //!   uniffi-bindgen generate --library ../target/release/libcatcher_uniffi.so --language swift --out-dir generated/swift
 //!   uniffi-bindgen generate --library ../target/release/libcatcher_uniffi.so --language kotlin --out-dir generated/kotlin
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use catcher_http::{
     types::http::{HttpClientConfig, HttpMethod, HttpRequest},
@@ -22,6 +22,19 @@ use catcher_ws::{
     types::ws::WsClientConfig,
     WsHandle,
 };
+
+/// Global tokio runtime for the UniFFI crate.
+/// UniFFI 0.28 does not support async constructors, so we use block_on()
+/// to bridge async Rust work into sync foreign-language calls.
+fn runtime() -> &'static tokio::runtime::Runtime {
+    static RT: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
+    RT.get_or_init(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("Failed to create tokio runtime for catcher-uniffi")
+    })
+}
 
 // ═══════════════════════════════════════════════════════════════
 // Error type
@@ -73,15 +86,17 @@ impl HttpClient {
 
     /// GET request
     #[uniffi::method]
-    pub async fn get(&self, url: String) -> Result<HttpResponseDto, CatcherError> {
-        let resp = self.inner.execute(HttpRequest {
-            method: HttpMethod::GET,
-            url,
-            headers: Default::default(),
-            body: None,
-            content_type: None,
-            timeout_ms: None,
-        }).await.map_err(|e| CatcherError::Network(e.to_string()))?;
+    pub fn get(&self, url: String) -> Result<HttpResponseDto, CatcherError> {
+        let resp = runtime().block_on(
+            self.inner.execute(HttpRequest {
+                method: HttpMethod::GET,
+                url,
+                headers: Default::default(),
+                body: None,
+                content_type: None,
+                timeout_ms: None,
+            })
+        ).map_err(|e| CatcherError::Network(e.to_string()))?;
 
         Ok(HttpResponseDto {
             status: resp.status,
@@ -92,20 +107,22 @@ impl HttpClient {
 
     /// POST request
     #[uniffi::method]
-    pub async fn post(
+    pub fn post(
         &self,
         url: String,
         body: Vec<u8>,
         content_type: Option<String>,
     ) -> Result<HttpResponseDto, CatcherError> {
-        let resp = self.inner.execute(HttpRequest {
-            method: HttpMethod::POST,
-            url,
-            headers: Default::default(),
-            body: Some(body),
-            content_type,
-            timeout_ms: None,
-        }).await.map_err(|e| CatcherError::Network(e.to_string()))?;
+        let resp = runtime().block_on(
+            self.inner.execute(HttpRequest {
+                method: HttpMethod::POST,
+                url,
+                headers: Default::default(),
+                body: Some(body),
+                content_type,
+                timeout_ms: None,
+            })
+        ).map_err(|e| CatcherError::Network(e.to_string()))?;
 
         Ok(HttpResponseDto {
             status: resp.status,
@@ -116,20 +133,22 @@ impl HttpClient {
 
     /// PUT request
     #[uniffi::method]
-    pub async fn put(
+    pub fn put(
         &self,
         url: String,
         body: Vec<u8>,
         content_type: Option<String>,
     ) -> Result<HttpResponseDto, CatcherError> {
-        let resp = self.inner.execute(HttpRequest {
-            method: HttpMethod::PUT,
-            url,
-            headers: Default::default(),
-            body: Some(body),
-            content_type,
-            timeout_ms: None,
-        }).await.map_err(|e| CatcherError::Network(e.to_string()))?;
+        let resp = runtime().block_on(
+            self.inner.execute(HttpRequest {
+                method: HttpMethod::PUT,
+                url,
+                headers: Default::default(),
+                body: Some(body),
+                content_type,
+                timeout_ms: None,
+            })
+        ).map_err(|e| CatcherError::Network(e.to_string()))?;
 
         Ok(HttpResponseDto {
             status: resp.status,
@@ -140,15 +159,17 @@ impl HttpClient {
 
     /// DELETE request
     #[uniffi::method]
-    pub async fn delete(&self, url: String) -> Result<HttpResponseDto, CatcherError> {
-        let resp = self.inner.execute(HttpRequest {
-            method: HttpMethod::DELETE,
-            url,
-            headers: Default::default(),
-            body: None,
-            content_type: None,
-            timeout_ms: None,
-        }).await.map_err(|e| CatcherError::Network(e.to_string()))?;
+    pub fn delete(&self, url: String) -> Result<HttpResponseDto, CatcherError> {
+        let resp = runtime().block_on(
+            self.inner.execute(HttpRequest {
+                method: HttpMethod::DELETE,
+                url,
+                headers: Default::default(),
+                body: None,
+                content_type: None,
+                timeout_ms: None,
+            })
+        ).map_err(|e| CatcherError::Network(e.to_string()))?;
 
         Ok(HttpResponseDto {
             status: resp.status,
@@ -159,20 +180,22 @@ impl HttpClient {
 
     /// PATCH request
     #[uniffi::method]
-    pub async fn patch(
+    pub fn patch(
         &self,
         url: String,
         body: Vec<u8>,
         content_type: Option<String>,
     ) -> Result<HttpResponseDto, CatcherError> {
-        let resp = self.inner.execute(HttpRequest {
-            method: HttpMethod::PATCH,
-            url,
-            headers: Default::default(),
-            body: Some(body),
-            content_type,
-            timeout_ms: None,
-        }).await.map_err(|e| CatcherError::Network(e.to_string()))?;
+        let resp = runtime().block_on(
+            self.inner.execute(HttpRequest {
+                method: HttpMethod::PATCH,
+                url,
+                headers: Default::default(),
+                body: Some(body),
+                content_type,
+                timeout_ms: None,
+            })
+        ).map_err(|e| CatcherError::Network(e.to_string()))?;
 
         Ok(HttpResponseDto {
             status: resp.status,
@@ -219,8 +242,11 @@ impl WsClient {
     /// ```json
     /// {"urls": ["wss://echo.example.com"], "reconnect": {"initial_delay_ms": 1000}}
     /// ```
+    ///
+    /// Note: Sync because UniFFI 0.28 does not support async constructors.
+    /// Uses block_on() on a dedicated tokio runtime.
     #[uniffi::constructor]
-    pub async fn new(
+    pub fn new(
         config_json: String,
         observer: Box<dyn WsEventObserver>,
     ) -> Result<Self, CatcherError> {
@@ -233,12 +259,13 @@ impl WsClient {
             .cloned()
             .ok_or_else(|| CatcherError::Config("urls cannot be empty".into()))?;
 
-        let (handle, mut rx) = WsTransport::connect(&first_url, &config)
-            .await
+        // Bridge async connect to sync — UniFFI 0.28 requires sync constructors
+        let (handle, mut rx) = runtime()
+            .block_on(WsTransport::connect(&first_url, &config))
             .map_err(|e| CatcherError::Network(e.to_string()))?;
 
-        // Spawn a task to forward events to the observer
-        tokio::spawn(async move {
+        // Spawn event forwarding on the runtime
+        runtime().spawn(async move {
             while let Some(event) = rx.recv().await {
                 let dto = match event {
                     catcher_ws::WsEvent::Connected { url, latency_ms } => {

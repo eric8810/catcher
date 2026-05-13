@@ -116,11 +116,20 @@ class CatcherHttpClient {
   ) async {
     final receivePort = ReceivePort();
     final completer = Completer<HttpResponse>();
+    bool cleanedUp = false;
 
     final nativeCallback = NativeCallable<EventCallbackDart>.listener(
       (Pointer<Char> eventType, Pointer<Uint8> eventData, int eventDataLen,
           Pointer<Void> userData) {
-        final jsonStr = utf8.decode(eventData.asTypedList(eventDataLen));
+        // Copy data immediately — pointers will be freed below
+        final jsonBytes = eventData.asTypedList(eventDataLen);
+        final jsonStr = utf8.decode(jsonBytes, allowMalformed: true);
+
+        // Free the CStrings that Rust leaked via CString::into_raw()
+        final freeFn = _lib.lookupFunction<CatcherFreeEventDataNative,
+            CatcherFreeEventDataDart>('catcher_free_event_data');
+        freeFn(eventType, eventData.cast<Char>());
+
         final Map<String, dynamic> result;
         try {
           result = jsonDecode(jsonStr) as Map<String, dynamic>;
@@ -135,8 +144,11 @@ class CatcherHttpClient {
     late StreamSubscription sub;
     sub = receivePort.listen((message) {
       sub.cancel();
-      nativeCallback.close();
-      receivePort.close();
+      if (!cleanedUp) {
+        cleanedUp = true;
+        nativeCallback.close();
+        receivePort.close();
+      }
       if (!completer.isCompleted) {
         if (message is Map && !message.containsKey('error')) {
           completer.complete(HttpResponse.fromJson(message));
@@ -180,8 +192,11 @@ class CatcherHttpClient {
         nullptr,
       );
     } catch (e) {
-      nativeCallback.close();
-      receivePort.close();
+      if (!cleanedUp) {
+        cleanedUp = true;
+        nativeCallback.close();
+        receivePort.close();
+      }
       _freeFfiString(methodFfi);
       _freeFfiString(urlFfi);
       _freeFfiString(ctFfi);
@@ -197,8 +212,15 @@ class CatcherHttpClient {
     return completer.future.timeout(
       const Duration(seconds: 30),
       onTimeout: () {
-        nativeCallback.close();
-        receivePort.close();
+        // Complete with error but do NOT close nativeCallback here —
+        // Rust might still invoke it, and closing causes UB.
+        // The callback will be cleaned up by GC or when a late
+        // response arrives and triggers cleanup via the listener above.
+        if (!completer.isCompleted) {
+          completer.completeError(
+            TimeoutException('HTTP request timed out after 30s'),
+          );
+        }
         throw TimeoutException('HTTP request timed out after 30s');
       },
     );

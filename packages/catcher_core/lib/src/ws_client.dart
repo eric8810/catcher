@@ -54,8 +54,14 @@ class CatcherWsClient {
     _nativeCallback = NativeCallable<EventCallbackDart>.listener(
       (Pointer<Char> eventType, Pointer<Uint8> eventData, int eventDataLen,
           Pointer<Void> userData) {
+        // Copy data immediately — pointers will be freed below
         final typeStr = eventType.toDartString();
-        final jsonStr = utf8.decode(eventData.asTypedList(eventDataLen));
+        final jsonBytes = eventData.asTypedList(eventDataLen);
+        final jsonStr = utf8.decode(jsonBytes, allowMalformed: true);
+
+        // Free the CStrings that Rust leaked via CString::into_raw()
+        _freeEventData(eventType, eventData.cast<Char>());
+
         final Map<String, dynamic> json;
         try {
           json = jsonDecode(jsonStr) as Map<String, dynamic>;
@@ -169,11 +175,19 @@ class CatcherWsClient {
     }
   }
 
-  /// Call catcher_freeResult to release the error_message CString
+  /// Call catcher_free_result to release the error_message CString
   void _freeResult(FfiResultNative result) {
     final freeFn = _lib!.lookupFunction<CatcherFreeResultNative,
         CatcherFreeResultDart>('catcher_free_result');
     freeFn(result);
+  }
+
+  /// Call catcher_free_event_data to release the CStrings Rust leaked
+  /// via CString::into_raw() for the async callback bridge.
+  void _freeEventData(Pointer<Char> eventType, Pointer<Char> eventData) {
+    final freeFn = _lib!.lookupFunction<CatcherFreeEventDataNative,
+        CatcherFreeEventDataDart>('catcher_free_event_data');
+    freeFn(eventType, eventData);
   }
 
   WsEvent _parseWsEvent(Map<String, dynamic> json) {

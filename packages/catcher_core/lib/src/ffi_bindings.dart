@@ -185,6 +185,18 @@ typedef CatcherWsDestroyDart = void Function(Pointer<Void> handle);
 typedef CatcherFreeResultNative = Void Function(FfiResultNative result);
 typedef CatcherFreeResultDart = void Function(FfiResultNative result);
 
+/// catcher_free_event_data(event_type, event_data) — frees CStrings
+/// allocated by Rust via CString::into_raw() for the async callback bridge.
+/// Dart must call this after reading the callback data.
+typedef CatcherFreeEventDataNative = Void Function(
+  Pointer<Char> eventType,
+  Pointer<Char> eventData,
+);
+typedef CatcherFreeEventDataDart = void Function(
+  Pointer<Char> eventType,
+  Pointer<Char> eventData,
+);
+
 // ═════════════════════════════════════════════════════════════════
 // Codec — pack / unpack
 // ═══════════════════════════════════════════════════════════════
