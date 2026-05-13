@@ -66,5 +66,11 @@ export 'src/ws_client.dart'
         WsHeartbeatRttEvent,
         CatcherWsError;
 
+// Network quality
+export 'src/quality.dart' show NetworkQualityResult, evaluateQuality;
+
+// Binary codec (stub — Rust side not yet implemented)
+export 'src/codec.dart' show pack, unpack;
+
 // FFI loader
 export 'src/native_loader.dart' show loadCatcherLibrary;

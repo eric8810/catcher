@@ -23,7 +23,6 @@ import 'native_loader.dart';
 /// ```
 class CatcherWsClient {
   Pointer<Void>? _handle;
-  DynamicLibrary? _lib;
   late final CatcherWsCreateDart _create;
   late final CatcherWsSendTextDart _sendText;
   late final CatcherWsSendBinaryDart _sendBinary;
@@ -35,34 +34,34 @@ class CatcherWsClient {
   final StreamController<WsEvent> _eventController =
       StreamController<WsEvent>.broadcast();
 
-  NativeCallable<EventCallbackDart>? _nativeCallback;
+  NativeCallable<EventCallbackNative>? _nativeCallback;
 
   CatcherWsClient(WsClientConfig config) {
-    _lib = loadCatcherLibrary();
+    final lib = loadCatcherLibrary();
 
-    _create = _lib.lookupFunction<CatcherWsCreateNative, CatcherWsCreateDart>(
+    _create = lib.lookupFunction<CatcherWsCreateNative, CatcherWsCreateDart>(
         'catcher_ws_create');
-    _sendText = _lib.lookupFunction<CatcherWsSendTextNative,
+    _sendText = lib.lookupFunction<CatcherWsSendTextNative,
         CatcherWsSendTextDart>('catcher_ws_send_text');
-    _sendBinary = _lib.lookupFunction<CatcherWsSendBinaryNative,
+    _sendBinary = lib.lookupFunction<CatcherWsSendBinaryNative,
         CatcherWsSendBinaryDart>('catcher_ws_send_binary');
     _close =
-        _lib.lookupFunction<CatcherWsCloseNative, CatcherWsCloseDart>(
+        lib.lookupFunction<CatcherWsCloseNative, CatcherWsCloseDart>(
             'catcher_ws_close');
-    _destroy = _lib.lookupFunction<CatcherWsDestroyNative,
+    _destroy = lib.lookupFunction<CatcherWsDestroyNative,
         CatcherWsDestroyDart>('catcher_ws_destroy');
 
-    _freeResultFn = _lib.lookupFunction<CatcherFreeResultNative,
+    _freeResultFn = lib.lookupFunction<CatcherFreeResultNative,
         CatcherFreeResultDart>('catcher_free_result');
-    _freeEventDataFn = _lib.lookupFunction<CatcherFreeEventDataNative,
+    _freeEventDataFn = lib.lookupFunction<CatcherFreeEventDataNative,
         CatcherFreeEventDataDart>('catcher_free_event_data');
 
     // Register native callback
-    _nativeCallback = NativeCallable<EventCallbackDart>.listener(
+    _nativeCallback = NativeCallable<EventCallbackNative>.listener(
       (Pointer<Char> eventType, Pointer<Uint8> eventData, int eventDataLen,
           Pointer<Void> userData) {
         // Copy data immediately — pointers will be freed below
-        final typeStr = eventType.toDartString();
+        final typeStr = eventType.cast<Utf8>().toDartString();
         final jsonBytes = eventData.asTypedList(eventDataLen);
         final jsonStr = utf8.decode(jsonBytes, allowMalformed: true);
 
@@ -177,7 +176,7 @@ class CatcherWsClient {
   void _checkResult(FfiResultNative result) {
     if (result.errorCode != 0) {
       final msg = result.errorMessage != nullptr
-          ? result.errorMessage.toDartString()
+          ? result.errorMessage.cast<Utf8>().toDartString()
           : 'Unknown error';
       // Free the error_message CString allocated by Rust FfiResult::error()
       _freeResult(result);

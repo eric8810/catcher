@@ -134,7 +134,7 @@ class CatcherHttpClient {
     final completer = Completer<HttpResponse>();
     bool cleanedUp = false;
 
-    final nativeCallback = NativeCallable<EventCallbackDart>.listener(
+    final nativeCallback = NativeCallable<EventCallbackNative>.listener(
       (Pointer<Char> eventType, Pointer<Uint8> eventData, int eventDataLen,
           Pointer<Void> userData) {
         // Copy data immediately — pointers will be freed below
@@ -165,7 +165,8 @@ class CatcherHttpClient {
       }
       if (!completer.isCompleted) {
         if (message is Map && !message.containsKey('error')) {
-          completer.complete(HttpResponse.fromJson(message));
+          completer.complete(
+              HttpResponse.fromJson(Map<String, dynamic>.from(message)));
         } else if (message is Map) {
           completer.completeError(CatcherHttpError(
             message['error']?.toString() ?? 'Unknown error',

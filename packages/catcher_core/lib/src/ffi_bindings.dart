@@ -1,5 +1,4 @@
 import 'dart:ffi';
-import 'dart:typed_data';
 
 // ═══════════════════════════════════════════════════════════════
 // C ABI types — must match Rust #[repr(C)] structs exactly
@@ -211,4 +210,20 @@ typedef CatcherUnpackNative = FfiResultNative Function(
 typedef CatcherUnpackDart = FfiResultNative Function(
   Pointer<Uint8> data,
   int len,
+);
+
+// ═══════════════════════════════════════════════════════════════════
+// Network quality — evaluate_quality
+// ═══════════════════════════════════════════════════════════════════
+
+/// catcher_evaluate_quality(host: FfiString, callback, user_data)
+typedef CatcherEvaluateQualityNative = Void Function(
+  FfiStringNative host,
+  Pointer<NativeFunction<EventCallbackNative>> callback,
+  Pointer<Void> userData,
+);
+typedef CatcherEvaluateQualityDart = void Function(
+  FfiStringNative host,
+  Pointer<NativeFunction<EventCallbackNative>> callback,
+  Pointer<Void> userData,
 );

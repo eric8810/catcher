@@ -1,13 +1,16 @@
-import 'package:flutter_test/flutter_test.dart';
+import 'dart:typed_data';
+
+import 'package:test/test.dart';
 import 'package:catcher_core/catcher_core.dart';
 
 void main() {
   group('HttpClientConfig', () {
-    test('default values', () {
-      final config = HttpClientConfig();
+    test('requires baseUrl, has sensible defaults', () {
+      final config = HttpClientConfig(baseUrl: 'https://api.example.com');
+      expect(config.baseUrl, 'https://api.example.com');
       expect(config.connectTimeoutMs, 10000);
       expect(config.responseTimeoutMs, 30000);
-      expect(config.keepAlive, true);
+      expect(config.pool.keepAlive, true);
       expect(config.maxConcurrency, 50);
     });
 
@@ -42,6 +45,19 @@ void main() {
       final json = cb.toJson();
       expect(json['failure_threshold'], 3);
     });
+
+    test('pool config', () {
+      final pool = PoolConfig(
+        maxIdlePerHost: 5,
+        idleTimeoutSecs: 60,
+        keepAlive: false,
+      );
+      expect(pool.keepAlive, false);
+      expect(pool.maxIdlePerHost, 5);
+      final json = pool.toJson();
+      expect(json['keep_alive'], false);
+      expect(json['max_idle_per_host'], 5);
+    });
   });
 
   group('HttpResponse', () {
@@ -59,9 +75,9 @@ void main() {
   });
 
   group('WsClientConfig', () {
-    test('default values', () {
-      final config = WsClientConfig();
-      expect(config.urls, isEmpty);
+    test('requires urls, has sensible defaults', () {
+      final config = WsClientConfig(urls: ['wss://example.com']);
+      expect(config.urls, ['wss://example.com']);
       expect(config.perMessageDeflate, false);
       expect(config.handshakeTimeoutMs, 15000);
       expect(config.raceCount, 1);
@@ -71,46 +87,67 @@ void main() {
       final config = WsClientConfig(
         urls: ['wss://example.com'],
         perMessageDeflate: true,
-        reconnect: ReconnectConfig(maxAttempts: 3),
+        reconnect: WsReconnectConfig(maxAttempts: 3),
       );
       final json = config.toJson();
       expect(json['urls'], ['wss://example.com']);
       expect(json['per_message_deflate'], true);
       expect(json['reconnect']['max_attempts'], 3);
     });
+
+    test('WsReconnectConfig defaults', () {
+      final rc = WsReconnectConfig();
+      expect(rc.initialDelayMs, 500);
+      expect(rc.maxDelayMs, 30000);
+      expect(rc.backoffMultiplier, 2.0);
+      expect(rc.maxAttempts, 20);
+    });
+
+    test('WsHeartbeatConfig defaults', () {
+      final hb = WsHeartbeatConfig();
+      expect(hb.intervalMs, 30000);
+      expect(hb.adaptive, true);
+      expect(hb.pongTimeoutMs, 10000);
+      expect(hb.maxMissedPongs, 3);
+    });
   });
 
-  group('WsEvent', () {
-    test('fromJson parses Connected', () {
-      final event = WsEvent.fromJson({
-        'type': 'Connected',
-        'url': 'wss://example.com',
-        'latency_ms': 42,
-      });
-      expect(event.type, 'Connected');
+  group('WsEvent types', () {
+    test('WsMessageEvent.text decodes UTF-8', () {
+      final event = WsMessageEvent(
+        data: [72, 101, 108, 108, 111],
+        isBinary: false,
+      );
+      expect(event.text, 'Hello');
+      expect(event.isBinary, false);
+    });
+
+    test('WsConnectedEvent', () {
+      final event = WsConnectedEvent(url: 'wss://example.com', latencyMs: 42);
       expect(event.url, 'wss://example.com');
       expect(event.latencyMs, 42);
     });
 
-    test('fromJson parses Disconnected', () {
-      final event = WsEvent.fromJson({
-        'type': 'Disconnected',
-        'code': 1006,
-        'reason': 'abnormal',
-      });
-      expect(event.type, 'Disconnected');
+    test('WsDisconnectedEvent', () {
+      final event = WsDisconnectedEvent(code: 1006, reason: 'abnormal');
       expect(event.code, 1006);
       expect(event.reason, 'abnormal');
     });
 
-    test('fromJson parses Message', () {
-      final event = WsEvent.fromJson({
-        'type': 'Message',
-        'data': [72, 101, 108, 108, 111],
-        'is_binary': false,
-      });
-      expect(event.type, 'Message');
-      expect(event.isBinary, false);
+    test('WsReconnectingEvent', () {
+      final event = WsReconnectingEvent(attempt: 2, delayMs: 1000);
+      expect(event.attempt, 2);
+      expect(event.delayMs, 1000);
+    });
+
+    test('WsErrorEvent', () {
+      final event = WsErrorEvent('something failed');
+      expect(event.message, 'something failed');
+    });
+
+    test('WsHeartbeatRttEvent', () {
+      final event = WsHeartbeatRttEvent(rttMs: 15);
+      expect(event.rttMs, 15);
     });
   });
 
@@ -127,6 +164,25 @@ void main() {
       expect(result.avgRttMs, 50);
       expect(result.packetLossRate, 0.01);
       expect(result.connectionType, 'Wifi');
+    });
+
+    test('default values from partial JSON', () {
+      final result = NetworkQualityResult.fromJson({});
+      expect(result.level, 'Bad');
+      expect(result.avgRttMs, 0);
+      expect(result.jitterMs, 0);
+      expect(result.packetLossRate, 0.0);
+      expect(result.connectionType, 'Unknown');
+    });
+  });
+
+  group('Codec stubs', () {
+    test('pack throws UnsupportedError', () {
+      expect(() => pack({'key': 'value'}), throwsUnsupportedError);
+    });
+
+    test('unpack throws UnsupportedError', () {
+      expect(() => unpack(Uint8List(0)), throwsUnsupportedError);
     });
   });
 }
