@@ -174,7 +174,7 @@ flutter build apk   # 自动编译 Rust + 打包 .so
 | `ws.addEventListener('message', fn)` | `ws.events.listen(fn)` |
 | `ws.send(data)` | `ws.sendText(data)` / `ws.sendBinary(data)` |
 | `pack(obj)` / `unpack(buf)` | `pack(obj)` / `unpack(buf)` |
-| `client.interceptors.request.use(fn)` | Dart 拦截器（规划中）|
+| `client.interceptors.request.use(fn)` | ❌ 不支持（dart:ffi 回调限制） |
 | `client.circuitBreakerState()` | `client.circuitBreakerState` |
 | `client.queueDepth()` | `client.queueDepth` |
 
