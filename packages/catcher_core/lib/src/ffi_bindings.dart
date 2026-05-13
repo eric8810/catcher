@@ -190,11 +190,11 @@ typedef CatcherFreeResultDart = void Function(FfiResultNative result);
 /// Dart must call this after reading the callback data.
 typedef CatcherFreeEventDataNative = Void Function(
   Pointer<Char> eventType,
-  Pointer<Char> eventData,
+  Pointer<Uint8> eventData,
 );
 typedef CatcherFreeEventDataDart = void Function(
   Pointer<Char> eventType,
-  Pointer<Char> eventData,
+  Pointer<Uint8> eventData,
 );
 
 // ═════════════════════════════════════════════════════════════════

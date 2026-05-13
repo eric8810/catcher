@@ -39,14 +39,14 @@ where
     F: std::future::Future<Output = T> + Send + 'static,
     T: Send + 'static,
 {
+    // Each call spawns a dedicated thread with its own single-threaded runtime.
+    // Creating a new runtime per thread avoids the OnceLock race where multiple
+    // threads share a current_thread runtime (which is bound to its creating thread).
     std::thread::spawn(move || {
-        static AUX_RT: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
-        let rt = AUX_RT.get_or_init(|| {
-            tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("Failed to create aux tokio runtime")
-        });
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("Failed to create aux tokio runtime");
         rt.block_on(future)
     })
 }

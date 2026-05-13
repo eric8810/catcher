@@ -6,16 +6,20 @@ use crate::observability::network_quality::NetworkQualityEvaluator;
 
 use catcher_core::{EventCallback, FfiString};
 
+/// Global tokio runtime for quality FFI operations.
+fn runtime() -> &'static tokio::runtime::Runtime {
+    static RT: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
+    RT.get_or_init(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("Failed to create tokio runtime for catcher-http quality FFI")
+    })
+}
+
 /// Safely read an FfiString as a Rust String.
 fn ffi_string_to_string(s: FfiString, default: &str) -> String {
-    if s.data.is_null() || s.len == 0 {
-        return default.to_string();
-    }
-    unsafe {
-        std::str::from_utf8(std::slice::from_raw_parts(s.data as *const u8, s.len))
-            .unwrap_or(default)
-            .to_string()
-    }
+    s.to_string_lossy(default)
 }
 
 #[no_mangle]
@@ -28,7 +32,7 @@ pub unsafe extern "C" fn catcher_evaluate_quality(
     let ud = user_data as usize;
 
     // Use spawn_blocking because evaluate() is CPU-bound / potentially blocking
-    tokio::task::spawn_blocking(move || {
+    runtime().spawn_blocking(move || {
         let evaluator = NetworkQualityEvaluator::new(20);
         // TODO: pass host_str into evaluator when host-specific evaluation is implemented
         let _ = host_str;

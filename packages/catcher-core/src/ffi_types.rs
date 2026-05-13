@@ -41,6 +41,20 @@ pub type EventCallback = extern "C" fn(
     user_data: *mut c_void,
 );
 
+impl FfiString {
+    /// Safely read an FfiString as a Rust String. Returns default on null/invalid.
+    pub fn to_string_lossy(&self, default: &str) -> String {
+        if self.data.is_null() || self.len == 0 {
+            return default.to_string();
+        }
+        unsafe {
+            std::str::from_utf8(std::slice::from_raw_parts(self.data as *const u8, self.len))
+                .unwrap_or(default)
+                .to_string()
+        }
+    }
+}
+
 impl FfiResult {
     pub fn ok(data: *mut c_void, len: usize) -> Self {
         Self {

@@ -142,7 +142,7 @@ class CatcherHttpClient {
         final jsonStr = utf8.decode(jsonBytes, allowMalformed: true);
 
         // Free the CStrings that Rust leaked via CString::into_raw()
-        _freeEventDataFn(eventType, eventData.cast<Char>());
+        _freeEventDataFn(eventType, eventData);
 
         final Map<String, dynamic> result;
         try {

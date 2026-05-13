@@ -12,20 +12,24 @@ use catcher_core::{EventCallback, FfiResult, FfiString};
 static WS_HANDLES: Mutex<Option<HashMap<usize, Arc<WsHandle>>>> = Mutex::new(None);
 static WS_NEXT_ID: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(1);
 
+/// Global tokio runtime for WS async operations (spawning, etc.)
+fn runtime() -> &'static tokio::runtime::Runtime {
+    static RT: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
+    RT.get_or_init(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("Failed to create tokio runtime for catcher-ws FFI")
+    })
+}
+
 fn ws_handles() -> std::sync::MutexGuard<'static, Option<HashMap<usize, Arc<WsHandle>>>> {
     WS_HANDLES.lock().unwrap()
 }
 
 /// Safely read an FfiString as a Rust String. Returns default on null/invalid.
 fn ffi_string_to_string(s: FfiString, default: &str) -> String {
-    if s.data.is_null() || s.len == 0 {
-        return default.to_string();
-    }
-    unsafe {
-        std::str::from_utf8(std::slice::from_raw_parts(s.data as *const u8, s.len))
-            .unwrap_or(default)
-            .to_string()
-    }
+    s.to_string_lossy(default)
 }
 
 /// Build a JSON error string safely (no format! injection).
@@ -81,7 +85,7 @@ pub unsafe extern "C" fn catcher_ws_create(
     let cb = event_callback;
     let ud = user_data as usize;
 
-    tokio::task::spawn(async move {
+    runtime().spawn(async move {
         match WsTransport::connect(&first_url, &config).await {
             Ok((handle, mut rx)) => {
                 let ws_handle = Arc::new(handle);
@@ -180,11 +184,5 @@ pub unsafe extern "C" fn catcher_ws_destroy(handle: *mut c_void) {
     drop(Box::from_raw(handle as *mut usize));
 }
 
-/// Free an FfiResult returned by WS FFI functions.
-///
-/// Dart must call this after every WS FFI call that returns FfiResult.
-/// Takes ownership — Drop impl handles freeing error_message CString.
-#[no_mangle]
-pub extern "C" fn catcher_free_result(result: FfiResult) {
-    drop(result);
-}
+// Note: catcher_free_result is provided by catcher-core (ffi_types.rs).
+// Do not re-define here to avoid duplicate symbol errors at link time.

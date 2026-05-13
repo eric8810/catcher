@@ -29,6 +29,8 @@ class CatcherWsClient {
   late final CatcherWsSendBinaryDart _sendBinary;
   late final CatcherWsCloseDart _close;
   late final CatcherWsDestroyDart _destroy;
+  late final CatcherFreeResultDart _freeResultFn;
+  late final CatcherFreeEventDataDart _freeEventDataFn;
 
   final StreamController<WsEvent> _eventController =
       StreamController<WsEvent>.broadcast();
@@ -50,6 +52,11 @@ class CatcherWsClient {
     _destroy = _lib.lookupFunction<CatcherWsDestroyNative,
         CatcherWsDestroyDart>('catcher_ws_destroy');
 
+    _freeResultFn = _lib.lookupFunction<CatcherFreeResultNative,
+        CatcherFreeResultDart>('catcher_free_result');
+    _freeEventDataFn = _lib.lookupFunction<CatcherFreeEventDataNative,
+        CatcherFreeEventDataDart>('catcher_free_event_data');
+
     // Register native callback
     _nativeCallback = NativeCallable<EventCallbackDart>.listener(
       (Pointer<Char> eventType, Pointer<Uint8> eventData, int eventDataLen,
@@ -60,7 +67,7 @@ class CatcherWsClient {
         final jsonStr = utf8.decode(jsonBytes, allowMalformed: true);
 
         // Free the CStrings that Rust leaked via CString::into_raw()
-        _freeEventData(eventType, eventData.cast<Char>());
+        _freeEventData(eventType, eventData);
 
         final Map<String, dynamic> json;
         try {
@@ -180,17 +187,13 @@ class CatcherWsClient {
 
   /// Call catcher_free_result to release the error_message CString
   void _freeResult(FfiResultNative result) {
-    final freeFn = _lib!.lookupFunction<CatcherFreeResultNative,
-        CatcherFreeResultDart>('catcher_free_result');
-    freeFn(result);
+    _freeResultFn(result);
   }
 
   /// Call catcher_free_event_data to release the CStrings Rust leaked
   /// via CString::into_raw() for the async callback bridge.
-  void _freeEventData(Pointer<Char> eventType, Pointer<Char> eventData) {
-    final freeFn = _lib!.lookupFunction<CatcherFreeEventDataNative,
-        CatcherFreeEventDataDart>('catcher_free_event_data');
-    freeFn(eventType, eventData);
+  void _freeEventData(Pointer<Char> eventType, Pointer<Uint8> eventData) {
+    _freeEventDataFn(eventType, eventData);
   }
 
   WsEvent _parseWsEvent(Map<String, dynamic> json) {

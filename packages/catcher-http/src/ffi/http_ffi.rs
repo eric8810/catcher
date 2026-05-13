@@ -12,20 +12,24 @@ use catcher_core::{EventCallback, FfiString};
 static HANDLES: Mutex<Option<HashMap<usize, Arc<HttpTransport>>>> = Mutex::new(None);
 static NEXT_ID: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(1);
 
+/// Global tokio runtime for HTTP async operations (spawning, etc.)
+fn runtime() -> &'static tokio::runtime::Runtime {
+    static RT: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
+    RT.get_or_init(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("Failed to create tokio runtime for catcher-http FFI")
+    })
+}
+
 fn handles() -> std::sync::MutexGuard<'static, Option<HashMap<usize, Arc<HttpTransport>>>> {
     HANDLES.lock().unwrap()
 }
 
 /// Safely read an FfiString as a Rust String. Returns default on null/invalid.
 fn ffi_string_to_string(s: FfiString, default: &str) -> String {
-    if s.data.is_null() || s.len == 0 {
-        return default.to_string();
-    }
-    unsafe {
-        std::str::from_utf8(std::slice::from_raw_parts(s.data as *const u8, s.len))
-            .unwrap_or(default)
-            .to_string()
-    }
+    s.to_string_lossy(default)
 }
 
 /// Safely read body bytes from a raw pointer. Returns empty vec on null.
@@ -98,7 +102,7 @@ pub unsafe extern "C" fn catcher_http_get(
 
     let transport = handles().as_ref().and_then(|m| m.get(&id)).cloned();
     if let Some(t) = transport {
-        tokio::task::spawn(async move {
+        runtime().spawn(async move {
             let result = t.get(&url_str).await;
             let json = match result {
                 Ok(resp) => serde_json::to_string(&resp).unwrap_or_default(),
@@ -130,7 +134,7 @@ pub unsafe extern "C" fn catcher_http_post(
 
     let transport = handles().as_ref().and_then(|m| m.get(&id)).cloned();
     if let Some(t) = transport {
-        tokio::task::spawn(async move {
+        runtime().spawn(async move {
             let result = t.post(&url_str, &body_data, &ct_str).await;
             let json = match result {
                 Ok(resp) => serde_json::to_string(&resp).unwrap_or_default(),
@@ -188,7 +192,7 @@ pub unsafe extern "C" fn catcher_http_execute(
 
     let transport = handles().as_ref().and_then(|m| m.get(&id)).cloned();
     if let Some(t) = transport {
-        tokio::task::spawn(async move {
+        runtime().spawn(async move {
             let request = HttpRequest {
                 method: http_method,
                 url: url_str,
