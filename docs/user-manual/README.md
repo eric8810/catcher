@@ -76,7 +76,7 @@ catcher  catcher             @catcher  @catcher
 | 韧性层 | catcher-rs (Rust) | p-retry/cockatiel (TS) | p-retry/cockatiel (TS) | catcher-rs (Rust) |
 | 编解码 | msgpack (Rust) | msgpackr (TS) | msgpackr (TS) | msgpack (Rust) |
 | 连接池 | ✅ Rust pool | ✅ Agent keepAlive | ❌ 浏览器管理 | ✅ Rust pool |
-| 拦截器 | ❌ (待暴露) | ✅ 完整 | ✅ (待建) | ❌ |
+| 拦截器 | ❌ (待暴露) | ✅ 完整 | ⏳ 基础 (stub) | ❌ |
 | 状态 | ✅ | ✅ | ✅ | ✅ (Rust ✅, 绑定 ✅) |
 
 > 详细调研见 [`research/platform-support-analysis.md`](../research/platform-support-analysis.md)

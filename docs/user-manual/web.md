@@ -1,6 +1,7 @@
 # Web 浏览器使用指南
 
-> 状态：⚠️ 缺失 — 唯一需要新建 TS 包的平台。Rust/WASM 不能做网络，必须纯 TS + fetch。
+> 状态：✅ 已实现 — `@catcher/web` 包，fetch-based，纯 TS  
+> 代码位置：`packages/catcher-web/`
 
 ---
 

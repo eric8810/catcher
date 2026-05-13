@@ -1,6 +1,7 @@
 # Flutter 使用指南
 
-> 状态：📋 规划中 — C ABI 已在 Rust 侧实现，dart:ffi 绑定层待写  
+> 状态：✅ 已实现 — `catcher_core` pub 包 + dart:ffi 绑定层  
+> 代码位置：`packages/catcher_core/`  
 > 架构文档：[`arch-rs/13-dart-ffi.md`](../arch-rs/13-dart-ffi.md)
 
 ---
