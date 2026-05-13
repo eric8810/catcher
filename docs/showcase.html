@@ -290,10 +290,11 @@
 <section class="hero">
   <div class="logo">🪤</div>
   <h1>Catcher</h1>
-  <p class="subtitle">Resilient network toolkit for Node.js — catches failures before they reach your business logic.</p>
-  <div class="tagline">npm install @catcher/napi-http @catcher/http</div>
+  <p class="subtitle">Resilient network toolkit — Rust core, cross-platform. Catches failures before they reach your business logic.</p>
+  <div class="tagline">npm install @catcher/napi-http @catcher/web @catcher/http</div>
   <br>
   <a href="#quickstart" class="btn btn-primary">Quick Start ↓</a>
+  <p class="subtitle" style="font-size:14px;margin-top:16px">Node.js · Browser · Electron · Rust · Flutter · iOS · Android</p>
 </section>
 
 <!-- ═══ Key Metrics ═══ -->
@@ -534,16 +535,19 @@ ws.<span class="fn">send</span>(<span class="fn">pack</span>({ event: <span clas
 <section class="section">
   <div class="container">
     <h2>Packages</h2>
-    <p class="desc">Install only what you need</p>
-    <div class="code-block" style="max-width:500px;margin:0 auto">
-      <pre><span class="cm"># REST API</span>
-<span class="kw">npm</span> i @catcher/http
+    <p class="desc">Install only what you need — Node.js, Browser, Rust, Flutter, native mobile</p>
+    <div class="code-block" style="max-width:600px;margin:0 auto">
+      <pre><span class="cm"># Node.js native (Rust via napi-rs)</span>
+<span class="kw">npm</span> i @catcher/napi-http @catcher/napi-ws
 
-<span class="cm"># IM / real-time</span>
-<span class="kw">npm</span> i @catcher/http @catcher/ws
+<span class="cm"># Node.js / Browser (pure TypeScript)</span>
+<span class="kw">npm</span> i @catcher/http @catcher/ws @catcher/web
 
-<span class="cm"># Full native performance (Rust via napi-rs)</span>
-<span class="kw">npm</span> i @catcher/napi-http @catcher/napi-ws</pre>
+<span class="cm"># Rust</span>
+cargo add catcher-http catcher-ws
+
+<span class="cm"># Flutter</span>
+flutter pub add catcher_core</pre>
     </div>
   </div>
 </section>

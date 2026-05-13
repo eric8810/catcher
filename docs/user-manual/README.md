@@ -12,9 +12,9 @@
 | **Node.js (TS)** | ✅ 可用 | `@catcher/http` / `@catcher/ws` (纯 TS，API 更丰富) |
 | **Electron** | ✅ 同 Node.js | napi 或 TS 包均可 |
 | **Rust** | ✅ 已实现 | `catcher-http` + `catcher-ws` + `catcher-core` crate |
-| **Web (Browser)** | ⚠️ 缺失 | `@catcher/web` — 唯一需要 TS 新建的平台 |
-| **Android + iOS** | 📋 规划 | UniFFI → Swift + Kotlin（Rust 核心已就绪） |
-| **Flutter** | 📋 规划 | dart:ffi → 现有 C ABI（Rust 核心已就绪） |
+| **Web (Browser)** | ✅ 可用 | `@catcher/web` — fetch-based, 纯 TS |
+| **Android + iOS** | ✅ 可用 | UniFFI → Swift + Kotlin |
+| **Flutter** | ✅ 可用 | dart:ffi → C ABI |
 
 ---
 
@@ -38,10 +38,9 @@
   Node.js/Electron     Rust / 移动端         浏览器
       │                    │                    │
  ┌────┴────┐          ┌────┴────┐          @catcher/web
- ▼         ▼          ▼         ▼          (缺失，待建)
+ ▼         ▼          ▼         ▼          (fetch)
 napi     TS版      Rust crate  Flutter
 native   (API更全)  (已实现)    dart:ffi
-(已编译)                     (C ABI 已就绪)
 ```
 
 ---
@@ -63,8 +62,8 @@ catcher  catcher             @catcher  @catcher
  │        @catcher/napi-ws
  │         (Node.js native)
  │
- ├── UniFFI → Swift + Kotlin (Android/iOS, 规划)
- └── C ABI  → dart:ffi (Flutter, 规划)
+ ├── UniFFI → Swift + Kotlin (Android/iOS)
+ └── C ABI  → dart:ffi (Flutter)
 ```
 
 ---
@@ -78,6 +77,6 @@ catcher  catcher             @catcher  @catcher
 | 编解码 | msgpack (Rust) | msgpackr (TS) | msgpackr (TS) | msgpack (Rust) |
 | 连接池 | ✅ Rust pool | ✅ Agent keepAlive | ❌ 浏览器管理 | ✅ Rust pool |
 | 拦截器 | ❌ (待暴露) | ✅ 完整 | ✅ (待建) | ❌ |
-| 状态 | ✅ | ✅ | ⚠️ | 📋 (Rust ✅, 绑定 📋) |
+| 状态 | ✅ | ✅ | ✅ | ✅ (Rust ✅, 绑定 ✅) |
 
 > 详细调研见 [`research/platform-support-analysis.md`](../research/platform-support-analysis.md)

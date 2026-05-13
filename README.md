@@ -1,46 +1,78 @@
 # Catcher 🪤
 
-Resilient network communication toolkit for Node.js / Electron apps.
+Resilient network communication toolkit — Rust core, TypeScript wrappers, cross-platform.
 
 > "Catcher" — catches network failures before they reach your business logic.
+
+## Platform Coverage
+
+| Platform | Package | Status |
+|----------|---------|--------|
+| **Node.js (native)** | `@catcher/napi-http` / `napi-ws` | ✅ |
+| **Node.js (TS)** | `@catcher/http` / `ws` | ✅ |
+| **Electron** | same as Node.js | ✅ |
+| **Web** | `@catcher/web` | ✅ |
+| **Rust** | `catcher-http` / `catcher-ws` / `catcher-core` | ✅ |
+| **Flutter** | `catcher_core` (dart:ffi) | ✅ |
+| **Android + iOS** | `catcher-uniffi` (UniFFI) | ✅ |
 
 ## Packages
 
 ```
-@catcher/core (zero deps, pure types)
-    /            \
-   /              \
-@catcher/http   @catcher/ws
-(axios-based)   (ws + msgpackr)
+catcher-core (Rust)              @catcher/core (TS)
+     │                                │
+ ┌───┴───┐                        ┌───┴───┐
+ ▼       ▼                        ▼       ▼
+catcher  catcher             @catcher  @catcher  @catcher
+-http    -ws                 /http     /ws       /web
+ │  │     │  │               (axios)   (ws)     (fetch)
+ │  │     │  │
+ │  └──napi-rs──┐   ┌──napi-rs──┘
+ │              ▼   ▼
+ │        @catcher/napi-http
+ │        @catcher/napi-ws
+ │
+ ├── UniFFI → Swift + Kotlin
+ └── C ABI  → dart:ffi (Flutter)
 ```
 
-| Package | npm | Description |
-|---------|-----|-------------|
-| `@catcher/core` | `packages/catcher-core-ts` | Shared type definitions, zero runtime deps |
-| `@catcher/http` | `packages/catcher-http-ts` | HTTP client with retry, circuit breaker, priority queue |
-| `@catcher/ws` | `packages/catcher-ws-ts` | WebSocket with reconnect, multi-endpoint racing, msgpack codec |
-| `@catcher/napi-http` | `packages/catcher-napi-http` | Native HTTP addon via napi-rs (Rust) |
-| `@catcher/napi-ws` | `packages/catcher-napi-ws` | Native WebSocket addon via napi-rs (Rust) |
+| Package | Path | Description |
+|---------|------|-------------|
+| `@catcher/core` | `packages/catcher-core-ts` | Shared TS type definitions |
+| `@catcher/http` | `packages/catcher-http-ts` | HTTP client — retry, CB, queue, interceptors |
+| `@catcher/ws` | `packages/catcher-ws-ts` | WebSocket — reconnect, multi-endpoint, codec |
+| `@catcher/web` | `packages/catcher-web` | Browser HTTP client — fetch-based |
+| `@catcher/napi-http` | `packages/catcher-napi-http` | Rust native via napi-rs |
+| `@catcher/napi-ws` | `packages/catcher-napi-ws` | Rust native via napi-rs |
+| `catcher-core` | `packages/catcher-core` | Rust shared types & errors |
+| `catcher-http` | `packages/catcher-http` | Rust HTTP — reqwest, retry, CB |
+| `catcher-ws` | `packages/catcher-ws` | Rust WS — tokio-tungstenite, codec |
+| `catcher-uniffi` | `packages/catcher-uniffi` | UniFFI → Swift + Kotlin |
+| `catcher_core` | `packages/catcher_core` | Flutter dart:ffi bindings |
 
-This is a pnpm monorepo. See [pnpm-workspace.yaml](./pnpm-workspace.yaml).
+> pnpm monorepo + Cargo workspace. See `pnpm-workspace.yaml` and `packages/Cargo.toml`.
 
 ## Features
 
-- **Shared HTTP Agent** — TCP keep-alive, DNS caching (cacheable-lookup), TLS session reuse, idle socket eviction. One agent for all clients.
-- **Auto-retry** — exponential backoff with ±25% jitter, configurable per client. On retry, destroys stale keepAlive sockets to force fresh connections.
-- **Circuit Breaker** — trips on consecutive failures, auto-recovers after reset timeout. Prevents retry storms.
-- **Resilient WebSocket** — perMessageDeflate compression, exponential backoff reconnection, multi-endpoint racing (connect to N regions, use the fastest).
-- **Binary codec** — msgpackr (2-4x faster than JSON, ~47% smaller). Auto-detects binary vs text frames. Built into `@catcher/ws`.
-- **Priority queue** — lower number = higher priority. POST (1) > PUT/PATCH (2) > GET/DELETE (3). Message sending before prefetch.
+- **Shared HTTP Agent** — TCP keep-alive, DNS caching, TLS session reuse, idle socket eviction
+- **Auto-retry** — exponential backoff with jitter, destroys stale keepAlive sockets on retry
+- **Circuit Breaker** — trips on consecutive failures, auto-recovers, prevents retry storms
+- **Resilient WebSocket** — perMessageDeflate compression, exponential reconnect, multi-endpoint racing
+- **Binary codec** — msgpack / msgpackr (2-4x faster than JSON, ~47% smaller)
+- **Priority queue** — POST before prefetch, concurrency-aware scheduling
+- **Dynamic interceptors** — use/eject/clear at runtime, per-request retry/timeout/signal overrides
 
 ## Quick Start
 
 ```bash
-# REST API
-npm install @catcher/http
+# Node.js (native — Rust via napi-rs)
+npm install @catcher/napi-http @catcher/napi-ws
 
-# IM / real-time communication
+# Node.js (TS — more API features)
 npm install @catcher/http @catcher/ws
+
+# Browser
+npm install @catcher/web
 ```
 
 ```typescript
@@ -49,101 +81,68 @@ import { createHttpClient } from '@catcher/http'
 
 const client = createHttpClient({
   baseURL: 'https://api.example.com',
-  keepAlive: true,                 // connection pooling
-  retry: { attempts: 3 },         // auto-retry on failure
-  concurrency: 10,                // max parallel requests
-  circuitBreaker: {               // trip on 5+ failures
-    failureThreshold: 5,
-    resetTimeout: 30_000,
-  },
+  keepAlive: true,
+  retry: { attempts: 3 },
+  concurrency: 10,
+  circuitBreaker: { failureThreshold: 5, resetTimeout: 30_000 },
 })
 
 const data = await client.get('/users/1')
 const result = await client.post('/messages', { text: 'hello' })
+
+// Per-request overrides
+await client.get('/analytics', { retry: false, timeout: 5000 })
+
+// Dynamic interceptors
+client.interceptors.request.use(config => {
+  config.headers['Authorization'] = `Bearer ${token}`
+  return config
+})
 ```
 
 ```typescript
-// WebSocket — compression + reconnect + multi-endpoint racing
-import { createResilientWS } from '@catcher/ws'
+// WebSocket — compression + reconnect + multi-endpoint
+import { createResilientWS, pack, decodeWSMessage } from '@catcher/ws'
 
 const ws = createResilientWS({
-  url: ['wss://cn.example.com', 'wss://sg.example.com'],  // multi-region racing
-  perMessageDeflate: true,          // ~80% bandwidth reduction
-  handshakeTimeout: 10_000,         // fail fast
-  reconnect: {
-    initialDelay: 1000,
-    maxDelay: 30_000,
-    maxAttempts: 20,
-  },
+  url: ['wss://cn.example.com', 'wss://sg.example.com'],
+  perMessageDeflate: true,
+  reconnect: { initialDelay: 1000, maxDelay: 30_000 },
 })
-
-ws.addEventListener('message', (e) => console.log(e.data))
-```
-
-```typescript
-// Codec — msgpackr binary (faster & smaller than JSON)
-import { pack, unpack, decodeWSMessage } from '@catcher/ws'
 
 ws.send(pack({ event: 'message', data: msg }))
-
-ws.addEventListener('message', (e) => {
-  const data = decodeWSMessage(e.data)  // auto-detects binary vs JSON
-})
+ws.addEventListener('message', e => console.log(decodeWSMessage(e.data)))
 ```
 
-```typescript
-// Standalone exports from @catcher/http
-import {
-  createHttpClient,
-  createRetryWrapper,
-  createSharedAgent,
-  clearDnsCache,
-  createPriorityQueue,
-  enqueueWithPriority,
-} from '@catcher/http'
-
-// Agent — shared connection pool with DNS caching
-const agent = createSharedAgent({ keepAlive: true, dnsCacheTtl: 300 })
-
-// Types from @catcher/core (zero runtime cost)
-import type {
-  HttpClientConfig,
-  ResilientWSOptions,
-  SharedAgentOptions,
-  RetryOptions,
-  PriorityQueueOptions,
-} from '@catcher/core'
-```
-
-## Resilience Layers (HTTP)
+## Resilience Layers
 
 ```
-axios  →  retry  →  circuit breaker  →  concurrency queue
+interceptors → retry → circuit breaker → concurrency queue → HTTP engine
 ```
-
-1. **axios** — underlying HTTP engine (pluggable)
-2. **retry** (p-retry) — exponential backoff, evicts stale keepAlive sockets before retry
-3. **circuit breaker** (cockatiel) — trips on `failureThreshold` consecutive failures, half-opens after `resetTimeout`
-4. **concurrency queue** (p-queue) — caps parallel requests, priority-aware scheduling
 
 ## Documentation
 
 | Directory | Content |
 |-----------|---------|
-| [`docs/arch-ts/`](./docs/arch-ts/) | TypeScript package architecture — overview, module tree, per-module design |
-| [`docs/arch-rs/`](./docs/arch-rs/) | Rust native addon architecture — cargo workspace, FFI, transport, resilience |
-| [`docs/plan/`](./docs/plan/) | Implementation plan — phased milestones (scaffold → types → transport → resilience → FFI) |
-| [`docs/research/`](./docs/research/) | Technical research — API gap analysis, WS/TUS split, TS/Dart package split |
-| [`docs/issues/`](./docs/issues/) | Bug tracker & fix documentation — keepAlive, retry, circuit breaker edge cases |
+| [`docs/arch-ts/`](./docs/arch-ts/) | TypeScript architecture — overview, module tree, per-module design |
+| [`docs/arch-rs/`](./docs/arch-rs/) | Rust architecture — cargo workspace, transport, FFI, resilience |
+| [`docs/user-manual/`](./docs/user-manual/) | Platform usage guides — Node.js, Browser, Flutter |
+| [`docs/test/`](./docs/test/) | Test architecture — proxy, profiles, scenarios |
+| [`docs/research/`](./docs/research/) | Research — API gaps, platform support, strategy |
+| [`docs/plan/`](./docs/plan/) | Implementation plan — phased milestones |
+| [`docs/issues/`](./docs/issues/) | Bug tracker — code review findings |
+| [`docs/showcase.html`](./docs/showcase.html) | Performance showcase page |
 
 ## Development
 
 ```bash
 pnpm install          # install all dependencies
-pnpm build            # build all packages
-pnpm test             # run all tests
-pnpm typecheck        # type-check all packages
-pnpm --filter @catcher/http typecheck   # type-check a single package
+pnpm test             # run all tests (vitest)
+pnpm typecheck        # type-check all TS packages
+pnpm bench            # run benchmarks
+
+# Rust
+cd packages && cargo build
 ```
 
 ## License
