@@ -18,6 +18,7 @@ import type {
   HttpResponse,
   RetryOptions,
 } from '@catcher/core'
+import { createInterceptorManager } from './interceptors.js'
 
 // ── Helpers ───────────────────────────────────────────────────
 
@@ -64,12 +65,20 @@ export function createWebClient(config: HttpClientConfig): IHttpClient {
   const { baseURL, retry, concurrency, circuitBreaker } = config
   const resolvedBase = baseURL.replace(/\/$/, '')
 
-  // ── fetch executor ──
+  // ── interceptors ──
+  const reqInterceptors = createInterceptorManager<RequestConfig>()
+  const resInterceptors = createInterceptorManager<HttpResponse>()
+
+  // ── doFetch with interceptor chain ──
   const doFetch = async (method: string, url: string, body: any, reqConfig?: RequestConfig) => {
+    // Run request interceptor chain (LIFO)
+    let merged = { ...reqConfig }
+    merged = await (reqInterceptors as any)._runRequestChain(merged, merged)
+
     const init: RequestInit = {
       method,
-      headers: { 'Content-Type': 'application/json', ...reqConfig?.headers },
-      signal: reqConfig?.signal,
+      headers: { 'Content-Type': 'application/json', ...merged.headers },
+      signal: merged.signal,
     }
     if (body !== undefined) init.body = JSON.stringify(body)
 
@@ -84,11 +93,16 @@ export function createWebClient(config: HttpClientConfig): IHttpClient {
     }
 
     const text = await resp.text()
-    return {
+    const httpResp: HttpResponse = {
       status: resp.status,
       headers: Object.fromEntries(resp.headers.entries()),
       data: tryParseJSON(text),
+      config: merged,
     }
+
+    // Run response interceptor chain (FIFO)
+    const final = await (resInterceptors as any)._runResponseChain(httpResp)
+    return final?.data !== undefined ? final.data : final
   }
 
   // ── retry wrapper ──
@@ -158,8 +172,8 @@ export function createWebClient(config: HttpClientConfig): IHttpClient {
       return enqueue(2, () => doRequest('PATCH', url, body, reqConfig))
     },
     interceptors: {
-      request: { use: () => 0, eject: () => {}, clear: () => {} },
-      response: { use: () => 0, eject: () => {}, clear: () => {} },
+      request: reqInterceptors,
+      response: resInterceptors,
     } as any,
     circuitBreakerState() {
       return breaker?.state ?? 'closed' as any
