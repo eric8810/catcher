@@ -2,7 +2,7 @@
   "name": "catcher-monorepo",
   "private": true,
   "scripts": {
-    "build": "pnpm -r build",
+    "build": "pnpm build:ts",
     "build:ts": "pnpm --filter @catcher/core --filter @catcher/http --filter @catcher/ws --filter @catcher/web build",
     "test": "vitest run",
     "test:integration": "vitest run packages/test/integration",

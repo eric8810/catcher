@@ -224,8 +224,8 @@ export function createWebClient(config: HttpClientConfig): IHttpClient {
           const isRetryable =
             error.code === 'HTTP_5XX' ||
             error.code === 'ECONNABORTED' ||
-            error.name === 'TypeError' || // network error in fetch
-            error.name === 'AbortError'
+            error.name === 'TypeError' // network error in fetch
+          // AbortError (from AbortController) means intentional cancel — do NOT retry
           if (isRetryable) throw error
           throw new AbortError(error)
         }

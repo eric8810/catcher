@@ -40,6 +40,7 @@ export function createWebSocketClient(options: WebSocketClientOptions): WebSocke
   let activeSocket: WebSocket | null = null
   let activeUrl = ''
   let currentStatus: WsStatus = 'CLOSED'
+  let closedByUser = false
   const listeners = new Map<string, Set<EventListener>>()
 
   function emit(type: string, event?: Event) {
@@ -47,6 +48,7 @@ export function createWebSocketClient(options: WebSocketClientOptions): WebSocke
   }
 
   function connect() {
+    if (closedByUser) return
     currentStatus = 'CONNECTING'
 
     // Try URLs in order (first to connect wins — browser WebSocket doesn't support racing)
@@ -59,8 +61,10 @@ export function createWebSocketClient(options: WebSocketClientOptions): WebSocke
       setupSocket(ws)
     } catch {
       // Invalid URL — schedule reconnect
-      const delay = reconnect.nextDelay()
-      if (delay >= 0) setTimeout(connect, delay)
+      if (!closedByUser) {
+        const delay = reconnect.nextDelay()
+        if (delay >= 0) setTimeout(connect, delay)
+      }
     }
   }
 
@@ -87,8 +91,10 @@ export function createWebSocketClient(options: WebSocketClientOptions): WebSocke
       if (activeSocket === ws) {
         emit('close', new CloseEvent('close', { code: e.code, reason: e.reason }))
         activeSocket = null
-        const delay = reconnect.nextDelay()
-        if (delay >= 0) setTimeout(connect, delay)
+        if (!closedByUser) {
+          const delay = reconnect.nextDelay()
+          if (delay >= 0) setTimeout(connect, delay)
+        }
       }
     }
 
@@ -108,6 +114,7 @@ export function createWebSocketClient(options: WebSocketClientOptions): WebSocke
       }
     },
     close(code, reason) {
+      closedByUser = true
       reconnect.reset()
       activeSocket?.close(code, reason)
     },

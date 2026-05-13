@@ -26,7 +26,10 @@ if (napiJs) {
     tryRequire(path.join(dirname, 'npm', `${platform}-${arch}`, `${pkg}.node`)) ??
     tryRequire(path.join(dirname, `${pkg}.node`)) ??
     tryRequire(path.join(dirname, `${pkg}.${platform}-${arch}.node`)) ??
-    tryRequire(path.join(dirname, 'target', 'release', `lib${pkg.replace(/-/g, '_')}.so`))
+    // cargo build fallback (platform-specific shared library)
+    tryRequire(path.join(dirname, 'target', 'release', `lib${pkg.replace(/-/g, '_')}.so`)) ??
+    tryRequire(path.join(dirname, 'target', 'release', `lib${pkg.replace(/-/g, '_')}.dylib`)) ??
+    tryRequire(path.join(dirname, 'target', 'release', `${pkg.replace(/-/g, '_')}.dll`))
 
   if (!addon) {
     throw new Error(
