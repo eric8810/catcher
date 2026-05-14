@@ -1,0 +1,246 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'catcher_core-v[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: write
+
+jobs:
+  # ──────────────────────────────────────────────
+  # 1. npm TS packages (catcher-core/http/ws/web)
+  # ──────────────────────────────────────────────
+  publish-npm-ts:
+    if: "!startsWith(github.ref, 'refs/tags/catcher_core-v')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - run: pnpm install
+      - run: pnpm build
+      - run: pnpm --filter @eric8810/catcher-core publish --no-git-checks --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - run: pnpm --filter @eric8810/catcher-http publish --no-git-checks --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - run: pnpm --filter @eric8810/catcher-ws publish --no-git-checks --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - run: pnpm --filter @eric8810/catcher-web publish --no-git-checks --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # ──────────────────────────────────────────────
+  # 2. napi native packages (cross-platform)
+  # ──────────────────────────────────────────────
+  publish-napi-http:
+    if: "!startsWith(github.ref, 'refs/tags/catcher_core-v')"
+    runs-on: ${{ matrix.settings.host }}
+    strategy:
+      fail-fast: false
+      matrix:
+        settings:
+          - host: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            build: |
+              cd packages/catcher-napi-http
+              napi build --platform --release --target x86_64-unknown-linux-gnu
+              napi build --platform --release --target x86_64-unknown-linux-musl
+          - host: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            build: |
+              cd packages/catcher-napi-http
+              napi build --platform --release --target x86_64-unknown-linux-musl
+          - host: macos-latest
+            target: aarch64-apple-darwin
+            build: |
+              cd packages/catcher-napi-http
+              napi build --platform --release --target aarch64-apple-darwin
+          - host: macos-latest
+            target: x86_64-apple-darwin
+            build: |
+              cd packages/catcher-napi-http
+              napi build --platform --release --target x86_64-apple-darwin
+          - host: windows-latest
+            target: x86_64-pc-windows-msvc
+            build: |
+              cd packages/catcher-napi-http
+              napi build --platform --release --target x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.settings.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages -> target
+      - name: Install musl tools (linux)
+        if: matrix.settings.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - run: pnpm install
+      - run: ${{ matrix.settings.build }}
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: napi-http-${{ matrix.settings.target }}
+          path: packages/catcher-napi-http/*.node
+          retention-days: 1
+
+  publish-napi-ws:
+    if: "!startsWith(github.ref, 'refs/tags/catcher_core-v')"
+    runs-on: ${{ matrix.settings.host }}
+    strategy:
+      fail-fast: false
+      matrix:
+        settings:
+          - host: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            build: |
+              cd packages/catcher-napi-ws
+              napi build --platform --release --target x86_64-unknown-linux-gnu
+          - host: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            build: |
+              cd packages/catcher-napi-ws
+              napi build --platform --release --target x86_64-unknown-linux-musl
+          - host: macos-latest
+            target: aarch64-apple-darwin
+            build: |
+              cd packages/catcher-napi-ws
+              napi build --platform --release --target aarch64-apple-darwin
+          - host: macos-latest
+            target: x86_64-apple-darwin
+            build: |
+              cd packages/catcher-napi-ws
+              napi build --platform --release --target x86_64-apple-darwin
+          - host: windows-latest
+            target: x86_64-pc-windows-msvc
+            build: |
+              cd packages/catcher-napi-ws
+              napi build --platform --release --target x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.settings.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages -> target
+      - name: Install musl tools (linux)
+        if: matrix.settings.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - run: pnpm install
+      - run: ${{ matrix.settings.build }}
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: napi-ws-${{ matrix.settings.target }}
+          path: packages/catcher-napi-ws/*.node
+          retention-days: 1
+
+  publish-napi-assemble:
+    needs: [publish-napi-http, publish-napi-ws]
+    if: "!startsWith(github.ref, 'refs/tags/catcher_core-v')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - run: pnpm install
+      - name: Download all napi artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: napi-artifacts
+          merge-multiple: false
+      - name: Assemble and publish catcher-napi-http
+        run: |
+          mkdir -p packages/catcher-napi-http/npm
+          cp napi-artifacts/napi-http-*/*.node packages/catcher-napi-http/ || true
+          cd packages/catcher-napi-http
+          napi artifacts -d npm --package-name @eric8810/catcher-napi-http
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Assemble and publish catcher-napi-ws
+        run: |
+          mkdir -p packages/catcher-napi-ws/npm
+          cp napi-artifacts/napi-ws-*/*.node packages/catcher-napi-ws/ || true
+          cd packages/catcher-napi-ws
+          napi artifacts -d npm --package-name @eric8810/catcher-napi-ws
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # ──────────────────────────────────────────────
+  # 3. Rust crates (crates.io)
+  # ──────────────────────────────────────────────
+  publish-rust:
+    if: "!startsWith(github.ref, 'refs/tags/catcher_core-v')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages -> target
+      # Publish in dependency order
+      - name: Publish catcher-core
+        run: cd packages/catcher-core && cargo publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      - name: Publish catcher-http
+        run: cd packages/catcher-http && cargo publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      - name: Publish catcher-ws
+        run: cd packages/catcher-ws && cargo publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      - name: Publish catcher-ffi
+        run: cd packages/catcher-ffi && cargo publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      - name: Publish catcher-uniffi
+        run: cd packages/catcher-uniffi && cargo publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  # ──────────────────────────────────────────────
+  # 4. Flutter (pub.dev) — OIDC auto-publish
+  # ──────────────────────────────────────────────
+  publish-flutter:
+    if: startsWith(github.ref, 'refs/tags/catcher_core-v')
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+      - name: Publish catcher_core
+        working-directory: packages/catcher_core
+        run: dart pub publish --force

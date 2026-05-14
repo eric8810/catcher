@@ -5,16 +5,42 @@
   "plugins": ["node-workspace"],
   "packages": {
     "packages/catcher-core-ts": {
-      "package-name": "@catcher/core"
+      "package-name": "@eric8810/catcher-core"
     },
     "packages/catcher-http-ts": {
-      "package-name": "@catcher/http"
+      "package-name": "@eric8810/catcher-http"
     },
     "packages/catcher-ws-ts": {
-      "package-name": "@catcher/ws"
+      "package-name": "@eric8810/catcher-ws"
     },
     "packages/catcher-web": {
-      "package-name": "@catcher/web"
+      "package-name": "@eric8810/catcher-web"
+    },
+    "packages/catcher-napi-http": {
+      "package-name": "@eric8810/catcher-napi-http"
+    },
+    "packages/catcher-napi-ws": {
+      "package-name": "@eric8810/catcher-napi-ws"
+    },
+    "packages/catcher-core": {
+      "package-name": "catcher-core",
+      "release-type": "rust"
+    },
+    "packages/catcher-http": {
+      "package-name": "catcher-http",
+      "release-type": "rust"
+    },
+    "packages/catcher-ws": {
+      "package-name": "catcher-ws",
+      "release-type": "rust"
+    },
+    "packages/catcher-ffi": {
+      "package-name": "catcher-ffi",
+      "release-type": "rust"
+    },
+    "packages/catcher-uniffi": {
+      "package-name": "catcher-uniffi",
+      "release-type": "rust"
     }
   },
   "changelog-sections": [
