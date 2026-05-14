@@ -7,6 +7,7 @@ export default defineConfig({
       'packages/test/integration/**/*.test.ts',
       'packages/catcher-http-ts/src/**/__tests__/**/*.test.ts',
       'packages/catcher-ws-ts/src/**/__tests__/**/*.test.ts',
+      'packages/catcher-web/src/**/__tests__/**/*.test.ts',
     ],
     exclude: ['packages/test/integration/napi.test.ts'],
     testTimeout: 30_000,

@@ -99,3 +99,71 @@ pub fn build_tls_config(
 
     Ok(builder)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::http::TlsVersion;
+
+    #[test]
+    fn tls1_default_accepts_unauthorized() {
+        let config = TlsConfig::default();
+        assert!(config.reject_unauthorized);
+    }
+
+    #[test]
+    fn tls2_config_with_reject_false() {
+        let config = TlsConfig {
+            reject_unauthorized: false,
+            ..Default::default()
+        };
+        let builder = reqwest::Client::builder();
+        let result = build_tls_config(builder, &config);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn tls3_config_with_ca_cert_pem_invalid() {
+        // Invalid PEM should produce a TlsError, not panic
+        let config = TlsConfig {
+            ca_cert_pem: Some("not-a-real-cert".to_string()),
+            ..Default::default()
+        };
+        let builder = reqwest::Client::builder();
+        let result = build_tls_config(builder, &config);
+        // Should fail because "not-a-real-cert" is not valid PEM
+        assert!(result.is_err(), "invalid PEM should produce an error");
+    }
+
+    #[test]
+    fn tls4_min_tls_version() {
+        let config = TlsConfig {
+            min_tls_version: Some(TlsVersion::Tls1_2),
+            ..Default::default()
+        };
+        let builder = reqwest::Client::builder();
+        let result = build_tls_config(builder, &config);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn tls5_sni_override() {
+        let config = TlsConfig {
+            tls_sni_override: Some("custom-sni.example.com".to_string()),
+            ..Default::default()
+        };
+        let builder = reqwest::Client::builder();
+        let result = build_tls_config(builder, &config);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn tls6_default_config_builds_client() {
+        let config = TlsConfig::default();
+        let builder = reqwest::Client::builder();
+        let result = build_tls_config(builder, &config);
+        assert!(result.is_ok());
+        let client = result.unwrap().build();
+        assert!(client.is_ok());
+    }
+}

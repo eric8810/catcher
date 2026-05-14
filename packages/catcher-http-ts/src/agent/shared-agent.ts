@@ -1,3 +1,4 @@
+import http from 'node:http'
 import https from 'node:https'
 import type { Socket } from 'node:net'
 import CacheableLookup from 'cacheable-lookup'
@@ -20,17 +21,24 @@ function createDnsLookup(ttl: number, hostMapping?: Record<string, string>): Cac
       options: any,
       callback: any,
     ) => {
-      if (hostMapping[hostname]) {
-        // Return mapped IP directly
-        if (typeof options === 'function') {
-          callback = options
-          options = {}
-        }
-        const ip = hostMapping[hostname]
+      // Normalize: CacheableLookup.lookup(hostname, options, callback)
+      // or CacheableLookup.lookup(hostname, callback) — handle both
+      if (typeof options === 'function') {
+        callback = options
+        options = {}
+      }
+
+      const mappedIp = hostMapping[hostname]
+      if (mappedIp) {
+        // CacheableLookup returns lookup-shaped objects: { address, family }
+        // When called with callback: callback(null, address, family)
+        // When called without callback: returns Promise<{ address, family }>
         if (callback) {
-          callback(null, ip, 4)
+          callback(null, mappedIp, 4)
           return
         }
+        // Promise-based usage
+        return Promise.resolve({ address: mappedIp, family: 4 })
       }
       return originalLookup(hostname, options, callback)
     }
@@ -50,7 +58,7 @@ function createDnsLookup(ttl: number, hostMapping?: Record<string, string>): Cac
  * Note: Each call creates a new Agent with its own DNS cache to ensure
  * hostMapping isolation between different client instances.
  */
-export function createSharedAgent(options: SharedAgentOptions & { hostMapping?: Record<string, string> } = {}): https.Agent {
+export function createSharedAgent(options: SharedAgentOptions & { hostMapping?: Record<string, string> } = {}): http.Agent | https.Agent {
   const {
     keepAlive = true,
     keepAliveMsecs = 30_000,
@@ -67,13 +75,12 @@ export function createSharedAgent(options: SharedAgentOptions & { hostMapping?: 
   // Default: keepAliveMsecs + 5s grace period.
   const freeSocketTimeout = keepAlive ? keepAliveMsecs + 5_000 : 0
 
-  const agentOpts: https.AgentOptions = {
+  const agentOpts: http.AgentOptions = {
     keepAlive,
     keepAliveMsecs,
     maxSockets,
     maxFreeSockets,
     timeout,
-    rejectUnauthorized,
     // Schedule requests FIFO to avoid hoarding connections
     scheduling: 'fifo' as const,
   }
@@ -83,7 +90,7 @@ export function createSharedAgent(options: SharedAgentOptions & { hostMapping?: 
     ;(agentOpts as any).lookup = createDnsLookup(dnsCacheTtl, hostMapping).lookup
   }
 
-  const agent = new https.Agent(agentOpts)
+  const agent = new http.Agent(agentOpts as http.AgentOptions)
 
   // Set freeSocketTimeout — Node destroys idle free sockets older than this
   if (keepAlive && freeSocketTimeout > 0) {
@@ -93,7 +100,9 @@ export function createSharedAgent(options: SharedAgentOptions & { hostMapping?: 
   // Auto-evict bad sockets from the keepAlive pool.
   // When a socket errors, Node normally removes it from freeSockets but
   // may keep it in CLOSE_WAIT. Explicitly destroy on error + close.
-  agent.on('free', (_req: any, socket: Socket) => {
+  agent.on('free', (_req: any, socket: any) => {
+    // Guard: socket may not always be a proper Socket in edge cases
+    if (!socket || typeof socket.once !== 'function') return
     const onError = () => {
       socket.destroy()
     }

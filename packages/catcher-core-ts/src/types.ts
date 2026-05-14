@@ -129,7 +129,8 @@ export interface HttpClientConfig {
   dns?: DnsConfig
   // --- G8: TLS ---
   tls?: TlsConfig
-  // --- G9: Transport adapter ---
+  // --- G9: Transport adapter (deferred — not yet consumed by client) ---
+  /** @deprecated Not yet consumed by the client. Reserved for future use. */
   adapter?: TransportAdapter
   // --- G12: Auth helpers ---
   /** Basic authentication */
@@ -409,15 +410,30 @@ export function isCatcherError(err: unknown): err is CatcherHttpError {
 }
 
 // === Transport Adapter (G9) ===
+//
+// NOTE: TransportAdapter is typed here for forward-compatibility but is
+// NOT yet consumed by createHttpClient(). The adapter config field exists
+// on HttpClientConfig but is currently ignored. Implementation is deferred
+// to a future release where it will allow swapping the underlying HTTP
+// transport (e.g. for testing mocks, custom protocols, or FFI bridges).
 
+/** @deprecated Not yet consumed by the client. Reserved for future use. */
 export interface TransportAdapter {
   execute(config: RequestConfig & { method: string; url: string; body?: any }): Promise<HttpResponse>
 }
 
 // === Events (G11) ===
+//
+// NOTE: `circuitBreakerChange` and `networkQualityChange` are typed here
+// for forward-compatibility but are NOT yet emitted by the current
+// implementation. Only `retry` and `requestComplete` are emitted.
+// Consumers can subscribe via client.on() without error — the events
+// will simply not fire until a future release adds the emission logic.
 
 export type ClientEvent =
   | { type: 'retry'; attempt: number; error: Error; url: string }
-  | { type: 'circuitBreakerChange'; from: 'closed' | 'open' | 'half-open'; to: 'closed' | 'open' | 'half-open' }
-  | { type: 'networkQualityChange'; from: string; to: string }
   | { type: 'requestComplete'; method: string; url: string; status: number; durationMs: number }
+  /** @deprecated Not yet emitted. Reserved for future use. */
+  | { type: 'circuitBreakerChange'; from: 'closed' | 'open' | 'half-open'; to: 'closed' | 'open' | 'half-open' }
+  /** @deprecated Not yet emitted. Reserved for future use. */
+  | { type: 'networkQualityChange'; from: string; to: string }

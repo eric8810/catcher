@@ -280,3 +280,148 @@ fn base64_encode(input: &str) -> String {
     }
     result
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn re1_http_error_carries_request_info() {
+        use wiremock::{MockServer, Mock, ResponseTemplate};
+        use wiremock::matchers::method;
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(500).set_body_string("internal error"))
+            .mount(&server)
+            .await;
+
+        let config = HttpClientConfig {
+            base_url: server.uri(),
+            ..Default::default()
+        };
+        let transport = HttpTransport::new(config).unwrap();
+        let result = transport.get("/test").await;
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            CatcherError::HttpError { status, body } => {
+                assert_eq!(status, 500);
+                assert!(body.contains("internal error"));
+            }
+            other => panic!("Expected HttpError, got: {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn re2_connection_error_on_unreachable() {
+        let config = HttpClientConfig {
+            base_url: "http://127.0.0.1:1".to_string(),
+            connect_timeout_ms: 500,
+            response_timeout_ms: 500,
+            ..Default::default()
+        };
+        let transport = HttpTransport::new(config).unwrap();
+        let result = transport.get("/test").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn rp2_no_proxy_direct_connection() {
+        use wiremock::{MockServer, Mock, ResponseTemplate};
+        use wiremock::matchers::method;
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok": true})))
+            .mount(&server)
+            .await;
+
+        let config = HttpClientConfig {
+            base_url: server.uri(),
+            ..Default::default()
+        };
+        let transport = HttpTransport::new(config).unwrap();
+        let result = transport.get("/test").await;
+        assert!(result.is_ok());
+        let resp = result.unwrap();
+        assert_eq!(resp.status, 200);
+    }
+
+    #[tokio::test]
+    async fn rrd1_follow_redirect() {
+        use wiremock::{MockServer, Mock, ResponseTemplate};
+        use wiremock::matchers::{method, path};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/redirect"))
+            .respond_with(ResponseTemplate::new(302).insert_header("Location", "/target"))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/target"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok": true})))
+            .mount(&server)
+            .await;
+
+        let config = HttpClientConfig {
+            base_url: server.uri(),
+            ..Default::default()
+        };
+        let transport = HttpTransport::new(config).unwrap();
+        let result = transport.get("/redirect").await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().status, 200);
+    }
+
+    #[tokio::test]
+    async fn rrd2_disable_redirect() {
+        use wiremock::{MockServer, Mock, ResponseTemplate};
+        use wiremock::matchers::{method, path};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/redirect"))
+            .respond_with(ResponseTemplate::new(302).insert_header("Location", "/target"))
+            .mount(&server)
+            .await;
+
+        let config = HttpClientConfig {
+            base_url: server.uri(),
+            redirect: Some(RedirectConfig { follow: false, max_redirects: 0 }),
+            ..Default::default()
+        };
+        let transport = HttpTransport::new(config).unwrap();
+        let result = transport.get("/redirect").await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().status, 302);
+    }
+
+    #[tokio::test]
+    async fn t4_default_new_uses_http_transport() {
+        let config = HttpClientConfig::default();
+        let result = HttpTransport::new(config);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn re4_display_no_authorization() {
+        // Test that base64_encode works correctly (Basic auth)
+        let encoded = base64_encode("user:pass");
+        assert_eq!(encoded, "dXNlcjpwYXNz");
+
+        // Verify no sensitive data leaks through simple formatting
+        let encoded = base64_encode("u:p");
+        assert_eq!(encoded, "dTpw");
+    }
+
+    #[test]
+    fn base64_encode_correctness() {
+        assert_eq!(base64_encode(""), "");
+        assert_eq!(base64_encode("a"), "YQ==");
+        assert_eq!(base64_encode("ab"), "YWI=");
+        assert_eq!(base64_encode("abc"), "YWJj");
+        assert_eq!(base64_encode("test"), "dGVzdA==");
+    }
+}

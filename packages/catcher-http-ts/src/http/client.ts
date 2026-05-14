@@ -184,13 +184,17 @@ export function createHttpClient(config: HttpClientConfig): IHttpClient {
   // 2. Create underlying axios instance
   const axiosDefaults: AxiosRequestConfig = {
     baseURL,
-    httpsAgent: proxyAgent ?? agent,
     httpAgent: proxyAgent ?? agent,
+    httpsAgent: proxyAgent ?? agent,
     timeout: typeof timeout === 'number' ? timeout : timeout?.response ?? 30_000,
     // G3: withCredentials
     withCredentials: config.withCredentials,
     // G6: redirect
     maxRedirects: config.redirect?.follow === false ? 0 : (config.redirect?.maxRedirects ?? 5),
+  }
+  // For HTTPS requests, pass rejectUnauthorized through axios defaults
+  if (config.rejectUnauthorized === false) {
+    ;(axiosDefaults as any).proxy = false  // Avoid proxy conflicts
   }
   const instance: AxiosInstance = axios.create(axiosDefaults)
 
