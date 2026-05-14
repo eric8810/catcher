@@ -15,11 +15,13 @@ catcher 是一个跨平台网络韧性库，覆盖 HTTP、WebSocket、Codec 三�
 |------|------|-----------|---------------|------|
 | **types** | `catcher-core` ✅ Published | `@eric8810/catcher-core` ✅ Published | — | `catcher_core` ✅ Published |
 | **HTTP** | `catcher-http` ✅ Published | `@eric8810/catcher-http` ✅ Published | `@eric8810/catcher-napi-http` ✅ Published | `catcher_core` ✅ Published |
+| **SSE** | `catcher-http` 📐 设计中 | `@eric8810/catcher-http` 📐 设计中 | `@eric8810/catcher-napi-http` 📐 设计中 | 📐 设计中 |
 | **WS** | `catcher-ws` ✅ Published | `@eric8810/catcher-ws` ✅ Published | `@eric8810/catcher-napi-ws` ✅ Published | `catcher_core` ✅ Published |
 | **FFI** | `catcher-ffi` ✅ Published (cdylib umbrella) | — | — | (通过 catcher_ffi) |
 
-> ✅ = 已实现  
+> ✅ = 已实现  📐 = 设计中
 > Codec 已合并到 WS — `catcher-ws` 内置 msgpack 编解码。
+> SSE 基于 HTTP，归入 `catcher-http` / `catcher-web`。
 
 ## 架构文档
 
@@ -44,6 +46,8 @@ catcher 是一个跨平台网络韧性库，覆盖 HTTP、WebSocket、Codec 三�
         catcher-uniffi        dart:ffi (Flutter)
         (Swift + Kotlin)      catcher_core
 ```
+
+> SSE 支持：`catcher-http`（Rust reqwest + tokio_stream）、`@eric8810/catcher-http`（Node fetch）、`@eric8810/catcher-web`（Browser fetch）均内置 SSE 能力。详见 [`arch-ts/10-sse.md`](../arch-ts/10-sse.md)。
 
 - **Node.js** — TS (`@eric8810/catcher-http`) 或 native (`@eric8810/catcher-napi-http`)
 - **Browser** — `@eric8810/catcher-web` (fetch)
