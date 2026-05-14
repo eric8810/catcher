@@ -51,21 +51,24 @@ const stream = createSSEStream({
   headers: { Authorization: `Bearer ${apiKey}` },
   body: { model: 'gpt-4', messages: [{ role: 'user', content: 'Hello' }], stream: true },
 })
-for await (const event of stream) {
-  if (event.data === '[DONE]') break  // 业务逻辑：自行判断终止
-  const chunk = JSON.parse(event.data)  // 业务逻辑：自行解析
-  process.stdout.write(chunk.choices[0]?.delta?.content ?? '')
+for await (const line of stream) {
+  if (!line.startsWith('data:')) continue
+  const payload = line.startsWith('data: ') ? line.slice(6) : line.slice(5)
+  if (payload === '[DONE]') break  // 业务逻辑：自行判断终止
+  process.stdout.write(JSON.parse(payload).choices[0]?.delta?.content ?? '')
 }
 
 // SSE — 长连接推送（自动重连 + 断点续传）
 import { createSSEClient } from '@eric8810/catcher-http'
-const sse = createSSEClient({
+const client = createSSEClient({
   url: 'https://api.example.com/events',
   headers: { Authorization: 'Bearer xxx' },
   reconnect: { initialDelay: 1000, maxDelay: 30_000 },
 })
-sse.addEventListener('message', (e) => console.log(e.data))
+for await (const line of client) {
+  if (line.startsWith('data: ')) console.log(line.slice(6))
+}
 
 // 类型
-import type { HttpClientConfig, ResilientWSOptions, SSEClientConfig, SSEStreamOptions } from '@eric8810/catcher-core'
+import type { HttpClientConfig, ResilientWSOptions, SSEStreamOptions, SSEClientOptions } from '@eric8810/catcher-core'
 ```

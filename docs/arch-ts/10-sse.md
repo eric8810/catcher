@@ -1,7 +1,6 @@
 # 10 — Server-Sent Events (SSE) 客户端
 
 > 新增模块 · 设计文档
-> 基于 WHATWG Server-Sent Events 规范，面向 AI 流式响应场景
 > 本文档同时覆盖 TypeScript 和 Rust 两侧的 SSE 设计
 
 ## 需求背景
@@ -16,202 +15,207 @@ AI 大模型 API（OpenAI / Anthropic / Google Gemini）的 chat completion 普�
 | AI 场景匹配 | 请求 → 流式响应，天然契合 | 过度设计 |
 | 行业标准 | OpenAI / Anthropic / Gemini 全部采用 | 少数场景使用 |
 
-## SSE 协议格式（WHATWG 规范）
-
-```
-event: message_start
-id: msg_001
-data: {"type":"message_start","message":{"id":"msg_01","model":"gpt-4"}}
-
-data: {"choices":[{"delta":{"content":"Hello"}}]}
-
-data: {"choices":[{"delta":{"content":" world"}}]}
-
-data: [DONE]
-```
-
-字段规范：
-
-| 字段 | 格式 | 用途 |
-|------|------|------|
-| `data:` | `data: <payload>\n` | 事件数据，可多行拼接 |
-| `event:` | `event: <type>\n` | 事件类型，默认 `"message"` |
-| `id:` | `id: <string>\n` | 事件 ID，用于断点续传 |
-| `retry:` | `retry: <ms>\n` | 服务端建议重连间隔 |
-| 空行 | `\n` | 事件分隔符 |
-| `: comment` | `: <text>\n` | 注释（心跳保活） |
-
-- MIME 类型：`text/event-stream`
-- 字符编码：UTF-8
-
 ---
 
-## ⚠️ 非标准 SSE 格式（重要）
+## 设计理念：fetch + stream 体验
 
-### 问题
-
-**现实中的 SSE 流并非总是严格遵循 WHATWG 规范。** 以下是实际生产环境中遇到的传输层变体：
-
-| 变体 | 描述 | 示例 |
-|------|------|------|
-| **`\r\n` 混用** | Windows 风格换行 | `data: foo\r\n\r\n` |
-| **前缀变体** | `data:` 后无空格 | `data:foo` vs `data: foo` |
-| **不完整 chunk** | 网络分片导致一行被切断 | 见 [elysiajs/eden#222](https://github.com/elysiajs/eden/issues/222) |
-| **多行 data 拼接问题** | 多行 data 拼接时丢失 `\n` | 影响代码/Markdown 格式 |
-
-> **注意**：裸 JSON、JSONL、自定义分隔符等属于**业务层协议**，Catcher 作为传输韧性库不介入。我们只处理 SSE 协议本身的传输层问题。
-
-### 设计原则：传输层只做传输层的事
+SSE 不是交互协议——没有握手、没有状态机、没有双向协商。它本质上就是：
 
 ```
-❌ 错误做法：在传输库里内置 OpenAI / Anthropic / JSONL 解析
-   → 每多一个 API 变体就多一种策略，永无止境
-   → 库的职责边界模糊，与业务耦合
-
-✅ 正确做法：
-   - 内置两种策略：standard（严格 WHATWG）+ lenient（容错传输层变体）
-   - 提供干净的扩展接口，开发者按需实现业务解析
-   - 库的职责：可靠地把 SSE 事件从网络层搬到调用方手里
+HTTP 请求 → 服务端慢慢吐文本 → 读完了就完了
 ```
 
-### 解析器架构
+因此 Catcher 的 SSE 模块定位为：**一个会重连的文本流行，不介入业务解析。**
 
-```
-原始字节流
-    │
-    ▼
-┌──────────────────────────────┐
-│ Chunk Buffer                 │  处理网络分片：按 \n 边界切行
-│ (处理不完整 chunk)            │  保证每次 yield 一个完整行
-└──────────────┬───────────────┘
-               │  完整行
-               ▼
-┌──────────────────────────────┐
-│ Line Classifier              │  识别行类型
-│ (内置两种，可自定义扩展)       │  data / event / id / retry / comment / blank
-└──────────────┬───────────────┘
-               │
-               ▼
-┌──────────────────────────────┐
-│ Event Assembler              │  组装完整事件
-│ (空行分隔，WHATWG 标准)       │
-└──────────────┬───────────────┘
-               │
-               ▼
-         SSEEvent { event, data, id, retry }
-```
-
-### 内置策略（仅两种）
-
-| | `standard`（默认） | `lenient` |
-|---|---|---|
-| 定位 | 严格 WHATWG 规范 | 容错真实世界的传输层毛刺 |
-| `data:` 行解析 | 严格 `data: ` 前缀（有空格） | 允许 `data:` 后无空格 |
-| 裸行（无 `data:` 前缀） | 忽略 | 当作 data |
-| 分隔符 | `\n\n`（空行） | `\n\n`（空行） |
-| `\r\n` | 不处理 | 自动 strip `\r` |
-| 不完整 chunk | 缓冲至行完整 | 缓冲至行完整 |
-| 未知字段 | 忽略 | 忽略 |
-
-### 自定义策略接口
-
-开发者遇到非标准服务端时，自行实现：
+### 用户的体验目标
 
 ```typescript
-interface SSEParseStrategy {
-  /** 行分类器：判断一行是什么类型 */
-  classifyLine?(line: string): 'data' | 'event' | 'id' | 'retry' | 'comment' | 'blank' | 'custom'
+// 裸 fetch 流式读取
+const res = await fetch(url, { method: 'POST', body, headers })
+const reader = res.body!.getReader()
+const decoder = new TextDecoder()
+while (true) {
+  const { done, value } = await reader.read()
+  if (done) break
+  const text = decoder.decode(value, { stream: true })  // 可能半行
+  // 自己处理分片、自己切行...
+}
 
-  /** 事件分隔判定：当前行是否标志一个事件结束 */
-  isEventBoundary?(line: string): boolean
-
-  /** data 解码：对原始 data 字符串做后处理 */
-  decodeData?(raw: string): string
-
-  /** 自定义字段处理：遇到无法识别的字段时 */
-  onUnknownField?(fieldName: string, value: string, ctx: SSEParseContext): void
+// Catcher SSE — 同样的心智模型，但没有痛点
+const stream = createSSEStream({ url, method: 'POST', body, headers })
+for await (const line of stream) {
+  // 完整的一行，没有半行分片问题
+  // 没有心跳噪音，没有空行噪音
 }
 ```
 
-### 使用示例
+### 职责划分
+
+```
+Catcher 的本分（库静默处理）：            用户的事（用户自己处理）：
+├── HTTP 连接管理                         ├── 读到内容行后怎么处理
+├── chunk → 完整行缓冲                    ├── data: 前缀剥离
+├── 自动重连 + 指数退避                   ├── [DONE] 判断
+├── Last-Event-ID 静默提取 + 重连携带     ├── JSON.parse
+├── retry: 间隔静默提取                   ├── event: 路由
+├── : comment 心跳静默吃掉                ├── 任何业务逻辑
+├── 空行静默吃掉
+├── 连接状态跟踪
+├── timeout / circuit breaker
+└── AbortSignal 支持
+```
+
+### 库静默处理的行（不吐给用户）
+
+| 服务端发送 | 库的行为 |
+|-----------|---------|
+| `: keepalive` | 静默吃掉，重置 idle timer |
+| （空行） | 静默吃掉（SSE 事件分隔符） |
+| `id: msg_003` | 静默记录 `lastEventId`，重连时自动携带 |
+| `retry: 5000` | 静默调整重连间隔 |
+
+这些是 SSE 协议自身的控制信令，跟 HTTP 的 `Content-Length`、`Transfer-Encoding` 一样——库处理掉，用户不需要知道。
+
+### 吐给用户的行（内容行，原样输出）
+
+| 服务端发送 | 用户拿到的 |
+|-----------|-----------|
+| `event: message_start` | `"event: message_start"` |
+| `data: {"type":"start",...}` | `"data: {\"type\":\"start\",...}"` |
+| `data: Hello` | `"data: Hello"` |
+| `data:  world` | `"data:  world"` |
+| `data: [DONE]` | `"data: [DONE]"` |
+
+用户拿到的是 **内容行（content lines）**——所有以 `event:`、`data:`、`id:`、`retry:` 开头的有效字段行，原样输出，不做任何结构化或解析。
+
+---
+
+## API
+
+### `createSSEStream` — 一次性流式请求
 
 ```typescript
-// 默认：严格 WHATWG
-const stream = createSSEStream({ url: '/api/events' })
+function createSSEStream(options: SSEStreamOptions): SSEStream
+```
 
-// lenient：容错传输层变体（\r\n、无空格等）
-const stream = createSSEStream({
-  url: '/api/stream',
-  parseStrategy: 'lenient',
-})
+- 用途：AI 流式对话、一次性数据拉取
+- 特点：`AsyncIterable<string>`，消费完即结束，不自动重连
+- 退出方式：`for await` 自然结束 / `break` / `AbortSignal.abort()`
 
-// 自定义：开发者自行处理业务格式
-// 例：某服务端用 --- 分隔，每行是裸 JSON
-const stream = createSSEStream({
-  url: '/api/custom',
-  parseStrategy: {
-    classifyLine(line) {
-      if (line === '---') return 'blank'
-      if (line.startsWith('#')) return 'comment'
-      return 'data'  // 所有其他行都当 data
-    },
-    isEventBoundary(line) { return line === '---' },
-  },
-})
+### `createSSEClient` — 长连接 + 自动重连
 
-// OpenAI 场景：开发者自己在业务层处理 [DONE] 和 delta 解析
+```typescript
+function createSSEClient(options: SSEClientOptions): SSEClient
+```
+
+- 用途：服务端推送、实时通知、监控仪表盘
+- 特点：`AsyncIterable<string>`，连接断开后自动重连，携带 `Last-Event-ID`
+- 退出方式：`client.close()` / `AbortSignal.abort()`
+
+---
+
+## 使用示例
+
+### AI 流式对话
+
+```typescript
+import { createSSEStream } from '@eric8810/catcher-http'
+
 const stream = createSSEStream({
   url: 'https://api.openai.com/v1/chat/completions',
   method: 'POST',
   headers: { Authorization: `Bearer ${apiKey}` },
-  body: { model: 'gpt-4', messages: [{ role: 'user', content: 'Hi' }], stream: true },
-  parseStrategy: 'lenient',
+  body: { model: 'gpt-4', messages: [{ role: 'user', content: 'Hello' }], stream: true },
 })
-for await (const event of stream) {
-  if (event.data === '[DONE]') break  // 业务逻辑：自行判断终止
-  const chunk = JSON.parse(event.data)  // 业务逻辑：自行解析
+
+for await (const line of stream) {
+  if (!line.startsWith('data:')) continue
+  const payload = line.startsWith('data: ') ? line.slice(6) : line.slice(5)
+  if (payload === '[DONE]') break
+  const chunk = JSON.parse(payload)
   process.stdout.write(chunk.choices[0]?.delta?.content ?? '')
+}
+// 循环结束 = 连接关闭，无需手动清理
+```
+
+### 长连接推送
+
+```typescript
+import { createSSEClient } from '@eric8810/catcher-http'
+
+const client = createSSEClient({
+  url: 'https://api.example.com/events',
+  headers: { Authorization: 'Bearer xxx' },
+  reconnect: { initialDelay: 1000, maxDelay: 30_000 },
+})
+
+for await (const line of client) {
+  if (line.startsWith('data: ')) {
+    console.log(line.slice(6))
+  }
+}
+
+// 永不主动断开。如需断开：
+client.close()
+```
+
+### 中断请求
+
+```typescript
+const controller = new AbortController()
+const stream = createSSEStream({
+  url: 'https://api.example.com/stream',
+  signal: controller.signal,
+})
+
+setTimeout(() => controller.abort(), 5000)  // 5 秒后中断
+for await (const line of stream) {
+  console.log(line)  // abort 后 for await 自然结束
 }
 ```
 
-**Rust 自定义策略示例：**
+### Rust
 
 ```rust
-use catcher_core::types::sse::{SseParseStrategy, LineType, SseStrategy, SseClientConfig};
-use catcher_http::sse::SseStream;
-
-// 自定义策略：用 "---" 分隔事件，# 开头为注释
-struct CustomSeparator;
-
-impl SseParseStrategy for CustomSeparator {
-    fn classify_line(&self, line: &str) -> LineType {
-        if line == "---" { return LineType::Blank; }
-        if line.starts_with('#') { return LineType::Comment; }
-        LineType::Data
-    }
-
-    fn is_event_boundary(&self, line: &str) -> bool {
-        line == "---"
-    }
-}
+use catcher_http::sse::{SseStream, SseClientConfig};
 
 let config = SseClientConfig {
-    url: "https://api.example.com/custom".into(),
-    parse_strategy: SseStrategy::Custom(Box::new(CustomSeparator)),
+    url: "https://api.openai.com/v1/chat/completions".into(),
+    method: SseMethod::POST,
+    headers: HashMap::from([("Authorization".into(), format!("Bearer {}", api_key))]),
+    body: Some(serde_json::to_string(&body)?),
     ..Default::default()
 };
 let mut stream = SseStream::connect(config).await?;
-while let Some(event) = stream.next().await {
-    let event = event?;
-    println!("data: {}", event.data);
+while let Some(line) = stream.next().await {
+    let line = line?;
+    if let Some(payload) = line.strip_prefix("data: ") {
+        if payload == "[DONE]" { break; }
+        let chunk: Value = serde_json::from_str(payload)?;
+        print!("{}", chunk["choices"][0]["delta"]["content"]);
+    }
 }
 ```
 
 ---
 
-## 全平台支持
+## 自动关闭连接
 
-SSE 模块覆盖所有 Catcher 平台：
+| 场景 | 行为 |
+|------|------|
+| 服务端正常关闭连接 | `for await` 自然结束（类似 fetch stream done） |
+| 服务端返回 204 | 不再重连（SSE 规范），`for await` 结束 |
+| 用户 `break` 出循环 | 库检测到消费者离开，关闭连接 |
+| `AbortSignal.abort()` | 立即中断，`for await` 结束 |
+| 超时 | throw `SSETimeoutError` |
+
+`createSSEStream` 用户不需要手动关闭任何东西——`for await` 结束 = 连接关闭。
+
+`createSSEClient` 因为可能永远不结束，需要 `client.close()` 或 `AbortSignal` 来主动断开。
+
+---
+
+## 全平台支持
 
 ```
                 @eric8810/catcher-core (zero deps)
@@ -250,35 +254,22 @@ SSE 模块覆盖所有 Catcher 平台：
 ```typescript
 // === SSE ===
 
-/** 内置解析策略名称 */
-export type SSEBuiltinStrategy = 'standard' | 'lenient'
-
-/** 自定义解析策略 */
-export interface SSEParseStrategy {
-  classifyLine?(line: string): 'data' | 'event' | 'id' | 'retry' | 'comment' | 'blank' | 'custom'
-  isEventBoundary?(line: string): boolean
-  decodeData?(raw: string): string
-  onUnknownField?(fieldName: string, value: string, ctx: SSEParseContext): void
-}
-
-export interface SSEClientConfig {
+export interface SSEStreamOptions {
   /** SSE 端点 URL */
   url: string
   /** HTTP 方法，默认 'GET'。AI 场景通常用 'POST' */
   method?: 'GET' | 'POST'
   /** 请求 headers（如 Authorization） */
   headers?: Record<string, string>
-  /** 请求 body（POST 场景） */
+  /** 请求 body（POST 场景）。对象会自动 JSON.stringify */
   body?: string | Record<string, unknown>
+  /** 请求超时 ms，默认 30_000 */
+  timeout?: number
+  /** 中断信号 */
+  signal?: AbortSignal
+}
 
-  /** 解析策略：内置名称 或 自定义对象。默认 'standard' */
-  parseStrategy?: SSEBuiltinStrategy | SSEParseStrategy
-
-  /** 连接层选项 */
-  keepAlive?: boolean
-  dnsCacheTtl?: number
-  rejectUnauthorized?: boolean
-
+export interface SSEClientOptions extends SSEStreamOptions {
   /** 自动重连配置 */
   reconnect?: {
     enabled?: boolean
@@ -287,49 +278,34 @@ export interface SSEClientConfig {
     maxDelay?: number
     backoffMultiplier?: number
   }
-
-  /** 重试配置（连接阶段的错误） */
-  retry?: RetryOptions
   /** 熔断配置 */
   circuitBreaker?: { failureThreshold: number; resetTimeout: number }
-  /** 请求超时 ms，默认 30_000 */
-  timeout?: number
 }
 
-export interface SSEEvent {
-  /** 事件类型，默认 'message' */
-  event: string
-  /** 事件数据（原始字符串） */
-  data: string
-  /** 事件 ID */
-  id?: string
-  /** 重连间隔（服务端建议） */
-  retry?: number
+/**
+ * SSE 内容流行 — yield 内容行，静默过滤控制行（心跳/空行）
+ *
+ * 库静默处理：
+ * - `id:` → 记录 lastEventId，用于重连
+ * - `retry:` → 调整重连间隔
+ * - `: comment` → 心跳，吃掉
+ * - 空行 → 事件分隔符，吃掉
+ * - chunk 缓冲 → 保证每次 yield 完整一行
+ */
+export interface SSEStream extends AsyncIterable<string> {
+  /** 库从 id: 行静默提取，用于重连时自动携带 Last-Event-ID */
+  readonly lastEventId: string
 }
 
-export interface ISSEClient {
+export interface SSEClient extends AsyncIterable<string> {
   readonly readyState: 'CONNECTING' | 'OPEN' | 'CLOSED'
   readonly lastEventId: string
-  addEventListener(type: string, listener: (event: SSEEvent) => void): void
-  removeEventListener(type: string, listener: (event: SSEEvent) => void): void
+  /** 主动关闭连接（仅 createSSEClient 需要） */
   close(): void
 }
 
-/** SSE 一次性消费流配置（SSEClientConfig 的简化版，无重连/熔断） */
-export interface SSEStreamOptions {
-  url: string
-  method?: 'GET' | 'POST'
-  headers?: Record<string, string>
-  body?: string | Record<string, unknown>
-  /** 解析策略 */
-  parseStrategy?: SSEBuiltinStrategy | SSEParseStrategy
-  timeout?: number
-  keepAlive?: boolean
-}
-
-export interface SSEStream extends AsyncIterable<SSEEvent> {
-  readonly lastEventId: string
-  cancel(): void
+export interface SSETimeoutError extends Error {
+  readonly type: 'SSE_TIMEOUT'
 }
 ```
 
@@ -338,61 +314,6 @@ export interface SSEStream extends AsyncIterable<SSEEvent> {
 ```rust
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-
-/// SSE 事件
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SseEvent {
-    /// 事件类型，默认 "message"
-    pub event: String,
-    /// 事件数据（原始字符串）
-    pub data: String,
-    /// 事件 ID（用于断点续传）
-    pub id: Option<String>,
-    /// 服务端建议的重连间隔（ms）
-    pub retry: Option<u64>,
-}
-
-/// 内置解析策略
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub enum SseBuiltinStrategy {
-    /// 严格 WHATWG 规范
-    #[default]
-    Standard,
-    /// 宽松模式：容错传输层变体（\r\n、缺少空格等）
-    Lenient,
-}
-
-/// 行分类结果
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LineType {
-    Data,
-    Event,
-    Id,
-    Retry,
-    Comment,
-    Blank,
-    Custom,
-}
-
-/// 自定义解析策略 trait（与 TS 侧 SSEParseStrategy 对等）
-pub trait SseParseStrategy: Send + Sync {
-    /// 行分类器：判断一行是什么类型
-    fn classify_line(&self, line: &str) -> LineType;
-    /// 事件分隔判定：当前行是否标志一个事件结束
-    fn is_event_boundary(&self, line: &str) -> bool { line.is_empty() }
-    /// data 解码：对原始 data 字符串做后处理
-    fn decode_data(&self, raw: &str) -> &str { raw }
-}
-
-/// 解析策略：内置名称 或 自定义 trait 实现
-pub enum SseStrategy {
-    Builtin(SseBuiltinStrategy),
-    Custom(Box<dyn SseParseStrategy>),
-}
-
-impl Default for SseStrategy {
-    fn default() -> Self { Self::Builtin(SseBuiltinStrategy::default()) }
-}
 
 /// SSE 客户端配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -405,9 +326,6 @@ pub struct SseClientConfig {
     /// 请求 body（JSON 字符串，调用方自行序列化）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub body: Option<String>,
-    /// 解析策略：内置名称 或 自定义 trait。默认 Standard
-    #[serde(skip)]
-    pub parse_strategy: SseStrategy,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reconnect: Option<SseReconnectConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -416,6 +334,21 @@ pub struct SseClientConfig {
     pub circuit_breaker: Option<CircuitBreakerConfig>,
     #[serde(default = "default_timeout")]
     pub timeout_ms: u64,
+}
+
+impl Default for SseClientConfig {
+    fn default() -> Self {
+        Self {
+            url: String::new(),
+            method: SseMethod::default(),
+            headers: HashMap::new(),
+            body: None,
+            reconnect: None,
+            retry: None,
+            circuit_breaker: None,
+            timeout_ms: 30_000,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
@@ -435,124 +368,148 @@ fn default_timeout() -> u64 { 30_000 }
 
 ---
 
-## Rust 侧实现设计
+## 内部实现
+
+### 核心管线
+
+```
+服务端字节流
+    │
+    ▼
+┌──────────────────────────────────┐
+│ Chunk Buffer                     │
+│ 按 \n 边界切行                    │
+│ 保证每次 yield 完整一行           │
+│ （strip \r，容错 Windows 换行）   │
+└──────────────┬───────────────────┘
+               │  完整行
+               ▼
+┌──────────────────────────────────┐
+│ Line Router                      │
+│                                   │
+│  空行           → 吃掉            │
+│  : comment      → 吃掉 + 重置idle │
+│  id: xxx        → 记录 lastEventId│
+│  retry: xxx     → 调整重连间隔    │
+│  其他内容行      → yield 给用户    │
+└──────────────────────────────────┘
+               │
+               ▼
+         string（原样输出）
+```
+
+没有策略、没有分类器、没有事件组装器。就是一个带规则的行过滤器。
 
 ### 新增源文件
 
 ```
-packages/catcher-http/src/
+packages/catcher-http/src/          packages/catcher-http-ts/src/
+├── sse/                             ├── sse/
+│   ├── mod.rs                       │   ├── router.ts    # 行路由（~80 行）
+│   ├── router.rs    # 行路由 (~80)  │   ├── stream.ts    # SSEStream (~100 行)
+│   ├── stream.rs    # SseStream     │   ├── client.ts    # SSEClient (~150 行)
+│   └── client.rs    # SseClient     │   └── index.ts
+└── lib.rs           # pub mod sse   └── index.ts
+
+packages/catcher-web/src/
 ├── sse/
-│   ├── mod.rs              # 模块导出
-│   ├── parser.rs           # SSE 解析器（策略化） (~200 行)
-│   ├── client.rs           # SseClient（长连接 + 自动重连） (~250 行)
-│   └── stream.rs           # SseStream（一次性消费） (~150 行)
-├── transport/
-│   ├── http_client.rs      # 现有
-│   └── ...
-├── resilience/
-│   └── ...
-└── lib.rs                  # 新增 pub mod sse
+│   ├── router.ts    # 同 TS 版
+│   ├── stream.ts    # 浏览器版
+│   ├── client.ts    # 浏览器版（无 SharedAgent）
+│   └── index.ts
+└── index.ts
 
 packages/catcher-core/src/types/
-├── sse.rs                  # SSE 类型定义（SseEvent, SseClientConfig 等）
-└── mod.rs                  # 新增 pub mod sse
+├── sse.rs           # SseClientConfig 等类型
+└── mod.rs           # pub mod sse
 ```
 
-### SSE 解析器（Rust）
+注意：**删除了 `parser.rs` 和 `strategies.ts`**。不再需要解析器和策略。
+
+### Rust 行路由（router.rs）
 
 ```rust
-// packages/catcher-http/src/sse/parser.rs
+// packages/catcher-http/src/sse/router.rs
 
-use catcher_core::types::sse::{SseStrategy, SseEvent};
-
-/// SSE 文本流解析器
-///
-/// 设计要点：
-/// - 策略化：支持 standard / lenient / 自定义 trait
-/// - 缓冲区：处理网络分片导致的不完整行
-/// - 零拷贝：尽可能避免不必要的 String clone
-pub struct SseParser {
-    strategy: SseStrategy,
-    data_buffer: String,
-    event_type_buffer: String,
-    last_event_id_buffer: String,
-    retry_buffer: Option<u64>,
+/// 行路由结果
+pub enum RouteAction {
+    /// 内容行，yield 给用户
+    Yield(String),
+    /// 控制行，静默处理（心跳/空行）
+    Silent,
+    /// id: 行，静默记录 last_event_id
+    SetLastEventId(String),
+    /// retry: 行，静默调整重连间隔
+    SetRetry(u64),
 }
 
-impl SseParser {
-    pub fn new(strategy: SseStrategy) -> Self { ... }
-
-    /// 处理一行文本，返回已组装完成的 SseEvent（可能有多个）
-    /// 在空行（或自定义分隔符）时触发事件组装
-    pub fn process_line(&mut self, line: &str) -> Option<SseEvent> { ... }
-
-    /// 重置缓冲区
-    pub fn reset(&mut self) { ... }
-
-    /// 获取当前 last_event_id
-    pub fn last_event_id(&self) -> &str { &self.last_event_id_buffer }
+/// 路由一行 SSE 文本
+pub fn route_line(line: &str) -> RouteAction {
+    if line.is_empty() {
+        return RouteAction::Silent;
+    }
+    if line.starts_with(':') {
+        // 心跳 / 注释，静默吃掉
+        return RouteAction::Silent;
+    }
+    if let Some(id) = line.strip_prefix("id:") {
+        return RouteAction::SetLastEventId(id.trim_start().to_string());
+    }
+    if let Some(retry) = line.strip_prefix("retry:") {
+        if let Ok(ms) = retry.trim().parse::<u64>() {
+            return RouteAction::SetRetry(ms);
+        }
+    }
+    // 其他所有行（data:, event:, 或任意内容）原样 yield
+    RouteAction::Yield(line.to_string())
 }
 ```
 
-### SSE 流（Rust）
+### SSE 流（stream.rs）
 
 ```rust
 // packages/catcher-http/src/sse/stream.rs
 
 use reqwest::Client;
 use tokio_stream::Stream;
-use catcher_core::types::sse::{SseClientConfig, SseEvent};
-use crate::sse::parser::SseParser;
+use catcher_core::types::sse::SseClientConfig;
 
-/// SSE 一次性消费流
-///
-/// 基于 reqwest 的 streaming response：
-/// - response.bytes_stream() → tokio Stream<Bytes>
-/// - 逐 chunk → 按 \n 切行 → SseParser → yield SseEvent
+/// SSE 内容流行 — yield 内容行，静默过滤控制行
 pub struct SseStream {
-    parser: SseParser,
     // 内部持有 reqwest Response 的 bytes stream
+    // chunk buffer: String（缓冲不完整行）
 }
 
 impl SseStream {
     /// 创建 SSE 流（一次性消费，不自动重连）
     pub async fn connect(config: SseClientConfig) -> Result<Self, CatcherError> {
         // 1. 构建 reqwest 请求
-        // 2. 发送请求，检查 Content-Type
+        // 2. 发送请求
         // 3. 获取 response.bytes_stream()
-        // 4. 初始化 SseParser
     }
 }
 
 impl Stream for SseStream {
-    type Item = Result<SseEvent, CatcherError>;
-    // 逐行从 bytes_stream 读取 → parser.process_line() → yield event
+    type Item = Result<String, CatcherError>;
+    // bytes_stream → chunk buffer → 按 \n 切行 → route_line() → yield 内容行
 }
 
-// 使用示例
-// let mut stream = SseStream::connect(config).await?;
-// while let Some(event) = stream.next().await {
-//     let event = event?;
-//     println!("data: {}", event.data);
-// }
+// 内部方法：静默提取 last_event_id，用于断点续传
+impl SseStream {
+    pub fn last_event_id(&self) -> &str { ... }
+}
 ```
 
-### SSE 客户端（Rust，长连接 + 自动重连）
+### SSE 客户端（client.rs，长连接 + 自动重连）
 
 ```rust
 // packages/catcher-http/src/sse/client.rs
 
 use tokio::sync::mpsc;
-use catcher_core::types::sse::{SseClientConfig, SseEvent};
-use crate::sse::parser::SseParser;
 
 /// SSE 长连接客户端（自动重连）
-///
-/// 内部 spawn 一个 tokio task 管理：
-/// - fetch → read stream → parse → send events via channel
-/// - 断连时按退避策略重连，携带 Last-Event-ID
 pub struct SseClient {
-    events_rx: mpsc::UnboundedReceiver<Result<SseEvent, CatcherError>>,
+    lines_rx: mpsc::UnboundedReceiver<Result<String, CatcherError>>,
     cancel_tx: mpsc::UnboundedSender<()>,
     last_event_id: std::sync::Arc<std::sync::Mutex<String>>,
     ready_state: std::sync::Arc<std::sync::Mutex<SseReadyState>>,
@@ -562,26 +519,25 @@ pub struct SseClient {
 pub enum SseReadyState { Connecting, Open, Closed }
 
 impl SseClient {
-    /// 创建 SSE 客户端（后台自动连接 + 重连）
     pub async fn connect(config: SseClientConfig) -> Result<Self, CatcherError> {
         // 1. 创建 mpsc channel
         // 2. spawn tokio task:
         //    loop {
         //      reqwest request with Last-Event-ID header
-        //      bytes_stream → SseParser → send events via channel
-        //      on disconnect: delay + reconnect (exponential backoff)
-        //      on cancel signal: break
+        //      bytes_stream → chunk buffer → route_line()
+        //      Yield → send via channel
+        //      SetLastEventId → 更新内部状态
+        //      SetRetry → 更新重连间隔
+        //      on disconnect → delay + reconnect (exponential backoff)
+        //      on cancel signal → break
         //    }
     }
 
-    /// 接收下一个事件
-    pub async fn next_event(&mut self) -> Option<Result<SseEvent, CatcherError>> {
-        self.events_rx.recv().await
+    pub async fn next_line(&mut self) -> Option<Result<String, CatcherError>> {
+        self.lines_rx.recv().await
     }
 
-    /// 关闭连接
     pub fn close(&mut self) { let _ = self.cancel_tx.send(()); }
-
     pub fn ready_state(&self) -> SseReadyState { ... }
     pub fn last_event_id(&self) -> String { ... }
 }
@@ -596,7 +552,6 @@ impl SseClient {
 ```rust
 impl HttpTransport {
     /// 流式请求 — 返回 reqwest Response（不消费 body）
-    /// SSE 和其他流式场景使用
     pub async fn execute_streaming(
         &self,
         request: HttpRequest,
@@ -608,90 +563,7 @@ impl HttpTransport {
 }
 ```
 
-这样 SSE 模块可以复用 `HttpTransport` 的连接池、TLS、DNS、熔断等能力，只是 body 读取方式不同。
-
-### Cargo.toml 变更
-
-```toml
-# catcher-http/Cargo.toml 新增依赖
-[dependencies]
-# 现有不变
-catcher-core = { path = "../catcher-core" }
-reqwest = { version = "0.12", features = ["stream"] }  # 新增 stream feature
-reqwest-middleware = "0.4"
-reqwest-retry = "0.7"
-tokio = { version = "1", features = ["full"] }
-tokio-stream = "0.1"     # 新增：SSE stream
-
-# catcher-core/Cargo.toml 无新增依赖
-```
-
----
-
-## TS 侧实现设计
-
-### Node.js (`@eric8810/catcher-http`)
-
-```
-packages/catcher-http-ts/src/
-├── sse/
-│   ├── parser.ts       # SseParser 类（策略化） (~200 行)
-│   ├── strategies.ts   # 内置策略实现 (~150 行)
-│   ├── client.ts       # ISSEClient 实现（长连接） (~200 行)
-│   ├── stream.ts       # SSEStream 实现（一次性） (~120 行)
-│   └── index.ts
-└── index.ts            # 新增 SSE 导出
-```
-
-### Browser (`@eric8810/catcher-web`)
-
-```
-packages/catcher-web/src/
-├── sse/
-│   ├── parser.ts       # 同 TS 版解析器
-│   ├── strategies.ts   # 同 TS 版策略
-│   ├── client.ts       # 浏览器版（无 SharedAgent）
-│   ├── stream.ts       # 浏览器版
-│   └── index.ts
-└── index.ts            # 新增 SSE 导出
-```
-
-### SSE 解析器核心逻辑（TS / Rust 共享设计）
-
-```
-SseParser {
-  data_buffer: String
-  event_type_buffer: String
-  last_event_id_buffer: String
-  retry_buffer: Option<u64>
-  strategy: SseBuiltinStrategy
-
-  process_line(line) → Option<SseEvent>:
-    switch strategy:
-      standard:
-        if line is empty → assemble_event()
-        if line starts with "data:" → append data_buffer (+ trim space)
-        if line starts with "event:" → set event_type_buffer
-        if line starts with "id:" → set last_event_id_buffer
-        if line starts with "retry:" → parse retry value
-        if line starts with ":" → ignore (comment)
-        else → ignore
-
-      lenient:
-        same as standard, but:
-          - strip \r from line before processing
-          - lines without recognized prefix → treat as data
-          - allow "data:" without trailing space
-          - treat single \n as event boundary if no blank line seen after 1 event
-
-  assemble_event() → Option<SseEvent>:
-    if data_buffer is empty → reset buffers, return null
-    data = data_buffer (strip trailing \n)
-    event = SseEvent { event: event_type_buffer, data, id: last_event_id_buffer, retry }
-    reset buffers
-    return event
-}
-```
+SSE 模块复用 `HttpTransport` 的连接池、TLS、DNS、熔断等能力，只是 body 读取方式不同。
 
 ---
 
@@ -700,13 +572,13 @@ SseParser {
 ### Node.js (`@eric8810/catcher-http`)
 
 ```typescript
-export { createSSEClient, createSSEStream, SseParser } from './sse/index.js'
+export { createSSEClient, createSSEStream } from './sse/index.js'
 ```
 
 ### Browser (`@eric8810/catcher-web`)
 
 ```typescript
-export { createSSEClient, createSSEStream, SseParser } from './sse/index.js'
+export { createSSEClient, createSSEStream } from './sse/index.js'
 ```
 
 ### Rust (`catcher-http`)
@@ -714,60 +586,58 @@ export { createSSEClient, createSSEStream, SseParser } from './sse/index.js'
 ```rust
 pub mod sse;
 
-// Re-export
-pub use sse::{SseClient, SseStream, SseParser};
-
-// catcher-core re-exports
-pub use catcher_core::types::sse::{
-    SseEvent, SseBuiltinStrategy, SseStrategy, SseParseStrategy, LineType,
-    SseClientConfig, SseStreamOptions,
-};
+pub use sse::{SseClient, SseStream};
+pub use catcher_core::types::sse::{SseClientConfig, SseMethod, SseReconnectConfig};
 ```
 
 ---
 
-## 重连机制设计
+## 重连机制（仅 createSSEClient）
 
 ```
 createSSEClient()
   │
   ├─ reqwest POST/GET (或 TS fetch) with headers + body
   │    │
-  │    ├─ 200 OK + text/event-stream (或非标准)
-  │    │    ├─ bytes_stream → 逐 chunk → 按 \n 切行 → SseParser → emit events
-  │    │    ├─ 记录 last_event_id（用于断点续传）
+  │    ├─ 200 OK
+  │    │    ├─ bytes_stream → chunk buffer → route_line() → yield 内容行
+  │    │    ├─ id: 行 → 静默记录 lastEventId
+  │    │    ├─ retry: 行 → 静默调整重连间隔
   │    │    └─ 流结束 → scheduleReconnect()
   │    │
   │    ├─ 网络错误 → scheduleReconnect()
   │    ├─ 204 → close()（服务端要求停止重连）
   │    ├─ 301/307 → 跟随重定向
-  │    └─ 其他错误 → error event → scheduleReconnect()
+  │    └─ 其他错误 → error via channel → scheduleReconnect()
   │
   ▼ scheduleReconnect()
   ├─ delay = initialDelay × multiplier^(attempt-1) + jitter(±25%)
-  ├─ headers['Last-Event-ID'] = lastEventId
+  ├─ headers['Last-Event-ID'] = lastEventId（自动携带）
   ├─ attempt++ ≤ maxRetries ? → 重新请求 : → close()
   └─ 成功连接 → attempt = 0, reset()
 ```
+
+`createSSEStream` **不重连**——它就是一次 fetch，失败就 throw，让调用方决定是否重试（可以配合 Catcher 的 retry wrapper）。
+
+---
 
 ## 韧性层次（SSE 场景）
 
 ```
                           ┌──────────────────┐
                           │   调用方代码       │
+                          │  for await (line) │
                           └────────┬─────────┘
                                    │
                           ┌────────▼─────────┐
-                          │  SseParser        │  ← 策略化解析 data/event/id/retry
+                          │  Line Router      │  ← 过滤控制行，yield 内容行
                           └────────┬─────────┘
                                    │
-                          ┌────────▼─────────┐
-                          │  Reconnect Layer  │  ← 指数退避 + Last-Event-ID 续传
-                          └────────┬─────────┘
-                                   │
-                          ┌────────▼─────────┐
-                          │  Circuit Breaker  │  ← 熔断保护
-                          └────────┬─────────┘
+                   ┌───────────────┴───────────────┐
+                   │ createSSEClient 才有：          │
+                   │  Reconnect Layer               │  ← 指数退避 + Last-Event-ID 续传
+                   │  Circuit Breaker               │  ← 熔断保护
+                   └───────────────┬───────────────┘
                                    │
                           ┌────────▼─────────┐
                           │  Retry Wrapper    │  ← 连接阶段错误重试
@@ -789,8 +659,10 @@ createSSEClient()
 | 连接池 / Agent | SSE 连接复用连接池和 DNS 缓存 | `SharedAgent` | `HttpTransport` (reqwest pool) |
 | 重试 | 连接阶段错误重试 | `createRetryWrapper` (p-retry) | `RetryTransientMiddleware` |
 | 熔断器 | SSE 端点级别的熔断保护 | `cockatiel` | `CircuitBreaker` |
-| 类型 | 配置和事件类型 | `catcher-core-ts` | `catcher-core` |
+| 类型 | 配置类型 | `catcher-core-ts` | `catcher-core` |
 | 退避策略 | 指数退避 + jitter | 与 WS 共享算法 | 与 WS 共享算法 |
+
+---
 
 ## 依赖
 
@@ -812,11 +684,16 @@ createSSEClient()
 | `reqwest` (stream feature) | SSE 流式读取 response body | 是（启用现有依赖的 feature） |
 | `tokio-stream` | `Stream` trait 实现 | 是 |
 
+---
+
 ## 不涉及的范围
 
 - **不创建新 npm 包 / crate** — SSE 是现有 HTTP 包的扩展能力
 - **不支持 IE** — 需要 `fetch` + `ReadableStream`，且 AI 场景需要 POST + 自定义 headers
 - **不实现 SSE 服务端** — Catcher 是客户端库
+- **不解析业务数据** — `[DONE]`、JSON 结构、event 路由等由调用方处理
+
+---
 
 ## FFI / napi / UniFFI 扩展
 

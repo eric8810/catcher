@@ -156,37 +156,43 @@ ws.addEventListener('message', e => console.log(decodeWSMessage(e.data)))
 ```
 
 ```typescript
-// SSE — AI streaming (OpenAI compatible, with parse strategy)
+// SSE — AI streaming (OpenAI compatible)
 import { createSSEStream } from '@eric8810/catcher-http'
 
 const stream = createSSEStream({
   url: 'https://api.openai.com/v1/chat/completions',
   method: 'POST',
-  parseStrategy: 'lenient',  // tolerates transport quirks (\r\n, missing space)
   headers: { Authorization: `Bearer ${apiKey}` },
   body: { model: 'gpt-4', messages: [{ role: 'user', content: 'Hello' }], stream: true },
 })
-for await (const event of stream) {
-  if (event.data === '[DONE]') break  // business logic: handle termination yourself
-  const chunk = JSON.parse(event.data)  // business logic: parse yourself
-  process.stdout.write(chunk.choices[0]?.delta?.content ?? '')
+for await (const line of stream) {
+  if (!line.startsWith('data:')) continue
+  const payload = line.startsWith('data: ') ? line.slice(6) : line.slice(5)
+  if (payload === '[DONE]') break  // business logic: handle termination yourself
+  process.stdout.write(JSON.parse(payload).choices[0]?.delta?.content ?? '')
 }
+// loop ends = connection closed, no manual cleanup
 
 // SSE — Rust (reqwest + tokio_stream)
 // use catcher_http::sse::{SseStream, SseClientConfig};
-// let config = SseClientConfig { url: "...".into(), parse_strategy: SseBuiltinStrategy::Lenient, ..Default::default() };
+// let config = SseClientConfig { url: "...".into(), method: SseMethod::POST, ..Default::default() };
 // let mut stream = SseStream::connect(config).await?;
-// while let Some(Ok(event)) = stream.next().await { println!("{}", event.data); }
+// while let Some(line) = stream.next().await {
+//     let line = line?;
+//     if let Some(payload) = line.strip_prefix("data: ") { println!("{}", payload); }
+// }
 
 // SSE — long-lived push with auto-reconnect
 import { createSSEClient } from '@eric8810/catcher-http'
 
-const sse = createSSEClient({
+const client = createSSEClient({
   url: 'https://api.example.com/events',
   headers: { Authorization: 'Bearer xxx' },
   reconnect: { initialDelay: 1000, maxDelay: 30_000 },
 })
-sse.addEventListener('message', e => console.log(e.data))
+for await (const line of client) {
+  if (line.startsWith('data: ')) console.log(line.slice(6))
+}
 ```
 
 ```dart
@@ -205,7 +211,7 @@ await client.close();
 - **Auto-retry** — exponential backoff with jitter, destroys stale keepAlive sockets on retry
 - **Circuit Breaker** — trips on consecutive failures, auto-recovers, prevents retry storms
 - **Resilient WebSocket** — perMessageDeflate compression, exponential reconnect, multi-endpoint racing
-- **Server-Sent Events (SSE)** — AI streaming, auto-reconnect, `Last-Event-ID` resume, flexible parser (standard/lenient/custom), cross-platform (Rust + TS + Browser)
+- **Server-Sent Events (SSE)** — raw line stream, auto-reconnect, `Last-Event-ID` resume, `AbortSignal`, cross-platform (Rust + TS + Browser)
 - **Binary codec** — msgpack / msgpackr (2-4x faster than JSON, ~47% smaller)
 - **Priority queue** — POST before prefetch, concurrency-aware scheduling
 - **Dynamic interceptors** — use/eject/clear at runtime, per-request retry/timeout/signal overrides
