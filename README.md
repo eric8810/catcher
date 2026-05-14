@@ -226,8 +226,11 @@ interceptors → retry → circuit breaker → concurrency queue → HTTP engine
 
 | Suite | Count | Status |
 |-------|-------|--------|
+| TS Unit — HTTP (retry, interceptors, client, agent, queue) | 53/53 | ✅ |
+| TS Unit — WS (codec, reconnect, multi-endpoint, client) | 45/45 | ✅ |
+| TS Unit — SSE (router, parser, stream, strict, client) | 68/68 | ✅ |
+| TS Integration (http + ws + dns) | 12/12 | ✅ |
 | TS E2E (scenarios + rust-vs-vanilla) | 38/38 | ✅ |
-| TS Integration (http + ws + chaos) | 12/12 | ✅ |
 | Dart Unit Tests | 20/20 | ✅ |
 | Dart Integration (real FFI + httpbin.org) | 8/8 | ✅ |
 | Rust catcher-ffi FFI tests | 8/8 | ✅ |

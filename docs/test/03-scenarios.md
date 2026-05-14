@@ -177,7 +177,15 @@ timeout: 15s
 ### S15 — DNS 慢解析
 
 ```yaml
-damage: DNS lookup 每次 500-2000ms 随机
+实现方式:
+  DNS 查询发生在 TCP 连接之前，proxy 无法拦截。
+  通过 vi.spyOn(dns, 'lookup') mock 延迟：
+    const originalLookup = dns.lookup
+    vi.spyOn(dns, 'lookup').mockImplementation((hostname, opts, cb) => {
+      const delay = 500 + Math.random() * 1500  // 500-2000ms
+      setTimeout(() => originalLookup(hostname, opts, cb), delay)
+    })
+damage: mock dns.lookup 延迟 500-2000ms 随机
 action:
   1. 清空 DNS cache
   2. POST /auth → GET /channels → GET /messages × 3  （慢，每次都 DNS 查询）

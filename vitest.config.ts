@@ -5,7 +5,8 @@ export default defineConfig({
     // Default: integration tests + SSE unit/integration tests (fast, stable, no Rust required)
     include: [
       'packages/test/integration/**/*.test.ts',
-      'packages/catcher-http-ts/src/sse/__tests__/**/*.test.ts',
+      'packages/catcher-http-ts/src/**/__tests__/**/*.test.ts',
+      'packages/catcher-ws-ts/src/**/__tests__/**/*.test.ts',
     ],
     exclude: ['packages/test/integration/napi.test.ts'],
     testTimeout: 30_000,

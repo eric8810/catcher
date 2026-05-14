@@ -59,6 +59,23 @@
   clamp(actualDelay, 0, +∞)
 ```
 
+### 延迟尖刺 (spike)
+
+在正常延迟基础上，以低概率触发极端高延迟尖刺。模拟偶发网络拥塞或路由抖动。
+
+```
+配置：
+  spikeLatency: 2000       — 尖刺延迟 ms
+  spikeProbability: 0.01   — 每 chunk 触发尖刺的概率（0-1）
+
+计算：
+  if (Math.random() < spikeProbability) {
+    actualDelay = spikeLatency
+  } else {
+    actualDelay = latency + jitter  // 正常延迟
+  }
+```
+
 ### 突发丢包 (burstLoss)
 
 Gilbert-Elliott 两状态马尔可夫模型。网络在"好状态"和"坏状态"之间切换。
@@ -76,9 +93,10 @@ Gilbert-Elliott 两状态马尔可夫模型。网络在"好状态"和"坏状态"
   burstLoss.p_bad_to_good   — BAD → GOOD 转移概率（典型 0.1-0.3）
   burstLoss.loss_good       — GOOD 状态丢包率（典型 0-0.02）
   burstLoss.loss_bad        — BAD 状态丢包率（典型 0.3-0.8）
+  burstLoss.minBadDuration  — 坏状态最短持续 ms（0 = 无限制）
 
 每 chunk 时：
-  1. 先根据转移概率判断是否切换状态
+  1. 先根据转移概率判断是否切换状态（坏状态未满 minBadDuration 时不允许切回好状态）
   2. 再根据当前状态的丢包率判断是否丢弃
 ```
 
@@ -136,6 +154,8 @@ interface NetworkConditions {
   latency?: number
   jitter?: number
   jitterDistribution?: 'uniform' | 'normal'
+  spikeLatency?: number                // 尖刺延迟 ms
+  spikeProbability?: number            // 尖刺触发概率 0-1
   packetLoss?: number
   bandwidth?: number
   bandwidthFluctuation?: number     // 0-1
@@ -150,6 +170,7 @@ interface NetworkConditions {
     p_bad_to_good: number
     loss_good: number
     loss_bad: number
+    minBadDuration?: number          // 坏状态最短持续 ms，0 = 无限制
   }
 
   // ── 路由黑洞 ──
@@ -169,6 +190,8 @@ interface DirectionConditions {
   latency?: number
   jitter?: number
   jitterDistribution?: 'uniform' | 'normal'
+  spikeLatency?: number
+  spikeProbability?: number
   packetLoss?: number
   bandwidth?: number
   bandwidthFluctuation?: number
