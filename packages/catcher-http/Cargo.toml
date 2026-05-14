@@ -14,7 +14,7 @@ hickory-dns = ["reqwest/hickory-dns", "dep:hickory-resolver"]
 napi = ["dep:napi", "dep:napi-derive"]
 
 [dependencies]
-catcher-core = { path = "../catcher-core" }
+catcher-core = { path = "../catcher-core", version = "0.2.0" }
 
 # ── 异步运行时 ──
 tokio = { version = "1", features = ["sync", "time", "net", "io-util", "macros"] }

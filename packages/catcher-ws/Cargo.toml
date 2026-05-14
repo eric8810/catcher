@@ -7,7 +7,7 @@ license = "MIT"
 repository = "https://github.com/eric8810/catcher"
 
 [dependencies]
-catcher-core = { path = "../catcher-core" }
+catcher-core = { path = "../catcher-core", version = "0.2.0" }
 tokio = { version = "1", features = ["rt", "sync", "time", "net", "io-util", "macros"] }
 tokio-tungstenite = "0.24"
 futures-util = "0.3"

@@ -53,28 +53,28 @@ jobs:
             target: x86_64-unknown-linux-gnu
             build: |
               cd packages/catcher-napi-http
-              napi build --platform --release --target x86_64-unknown-linux-gnu
-              napi build --platform --release --target x86_64-unknown-linux-musl
+              pnpm exec napi build --platform --release --target x86_64-unknown-linux-gnu
+              pnpm exec napi build --platform --release --target x86_64-unknown-linux-musl
           - host: ubuntu-latest
             target: x86_64-unknown-linux-musl
             build: |
               cd packages/catcher-napi-http
-              napi build --platform --release --target x86_64-unknown-linux-musl
+              pnpm exec napi build --platform --release --target x86_64-unknown-linux-musl
           - host: macos-latest
             target: aarch64-apple-darwin
             build: |
               cd packages/catcher-napi-http
-              napi build --platform --release --target aarch64-apple-darwin
+              pnpm exec napi build --platform --release --target aarch64-apple-darwin
           - host: macos-latest
             target: x86_64-apple-darwin
             build: |
               cd packages/catcher-napi-http
-              napi build --platform --release --target x86_64-apple-darwin
+              pnpm exec napi build --platform --release --target x86_64-apple-darwin
           - host: windows-latest
             target: x86_64-pc-windows-msvc
             build: |
               cd packages/catcher-napi-http
-              napi build --platform --release --target x86_64-pc-windows-msvc
+              pnpm exec napi build --platform --release --target x86_64-pc-windows-msvc
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -112,27 +112,27 @@ jobs:
             target: x86_64-unknown-linux-gnu
             build: |
               cd packages/catcher-napi-ws
-              napi build --platform --release --target x86_64-unknown-linux-gnu
+              pnpm exec napi build --platform --release --target x86_64-unknown-linux-gnu
           - host: ubuntu-latest
             target: x86_64-unknown-linux-musl
             build: |
               cd packages/catcher-napi-ws
-              napi build --platform --release --target x86_64-unknown-linux-musl
+              pnpm exec napi build --platform --release --target x86_64-unknown-linux-musl
           - host: macos-latest
             target: aarch64-apple-darwin
             build: |
               cd packages/catcher-napi-ws
-              napi build --platform --release --target aarch64-apple-darwin
+              pnpm exec napi build --platform --release --target aarch64-apple-darwin
           - host: macos-latest
             target: x86_64-apple-darwin
             build: |
               cd packages/catcher-napi-ws
-              napi build --platform --release --target x86_64-apple-darwin
+              pnpm exec napi build --platform --release --target x86_64-apple-darwin
           - host: windows-latest
             target: x86_64-pc-windows-msvc
             build: |
               cd packages/catcher-napi-ws
-              napi build --platform --release --target x86_64-pc-windows-msvc
+              pnpm exec napi build --platform --release --target x86_64-pc-windows-msvc
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -182,7 +182,7 @@ jobs:
           mkdir -p packages/catcher-napi-http/npm
           cp napi-artifacts/napi-http-*/*.node packages/catcher-napi-http/ || true
           cd packages/catcher-napi-http
-          napi artifacts -d npm --package-name @eric8810/catcher-napi-http
+          pnpm exec napi artifacts -d npm --package-name @eric8810/catcher-napi-http
           npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -191,7 +191,7 @@ jobs:
           mkdir -p packages/catcher-napi-ws/npm
           cp napi-artifacts/napi-ws-*/*.node packages/catcher-napi-ws/ || true
           cd packages/catcher-napi-ws
-          napi artifacts -d npm --package-name @eric8810/catcher-napi-ws
+          pnpm exec napi artifacts -d npm --package-name @eric8810/catcher-napi-ws
           npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
