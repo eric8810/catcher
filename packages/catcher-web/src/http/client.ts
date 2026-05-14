@@ -17,8 +17,64 @@ import type {
   RequestConfig,
   HttpResponse,
   RetryOptions,
+  CatcherErrorType,
+  CatcherHttpError,
+  ClientEvent,
 } from '@eric8810/catcher-core'
 import { createInterceptorManager } from './interceptors.js'
+
+// ── Error helpers (G2) ──────────────────────────────────────────
+
+const SENSITIVE_HEADERS = new Set(['authorization', 'cookie', 'set-cookie', 'proxy-authorization'])
+
+function classifyFetchError(error: any): CatcherErrorType {
+  if (error.name === 'AbortError' || error.code === 'ECANCELED') return 'cancelled'
+  if (error.name === 'TypeError' && error.message?.includes('Failed to fetch')) return 'connection'
+  if (error.code === 'HTTP_5XX') return 'http'
+  if (error.response) return 'http'
+  return 'unknown'
+}
+
+function redactHeaders(headers: Record<string, string>): Record<string, string> {
+  const safe: Record<string, string> = {}
+  for (const [key, value] of Object.entries(headers)) {
+    safe[key] = SENSITIVE_HEADERS.has(key.toLowerCase()) ? '[REDACTED]' : value
+  }
+  return safe
+}
+
+function createCatcherError(
+  error: any,
+  type: CatcherErrorType,
+  method: string,
+  url: string,
+  headers: Record<string, string>,
+  config: RequestConfig,
+  attempt: number,
+  elapsedMs: number,
+): CatcherHttpError {
+  const err = new Error(error.message ?? String(error)) as Error & CatcherHttpError
+  err.name = 'CatcherHttpError'
+  ;(err as any).type = type
+  ;(err as any).request = { method, url, headers, config }
+  if (error.response) {
+    ;(err as any).response = {
+      status: error.response.status,
+      headers: error.response.headers ?? {},
+      data: error.response.data,
+    }
+  }
+  ;(err as any).attempt = attempt
+  ;(err as any).elapsedMs = elapsedMs
+  ;(err as any).toJSON = () => ({
+    type, message: err.message,
+    request: { method, url, headers: redactHeaders(headers) },
+    response: (err as any).response ? { status: (err as any).response.status, data: (err as any).response.data } : undefined,
+    attempt, elapsedMs,
+  })
+  if (error.stack) err.stack = error.stack
+  return err as unknown as CatcherHttpError
+}
 
 // ── Helpers ───────────────────────────────────────────────────
 
@@ -76,10 +132,11 @@ function createTimeoutSignal(signal?: AbortSignal, timeoutMs?: number): { signal
 }
 
 /** Parse response body according to responseType. */
-async function parseBody(resp: Response, responseType?: 'json' | 'text' | 'bytes'): Promise<any> {
+async function parseBody(resp: Response, responseType?: 'json' | 'text' | 'bytes' | 'stream'): Promise<any> {
   switch (responseType) {
     case 'text': return resp.text()
     case 'bytes': return new Uint8Array(await resp.arrayBuffer())
+    case 'stream': return resp.body  // G10: Web ReadableStream<Uint8Array>
     case 'json':
     default:
       return tryParseJSON(await resp.text())
@@ -127,11 +184,23 @@ export function createWebClient(config: HttpClientConfig): IHttpClient {
   const effectiveRetry = (req?: RequestConfig): RetryOptions | null => {
     if (req?.retry === false) return null
     if (req?.retry) return req.retry
-    return retry ?? null
+    return mutableConfig.retry ?? null
   }
+
+  // G11: Event system
+  const eventListeners = new Map<string, Set<(event: any) => void>>()
+
+  // G2: Track attempt count across retries
+  const retryContext = { lastAttempt: 0 }
+
+  // G11: Mutable config for runtime hot-update
+  const mutableConfig = { retry, timeout: config.timeout }
 
   // ── doFetch with interceptor chain ──
   const doFetch = async (method: string, url: string, body: any, reqConfig?: RequestConfig) => {
+    const startTime = Date.now()
+    retryContext.lastAttempt = 0
+
     // Run request interceptor chain (LIFO)
     let merged = { ...reqConfig }
     merged = await (reqInterceptors as any)._runRequestChain(merged, merged)
@@ -146,9 +215,10 @@ export function createWebClient(config: HttpClientConfig): IHttpClient {
 
     // Check cancellation before sending
     if (merged.signal?.aborted) {
-      const err = new Error('Request cancelled') as Error & { code: string }
-      err.code = 'ECANCELED'
-      throw err
+      throw createCatcherError(
+        new Error('Request cancelled'), 'cancelled',
+        method, finalUrl, merged.headers ?? {}, merged, 0, Date.now() - startTime,
+      )
     }
 
     // Build timeout + cancellation signal
@@ -158,8 +228,29 @@ export function createWebClient(config: HttpClientConfig): IHttpClient {
     )
 
     const headers: Record<string, string> = { ...merged.headers }
-    // Only set default Content-Type when sending a body
-    if (body !== undefined && !headers['Content-Type'] && !headers['content-type']) {
+
+    // G12: Auth helpers
+    if (config.auth) {
+      const encoded = btoa(`${config.auth.username}:${config.auth.password}`)
+      headers['Authorization'] = `Basic ${encoded}`
+    }
+    if (config.bearerToken) {
+      const resolveToken = typeof config.bearerToken === 'function'
+        ? config.bearerToken
+        : () => config.bearerToken as string
+      const token = await resolveToken()
+      if (token) headers['Authorization'] = `Bearer ${token}`
+    }
+    // G12: XSRF (browser only)
+    if (config.xsrfCookieName && typeof document !== 'undefined') {
+      const match = document.cookie.match(new RegExp(`(?:^|; )${config.xsrfCookieName}=([^;]*)`))
+      if (match) {
+        headers[config.xsrfHeaderName ?? 'X-XSRF-TOKEN'] = decodeURIComponent(match[1])
+      }
+    }
+
+    // Only set default Content-Type when NOT sending FormData (G5)
+    if (body !== undefined && !(body instanceof FormData) && !headers['Content-Type'] && !headers['content-type']) {
       headers['Content-Type'] = 'application/json'
     }
 
@@ -167,11 +258,16 @@ export function createWebClient(config: HttpClientConfig): IHttpClient {
       method,
       headers,
       signal,
+      // G3: CORS/Credentials
+      credentials: merged.credentials ?? config.credentials ?? 'same-origin',
+      mode: config.fetchMode ?? 'cors',
+      // G6: Redirect
+      redirect: config.redirect?.follow === false ? 'manual' : 'follow',
     }
 
     // Handle body: skip for GET/HEAD, allow custom Content-Type to override
     if (body !== undefined) {
-      init.body = JSON.stringify(body)
+      init.body = body instanceof FormData ? body : JSON.stringify(body)
     }
 
     try {
@@ -189,7 +285,30 @@ export function createWebClient(config: HttpClientConfig): IHttpClient {
         throw err
       }
 
+      // G10: Stream response
+      if (merged.responseType === 'stream') {
+        const streamResponse: HttpResponse = {
+          status: resp.status,
+          headers: Object.fromEntries(resp.headers.entries()),
+          data: resp.body,
+          config: merged,
+        }
+        // G11: emit requestComplete
+        eventListeners.get('requestComplete')?.forEach(fn =>
+          fn({ type: 'requestComplete', method, url: finalUrl, status: resp.status, durationMs: Date.now() - startTime }),
+        )
+        return streamResponse
+      }
+
       const data = await parseBody(resp, merged.responseType)
+
+      if (!isValid) {
+        // Non-5xx error (e.g. 4xx) — throw as CatcherHttpError
+        const err: any = new Error(`HTTP ${resp.status}`)
+        err.response = { status: resp.status, data }
+        throw err
+      }
+
       const httpResp: HttpResponse = {
         status: resp.status,
         headers: Object.fromEntries(resp.headers.entries()),
@@ -199,7 +318,22 @@ export function createWebClient(config: HttpClientConfig): IHttpClient {
 
       // Run response interceptor chain (FIFO)
       const final = await (resInterceptors as any)._runResponseChain(httpResp)
+
+      // G11: emit requestComplete
+      eventListeners.get('requestComplete')?.forEach(fn =>
+        fn({ type: 'requestComplete', method, url: finalUrl, status: resp.status, durationMs: Date.now() - startTime }),
+      )
+
       return final?.data !== undefined ? final.data : final
+    } catch (error: any) {
+      // G2: Wrap into CatcherHttpError
+      const type = classifyFetchError(error)
+      throw createCatcherError(
+        error, type,
+        method, finalUrl,
+        headers, merged,
+        retryContext.lastAttempt, Date.now() - startTime,
+      )
     } finally {
       clearTimeoutSignal()
     }
@@ -235,9 +369,14 @@ export function createWebClient(config: HttpClientConfig): IHttpClient {
         factor: er.backoff === 'exponential' ? 2 : 1,
         minTimeout: er.minTimeout ?? 500,
         maxTimeout: er.maxTimeout ?? 30_000,
-        onFailedAttempt: er.onRetry
-          ? (err) => er.onRetry!(err.attemptNumber)
-          : undefined,
+        onFailedAttempt: (err) => {
+          retryContext.lastAttempt = err.attemptNumber
+          er.onRetry?.(err.attemptNumber)
+          // G11: emit retry event
+          eventListeners.get('retry')?.forEach(fn =>
+            fn({ type: 'retry', attempt: err.attemptNumber, error: err, url }),
+          )
+        },
       },
     )
   }
@@ -290,7 +429,6 @@ export function createWebClient(config: HttpClientConfig): IHttpClient {
     } as any,
     circuitBreakerState(): 'closed' | 'open' | 'half-open' {
       if (!breaker) return 'closed'
-      // Cockatiel CircuitState enum: Closed=0, Open=1, HalfOpen=2
       const s: number = (breaker as any).state
       if (s === 1) return 'open'
       if (s === 2) return 'half-open'
@@ -299,7 +437,32 @@ export function createWebClient(config: HttpClientConfig): IHttpClient {
     queueDepth() {
       return queue?.size ?? 0
     },
+
+    // G11: Event subscription
+    on(event: ClientEvent['type'], listener: (event: ClientEvent) => void): () => void {
+      if (!eventListeners.has(event)) eventListeners.set(event, new Set())
+      eventListeners.get(event)!.add(listener)
+      return () => eventListeners.get(event)?.delete(listener)
+    },
+
+    off(event: ClientEvent['type'], listener?: (event: ClientEvent) => void): void {
+      if (listener) {
+        eventListeners.get(event)?.delete(listener)
+      } else {
+        eventListeners.delete(event)
+      }
+    },
+
+    // G11: Runtime config hot-update
+    updateConfig(updates: Partial<Pick<HttpClientConfig, 'retry' | 'timeout'>>) {
+      if (updates.retry) {
+        mutableConfig.retry = updates.retry
+      }
+      if (updates.timeout) {
+        mutableConfig.timeout = updates.timeout
+      }
+    },
   }
 }
 
-export type { IHttpClient, RequestConfig, HttpClientConfig, HttpResponse } from '@eric8810/catcher-core'
+export type { IHttpClient, RequestConfig, HttpClientConfig, HttpResponse, CatcherHttpError, ClientEvent } from '@eric8810/catcher-core'

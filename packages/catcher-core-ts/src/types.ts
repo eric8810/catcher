@@ -17,6 +17,60 @@ export interface SharedAgentOptions {
   dnsCacheTtl?: number
 }
 
+// === Proxy ===
+
+export interface ProxyConfig {
+  /** "http://host:port" | "https://host:port" | "socks5://host:port" */
+  url: string
+  auth?: { username: string; password: string }
+  noProxy?: string[]
+}
+
+// === DNS ===
+
+export interface DnsConfig {
+  /** Custom DNS nameservers (e.g. ["8.8.8.8"]) */
+  nameservers?: string[]
+  /** Hostname → IP mapping for custom DNS resolution */
+  hostMapping?: Record<string, string>
+}
+
+// === TLS ===
+
+export interface TlsConfig {
+  rejectUnauthorized?: boolean
+  /** Path to CA certificate PEM file */
+  caCertPath?: string
+  /** CA certificate PEM content */
+  caCertPem?: string
+  /** Path to client certificate PEM file */
+  clientCertPath?: string
+  /** Client certificate PEM content */
+  clientCertPem?: string
+  /** Path to client private key PEM file */
+  clientKeyPath?: string
+  /** Client private key PEM content */
+  clientKeyPem?: string
+  /** PFX/PKCS12 client identity (binary) */
+  clientIdentityPfx?: Uint8Array
+  /** Password for PFX identity */
+  clientIdentityPassword?: string
+  /** Override TLS SNI hostname */
+  tlsSniOverride?: string
+  /** Minimum TLS version */
+  minTlsVersion?: '1.0' | '1.1' | '1.2' | '1.3'
+  /** SHA-256 public key pins (deferred — requires custom cert verifier) */
+  pinSha256?: string[]
+}
+
+// === Redirect ===
+
+export interface RedirectInfo {
+  url: string
+  status: number
+  headers: Record<string, string>
+}
+
 // === HTTP ===
 
 export interface HttpClientConfig {
@@ -38,6 +92,10 @@ export interface HttpClientConfig {
     retryIf?: (error: any) => boolean
     /** Called on each retry attempt (attempt number 1-based) */
     onRetry?: (attempt: number) => void
+    /** Minimum retry delay in ms */
+    minTimeout?: number
+    /** Maximum retry delay in ms */
+    maxTimeout?: number
   }
   /** Max concurrent requests */
   concurrency?: number
@@ -51,6 +109,37 @@ export interface HttpClientConfig {
     request?: Array<(config: any) => any>
     response?: Array<(response: any) => any>
   }
+  // --- G3: CORS / Credentials ---
+  /** Browser fetch credentials policy */
+  credentials?: 'include' | 'same-origin' | 'omit'
+  /** Browser fetch mode */
+  fetchMode?: 'cors' | 'no-cors' | 'same-origin' | 'navigate'
+  /** Node.js axios withCredentials */
+  withCredentials?: boolean
+  // --- G4: Proxy ---
+  /** HTTP/SOCKS5 proxy: true = auto-detect env, string = proxy URL, object = full config */
+  proxy?: boolean | string | ProxyConfig
+  // --- G6: Redirect ---
+  redirect?: {
+    follow?: boolean
+    maxRedirects?: number
+    beforeRedirect?: (info: RedirectInfo) => boolean
+  }
+  // --- G7: Custom DNS ---
+  dns?: DnsConfig
+  // --- G8: TLS ---
+  tls?: TlsConfig
+  // --- G9: Transport adapter ---
+  adapter?: TransportAdapter
+  // --- G12: Auth helpers ---
+  /** Basic authentication */
+  auth?: { username: string; password: string }
+  /** Bearer token — static string or async function for dynamic refresh */
+  bearerToken?: string | (() => string | Promise<string>)
+  /** XSRF/CSRF cookie name (browser only, reads from document.cookie) */
+  xsrfCookieName?: string
+  /** XSRF/CSRF header name. Default: "X-XSRF-TOKEN" */
+  xsrfHeaderName?: string
 }
 
 // === Per-request Options ===
@@ -65,7 +154,7 @@ export interface RequestConfig {
   /** Override instance-level retry; false = disable retry for this request */
   retry?: RetryOptions | false
   /** Response body parsing mode */
-  responseType?: 'json' | 'text' | 'bytes'
+  responseType?: 'json' | 'text' | 'bytes' | 'stream'
   /** Custom success status code predicate */
   validateStatus?: (status: number) => boolean
   /** Override priority (0 = highest) */
@@ -80,6 +169,10 @@ export interface RequestConfig {
   onUploadProgress?: (event: ProgressEvent) => void
   /** Download progress callback */
   onDownloadProgress?: (event: ProgressEvent) => void
+  // --- G3: per-request credentials override ---
+  credentials?: 'include' | 'same-origin' | 'omit'
+  // --- G4: per-request proxy override ---
+  proxy?: boolean | string | ProxyConfig
 }
 
 export interface ProgressEvent {
@@ -142,6 +235,16 @@ export interface IHttpClient {
 
   /** Number of requests waiting in the concurrency queue */
   queueDepth(): number
+
+  // --- G11: Event system ---
+  /** Subscribe to client events. Returns unsubscribe function. */
+  on?(event: ClientEvent['type'], listener: (event: ClientEvent) => void): () => void
+  /** Unsubscribe from client events */
+  off?(event: ClientEvent['type'], listener?: (event: ClientEvent) => void): void
+
+  // --- G11: Runtime config update ---
+  /** Hot-update retry configuration at runtime */
+  updateConfig?(updates: Partial<Pick<HttpClientConfig, 'retry' | 'timeout'>>): void
 }
 
 // === WebSocket ===
@@ -170,6 +273,10 @@ export interface ResilientWSOptions {
   headers?: Record<string, string>
   /** Skip TLS cert validation */
   rejectUnauthorized?: boolean
+  // --- G3: Cookie for WS handshake (Node.js ws library) ---
+  cookie?: string
+  // --- G4: Proxy for WS connections ---
+  proxy?: boolean | string | ProxyConfig
 }
 
 export interface ResilientWS extends EventTarget {
@@ -178,7 +285,7 @@ export interface ResilientWS extends EventTarget {
   readonly readyState: number
   readonly url: string
   readonly status: 'CONNECTING' | 'CONNECTED' | 'CLOSED'
-  addEventListener(type: 'open' | 'close' | 'message' | 'error', listener: EventListener): void
+  addEventListener(type: 'open' | 'close' | 'message' | 'error' | 'statuschange', listener: EventListener): void
   removeEventListener(type: string, listener: EventListener): void
 }
 
@@ -257,3 +364,60 @@ export interface SSEClient extends AsyncIterable<string> {
 export interface SSETimeoutError extends Error {
   readonly type: 'SSE_TIMEOUT'
 }
+
+// === Error (G2) ===
+
+export type CatcherErrorType =
+  | 'timeout'
+  | 'connection'
+  | 'dns'
+  | 'tls'
+  | 'http'
+  | 'cancelled'
+  | 'unknown'
+
+export interface CatcherHttpError extends Error {
+  readonly type: CatcherErrorType
+  readonly request: {
+    method: string
+    url: string
+    headers: Record<string, string>
+    config: RequestConfig
+  }
+  readonly response?: {
+    status: number
+    headers: Record<string, string>
+    data: unknown
+    rawData?: Uint8Array
+  }
+  readonly attempt: number
+  readonly elapsedMs: number
+  toJSON(): Record<string, unknown>
+}
+
+export function isCatcherError(err: unknown): err is CatcherHttpError {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'type' in err &&
+    typeof (err as any).type === 'string' &&
+    (err as any).type !== undefined &&
+    'request' in err &&
+    'attempt' in err &&
+    'elapsedMs' in err
+  )
+}
+
+// === Transport Adapter (G9) ===
+
+export interface TransportAdapter {
+  execute(config: RequestConfig & { method: string; url: string; body?: any }): Promise<HttpResponse>
+}
+
+// === Events (G11) ===
+
+export type ClientEvent =
+  | { type: 'retry'; attempt: number; error: Error; url: string }
+  | { type: 'circuitBreakerChange'; from: 'closed' | 'open' | 'half-open'; to: 'closed' | 'open' | 'half-open' }
+  | { type: 'networkQualityChange'; from: string; to: string }
+  | { type: 'requestComplete'; method: string; url: string; status: number; durationMs: number }

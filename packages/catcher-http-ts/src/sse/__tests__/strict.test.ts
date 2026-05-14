@@ -237,7 +237,7 @@ describe('SSE Strict — real HTTP server', () => {
     })
 
     it('服务器发完第一批后挂起 — idle timeout 应触发', async () => {
-      const server = await createHangingSSEServer(['data: first'], 0)
+      const server = await createHangingSSEServer(['data: first'])
       servers.push(server)
 
       const stream = createSSEStream({ url: `${server.url}/sse`, timeout: 200 })

@@ -3,13 +3,40 @@ import type { Socket } from 'node:net'
 import CacheableLookup from 'cacheable-lookup'
 import type { SharedAgentOptions } from '@eric8810/catcher-core'
 
-let _defaultDnsCache: CacheableLookup | null = null
+/**
+ * Create a CacheableLookup instance for a specific agent.
+ *
+ * G7 fix: Each agent gets its own CacheableLookup instance so that
+ * different clients with different hostMapping don't interfere.
+ */
+function createDnsLookup(ttl: number, hostMapping?: Record<string, string>): CacheableLookup {
+  const cache = new CacheableLookup({ maxTtl: ttl })
 
-function getDnsCache(ttl: number): CacheableLookup {
-  if (!_defaultDnsCache) {
-    _defaultDnsCache = new CacheableLookup({ maxTtl: ttl })
+  // G7: Inject custom host mapping into DNS lookup
+  if (hostMapping && Object.keys(hostMapping).length > 0) {
+    const originalLookup = cache.lookup.bind(cache)
+    ;(cache as any).lookup = (
+      hostname: string,
+      options: any,
+      callback: any,
+    ) => {
+      if (hostMapping[hostname]) {
+        // Return mapped IP directly
+        if (typeof options === 'function') {
+          callback = options
+          options = {}
+        }
+        const ip = hostMapping[hostname]
+        if (callback) {
+          callback(null, ip, 4)
+          return
+        }
+      }
+      return originalLookup(hostname, options, callback)
+    }
   }
-  return _defaultDnsCache
+
+  return cache
 }
 
 /**
@@ -19,8 +46,11 @@ function getDnsCache(ttl: number): CacheableLookup {
  * Health checks:
  * - freeSocketTimeout auto-evicts idle sockets (prevents stale connection reuse)
  * - socket error handler marks bad sockets so Node can remove them from the pool
+ *
+ * Note: Each call creates a new Agent with its own DNS cache to ensure
+ * hostMapping isolation between different client instances.
  */
-export function createSharedAgent(options: SharedAgentOptions = {}): https.Agent {
+export function createSharedAgent(options: SharedAgentOptions & { hostMapping?: Record<string, string> } = {}): https.Agent {
   const {
     keepAlive = true,
     keepAliveMsecs = 30_000,
@@ -29,6 +59,7 @@ export function createSharedAgent(options: SharedAgentOptions = {}): https.Agent
     timeout = 60_000,
     rejectUnauthorized = true,
     dnsCacheTtl = 300,
+    hostMapping,
   } = options
 
   // freeSocketTimeout: destroy unused free sockets after this many ms.
@@ -48,7 +79,8 @@ export function createSharedAgent(options: SharedAgentOptions = {}): https.Agent
   }
 
   if (dnsCacheTtl > 0) {
-    ;(agentOpts as any).lookup = getDnsCache(dnsCacheTtl).lookup
+    // Each agent gets its own DNS cache to ensure hostMapping isolation
+    ;(agentOpts as any).lookup = createDnsLookup(dnsCacheTtl, hostMapping).lookup
   }
 
   const agent = new https.Agent(agentOpts)
@@ -77,7 +109,11 @@ export function createSharedAgent(options: SharedAgentOptions = {}): https.Agent
   return agent
 }
 
-/** Reset the global DNS cache (useful for testing or network changes) */
+/**
+ * Reset all DNS caches.
+ * Since each agent now has its own cache, this is a no-op kept for API compat.
+ */
 export function clearDnsCache(): void {
-  _defaultDnsCache = null
+  // No-op: DNS caches are now per-agent, not global.
+  // Individual agents will naturally GC when dereferenced.
 }

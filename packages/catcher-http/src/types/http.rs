@@ -78,21 +78,57 @@ impl Default for PoolConfig {
     }
 }
 
+/// TLS 版本
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TlsVersion {
+    Tls1_0,
+    Tls1_1,
+    Tls1_2,
+    Tls1_3,
+}
+
 /// TLS 配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TlsConfig {
     /// 是否验证服务端证书
     #[serde(default = "default_true")]
     pub reject_unauthorized: bool,
-    /// CA 证书 PEM
+    /// CA 证书 PEM (inline)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ca_cert_pem: Option<String>,
-    /// 客户端证书 PEM
+    /// CA 证书文件路径
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ca_cert_path: Option<String>,
+    /// 客户端证书 PEM (inline)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_cert_pem: Option<String>,
-    /// 客户端私钥 PEM
+    /// 客户端证书文件路径
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_cert_path: Option<String>,
+    /// 客户端私钥 PEM (inline)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_key_pem: Option<String>,
+    /// 客户端私钥文件路径
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_key_path: Option<String>,
+    /// PFX/PKCS12 客户端身份 (binary)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_identity_pfx: Option<Vec<u8>>,
+    /// PFX 身份密码
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_identity_password: Option<String>,
+    /// TLS SNI 覆写
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tls_sni_override: Option<String>,
+    /// 最低 TLS 版本
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_tls_version: Option<TlsVersion>,
+    /// 最高 TLS 版本
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_tls_version: Option<TlsVersion>,
+    /// SHA-256 公钥指纹 pinning (deferred — requires custom ServerCertVerifier)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pin_sha256: Option<Vec<String>>,
 }
 
 impl Default for TlsConfig {
@@ -100,8 +136,17 @@ impl Default for TlsConfig {
         Self {
             reject_unauthorized: true,
             ca_cert_pem: None,
+            ca_cert_path: None,
             client_cert_pem: None,
+            client_cert_path: None,
             client_key_pem: None,
+            client_key_path: None,
+            client_identity_pfx: None,
+            client_identity_password: None,
+            tls_sni_override: None,
+            min_tls_version: None,
+            max_tls_version: None,
+            pin_sha256: None,
         }
     }
 }
@@ -115,6 +160,9 @@ pub struct DnsConfig {
     /// 自定义 DNS 服务器地址列表（如 ["8.8.8.8:53"]）
     #[serde(default)]
     pub nameservers: Vec<String>,
+    /// Hostname → IP 映射 (G7: custom DNS host mapping)
+    #[serde(default)]
+    pub host_mapping: HashMap<String, String>,
 }
 
 fn default_dns_cache_ttl() -> u32 {
@@ -126,6 +174,49 @@ impl Default for DnsConfig {
         Self {
             cache_ttl_secs: default_dns_cache_ttl(),
             nameservers: Vec::new(),
+            host_mapping: HashMap::new(),
+        }
+    }
+}
+
+/// 代理认证
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProxyAuth {
+    pub username: String,
+    pub password: String,
+}
+
+/// 代理配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProxyConfig {
+    /// "http://host:port" | "https://host:port" | "socks5://host:port"
+    pub url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auth: Option<ProxyAuth>,
+    #[serde(default)]
+    pub no_proxy: Vec<String>,
+}
+
+/// 重定向配置 (G6)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RedirectConfig {
+    /// 是否跟随重定向. Default: true
+    #[serde(default = "default_true")]
+    pub follow: bool,
+    /// 最大重定向次数. Default: 5
+    #[serde(default = "default_max_redirects")]
+    pub max_redirects: u32,
+}
+
+fn default_max_redirects() -> u32 {
+    5
+}
+
+impl Default for RedirectConfig {
+    fn default() -> Self {
+        Self {
+            follow: true,
+            max_redirects: default_max_redirects(),
         }
     }
 }
@@ -177,6 +268,25 @@ pub struct HttpClientConfig {
     /// NOTE: not yet wired into reqwest; configure via default_headers "Host" field as workaround.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hostname_override: Option<String>,
+
+    // --- G4: Proxy ---
+    /// 代理配置
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub proxy: Option<ProxyConfig>,
+
+    // --- G6: Redirect ---
+    /// 重定向配置
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub redirect: Option<RedirectConfig>,
+
+    // --- G12: Auth ---
+    /// Basic 认证
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auth: Option<ProxyAuth>,
+
+    /// Bearer token
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bearer_token: Option<String>,
 }
 
 fn default_connect_timeout() -> u64 {
@@ -203,6 +313,10 @@ impl Default for HttpClientConfig {
             max_concurrency: default_max_concurrency(),
             default_headers: HashMap::new(),
             hostname_override: None,
+            proxy: None,
+            redirect: None,
+            auth: None,
+            bearer_token: None,
         }
     }
 }

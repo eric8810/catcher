@@ -29,6 +29,7 @@
 | 10 | [`10-sse.md`](./10-sse.md) | **Server-Sent Events 客户端（AI 流式响应）** |
 | 11 | [`11-http-tests.md`](./11-http-tests.md) | **HTTP 客户端测试设计**（TS + Rust） |
 | 12 | [`12-ws-tests.md`](./12-ws-tests.md) | **WebSocket 客户端测试设计**（TS） |
+| 13 | [`13-api-gap-tests.md`](./13-api-gap-tests.md) | **API Gap 功能补充测试设计**（G2–G12） |
 
 > `07-codec.md` 已移除 — codec 不再是独立包，作为 `@eric8810/catcher-ws` 的内置能力。
 

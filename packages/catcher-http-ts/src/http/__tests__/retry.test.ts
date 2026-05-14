@@ -146,7 +146,7 @@ describe('R8 — Constant backoff', () => {
 
     const wrap = createRetryWrapper(instance, {
       attempts: 3,
-      backoff: 'constant',
+      backoff: 'fixed',
       minTimeout: 50,
     })
     await wrap('get', '/test')

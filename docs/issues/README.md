@@ -22,6 +22,27 @@
 
 > ⚠️ Issue #6 为测试基础设施 bug，可能导致 #1~#5 的 E2E 证据需要重新评估。
 
+## API 功能补充 Issues
+
+> 来源：[api-gap-analysis](../research/api-gap-analysis.md) 对照 + 代码审查
+
+| # | Issue | 优先级 | 状态 | 文件 |
+|---|-------|:------:|:----:|------|
+| G1 | ~~请求取消 (AbortSignal)~~ | 🔴 P0 | ✅ 已实现 | — |
+| G2 | 错误上下文丰富化 | 🔴 P0 | 🔲 | 同上 |
+| G3 | CORS / credentials / cookie | 🔴 P0 | 🔲 | 同上 |
+| G4 | 代理设置 (HTTP/SOCKS5) | 🟡 P1 | 🔲 | 同上 |
+| G5 | FormData / 文件上传 | 🟡 P1 | 🔲 | 同上 |
+| G6 | 重定向控制 | 🟡 P1 | 🔲 | 同上 |
+| G7 | 自定义 Hostname 解析 | 🟡 P1 | 🔲 | 同上 |
+| G8 | HTTPS 配置增强 | 🟡 P1 | 🔲 | 同上 |
+| G9 | Transport trait (Adapter) | 🟡 P1 | 🔲 | 同上 |
+| G10 | 流式响应 | 🟡 P1 | 🔲 | 同上 |
+| G11 | 韧性运行时控制 | 🟡 P1 | 🔲 | 同上 |
+| G12 | 认证辅助 | 🟢 P2 | 🔲 | 同上 |
+
+详见 → [api-gap-features.md](./api-gap-features.md)
+
 ## 间题之间的关联
 
 ```

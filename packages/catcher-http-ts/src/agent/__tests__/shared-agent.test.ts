@@ -4,7 +4,7 @@ import { createSharedAgent, clearDnsCache } from '../shared-agent.js'
 
 describe('A1 — Default config creates Agent with keepAlive', () => {
   it('returns https.Agent with keepAlive=true', () => {
-    const agent = createSharedAgent()
+    const agent = createSharedAgent() as any
     expect(agent).toBeInstanceOf(https.Agent)
     expect(agent.keepAlive).toBe(true)
   })
@@ -12,7 +12,7 @@ describe('A1 — Default config creates Agent with keepAlive', () => {
 
 describe('A2 — keepAlive=false', () => {
   it('returns Agent with keepAlive=false', () => {
-    const agent = createSharedAgent({ keepAlive: false })
+    const agent = createSharedAgent({ keepAlive: false }) as any
     expect(agent.keepAlive).toBe(false)
   })
 })

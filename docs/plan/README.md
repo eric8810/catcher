@@ -15,6 +15,7 @@
 | `06-phase5-ffi.md` | Phase 5：C ABI + napi-rs + flutter_rust_bridge |
 | `07-test-reuse.md` | TS e2e 测试复用方案（S1-S8 + chaos） |
 | `08-release.md` | 对外发包 Release 方案 — CI/CD, release-please, publish 流程 |
+| `09-api-gap-technical-design.md` | API Gap 功能补充技术方案 — G1~G12 详细设计与实现计划 |
 
 ## 与 arch-rs 的关系
 

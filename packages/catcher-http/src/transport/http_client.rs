@@ -35,13 +35,58 @@ impl HttpTransport {
                     .then(|| Duration::from_secs(config.pool.keep_alive_interval_secs)),
             );
 
+        // G8: TLS configuration
         reqwest_builder = build_tls_config(reqwest_builder, &config.tls)?;
 
-        // DNS resolution: build_dns_resolver validates config but custom
+        // G7: DNS resolution: build_dns_resolver validates config but custom
         // nameservers are not yet wired into reqwest (requires hickory-dns
         // feature integration). System DNS is used as fallback.
         if let Some(ref dns) = config.dns {
             build_dns_resolver(dns)?;
+        }
+
+        // G4: Proxy configuration
+        if let Some(ref proxy_config) = config.proxy {
+            let mut proxy = reqwest::Proxy::all(&proxy_config.url)
+                .map_err(|e| CatcherError::InvalidConfig(format!("invalid proxy URL: {e}")))?;
+            if let Some(ref auth) = proxy_config.auth {
+                proxy = proxy.basic_auth(&auth.username, &auth.password);
+            }
+            // G4: noProxy — exclude matching hostnames from proxying
+            if !proxy_config.no_proxy.is_empty() {
+                let no_proxy_str = proxy_config.no_proxy.join(",");
+                let no_proxy = reqwest::NoProxy::from_string(&no_proxy_str);
+                proxy = proxy.no_proxy(no_proxy);
+            }
+            reqwest_builder = reqwest_builder.proxy(proxy);
+        }
+
+        // G6: Redirect policy
+        reqwest_builder = match &config.redirect {
+            Some(r) if !r.follow => reqwest_builder.redirect(reqwest::redirect::Policy::none()),
+            Some(r) => reqwest_builder.redirect(reqwest::redirect::Policy::limited(r.max_redirects as usize)),
+            None => reqwest_builder,
+        };
+
+        // G12: Auth — set default headers for basic auth and bearer token
+        if let Some(ref auth) = config.auth {
+            let encoded = base64_encode(&format!("{}:{}", auth.username, auth.password));
+            let mut headers = reqwest::header::HeaderMap::new();
+            headers.insert(
+                "Authorization",
+                format!("Basic {}", encoded).parse()
+                    .map_err(|e| CatcherError::InvalidConfig(format!("invalid basic auth header: {e}")))?,
+            );
+            reqwest_builder = reqwest_builder.default_headers(headers);
+        }
+        if let Some(ref token) = config.bearer_token {
+            let mut headers = reqwest::header::HeaderMap::new();
+            headers.insert(
+                "Authorization",
+                format!("Bearer {}", token).parse()
+                    .map_err(|e| CatcherError::InvalidConfig(format!("invalid bearer token header: {e}")))?,
+            );
+            reqwest_builder = reqwest_builder.default_headers(headers);
         }
 
         let reqwest_client = reqwest_builder
@@ -203,8 +248,6 @@ impl HttpTransport {
 }
 
 fn map_middleware_error(e: reqwest_middleware::Error, config: &HttpClientConfig) -> CatcherError {
-    // reqwest_middleware::Error wraps reqwest::Error
-    // Try to check timeout/connect via string matching since reqwest v0.12 uses anyhow
     let msg = format!("{e}");
     if msg.contains("timeout") || msg.contains("timed out") {
         return CatcherError::RequestTimeout(config.response_timeout_ms);
@@ -213,4 +256,27 @@ fn map_middleware_error(e: reqwest_middleware::Error, config: &HttpClientConfig)
         return CatcherError::ConnectionTimeout(config.connect_timeout_ms);
     }
     CatcherError::Internal(format!("request: {e}"))
+}
+
+/// Simple base64 encoding for Basic auth (no external dependency needed)
+fn base64_encode(input: &str) -> String {
+    use std::fmt::Write;
+    const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let bytes = input.as_bytes();
+    let mut result = String::with_capacity((bytes.len() + 2) / 3 * 4);
+    for chunk in bytes.chunks(3) {
+        let mut n = 0u32;
+        for (i, &byte) in chunk.iter().enumerate() {
+            n |= (byte as u32) << (16 - i * 8);
+        }
+        for i in 0..4 {
+            if i <= chunk.len() {
+                let idx = ((n >> (18 - i * 6)) & 0x3F) as usize;
+                result.write_char(CHARSET[idx] as char).unwrap();
+            } else {
+                result.write_char('=').unwrap();
+            }
+        }
+    }
+    result
 }

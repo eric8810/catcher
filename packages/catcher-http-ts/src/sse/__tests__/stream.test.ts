@@ -284,7 +284,7 @@ describe('createSSEStream', () => {
 
   describe('POST / headers 验证', () => {
     it('S19 POST + JSON body — fetch 请求构造正确', async () => {
-      const { fetchSpy, response } = setupFetchSpy(['data: ok', ''])
+      const { fetchSpy } = setupFetchSpy(['data: ok', ''])
 
       const body = { model: 'gpt-4', messages: [{ role: 'user', content: 'hi' }] }
       const stream = createSSEStream({ url: 'http://test/sse', method: 'POST', body })

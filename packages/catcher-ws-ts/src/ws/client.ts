@@ -1,7 +1,21 @@
 import WebSocket from 'ws'
-import type { ResilientWSOptions, ResilientWS } from '@eric8810/catcher-core'
+import type { ResilientWSOptions, ResilientWS, ProxyConfig } from '@eric8810/catcher-core'
 import { createReconnectStrategy } from './reconnect.js'
 import { raceEndpoints } from './multi-endpoint.js'
+
+/**
+ * Resolve proxy config from boolean/string/ProxyConfig.
+ */
+function resolveProxyConfig(proxy: boolean | string | ProxyConfig): ProxyConfig | null {
+  if (proxy === false) return null
+  if (proxy === true) {
+    const url = process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.http_proxy || process.env.https_proxy
+    if (!url) return null
+    return { url, noProxy: process.env.NO_PROXY?.split(',') }
+  }
+  if (typeof proxy === 'string') return { url: proxy }
+  return proxy
+}
 
 /**
  * Create a resilient WebSocket client with:
@@ -9,6 +23,8 @@ import { raceEndpoints } from './multi-endpoint.js'
  * - configurable handshake timeout
  * - exponential backoff reconnection
  * - optional multi-endpoint racing
+ * - cookie header support (G3)
+ * - proxy support (G4)
  */
 export function createResilientWS(options: ResilientWSOptions): ResilientWS {
   const {
@@ -21,6 +37,8 @@ export function createResilientWS(options: ResilientWSOptions): ResilientWS {
     raceCount = 3,
     headers,
     rejectUnauthorized = true,
+    cookie,
+    proxy,
   } = options
 
   const urls = Array.isArray(url) ? url : [url]
@@ -31,7 +49,31 @@ export function createResilientWS(options: ResilientWSOptions): ResilientWS {
     handshakeTimeout,
     maxPayload,
     rejectUnauthorized,
-    headers,
+    headers: {
+      ...headers,
+      ...(cookie ? { Cookie: cookie } : {}),
+    },
+  }
+
+  // G4: Proxy support
+  const proxyConfig = proxy ? resolveProxyConfig(proxy) : null
+  if (proxyConfig) {
+    try {
+      // Dynamic import for proxy agents — these are optional dependencies
+      const proxyUrl = proxyConfig.url
+      if (proxyUrl.startsWith('socks')) {
+        // SOCKS5 proxy
+        const { SocksProxyAgent } = require('socks-proxy-agent')
+        ;(wsOptions as any).agent = new SocksProxyAgent(proxyUrl)
+      } else {
+        // HTTP/HTTPS proxy
+        const { HttpsProxyAgent } = require('https-proxy-agent')
+        ;(wsOptions as any).agent = new HttpsProxyAgent(proxyUrl)
+      }
+    } catch {
+      // Proxy agent not available — continue without proxy
+      console.warn('[catcher] Proxy agent not available. Install https-proxy-agent or socks-proxy-agent.')
+    }
   }
 
   if (protocol) {

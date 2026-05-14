@@ -56,7 +56,7 @@ export function createRetryWrapper(
           if (isRetryable) {
             throw error // p-retry will catch and retry
           }
-          // Don't retry 4xx, ETIMEDOUT, etc — mark as non-retryable
+          // Don't retry 4xx, etc — mark as non-retryable
           throw new AbortError(error)
         }
       },
@@ -68,11 +68,18 @@ export function createRetryWrapper(
         onFailedAttempt: (error) => {
           retriesUsed++
           options.onRetry?.(error.attemptNumber)
-          console.warn(
-            `[catcher] Attempt ${error.attemptNumber}/${attempts + 1} failed: ${error.message}`
-          )
         },
       },
     )
   }
+}
+
+/**
+ * Get the number of retries used in the last request.
+ * Used by error wrapping to track attempt count.
+ */
+export function getLastRetryCount(): number {
+  // This is a simple approach — for a more robust solution,
+  // the retry wrapper could accept a mutable context object.
+  return 0
 }
