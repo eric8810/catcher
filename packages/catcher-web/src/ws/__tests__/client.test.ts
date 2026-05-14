@@ -7,6 +7,22 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createWebSocketClient } from '../client.js'
 
+// ── Polyfill CloseEvent for Node.js ──────────────────────
+// CloseEvent is a browser-only API; vitest runs in Node by default.
+if (typeof (globalThis as any).CloseEvent === 'undefined') {
+  ;(globalThis as any).CloseEvent = class CloseEvent extends Event {
+    readonly code: number
+    readonly reason: string
+    readonly wasClean: boolean
+    constructor(type: string, init?: { code?: number; reason?: string; wasClean?: boolean }) {
+      super(type)
+      this.code = init?.code ?? 0
+      this.reason = init?.reason ?? ''
+      this.wasClean = init?.wasClean ?? false
+    }
+  }
+}
+
 // ── Mock WebSocket ────────────────────────────────────────
 
 interface MockWSInstance {
