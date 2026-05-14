@@ -33,7 +33,8 @@ Layer 2: 集成测试 (integration/)
          指标：功能正确性 + 基础对比
 
 Layer 1: 单元测试 (packages/*/src/**)
-         各包内部逻辑（拦截器、队列、编解码）
+         各包内部逻辑（拦截器、队列、编解码、SSE）
+         SSE: router (24 tests), stream (23), strict (10), client (11)
          网络：无，纯逻辑测试
 ```
 

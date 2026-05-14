@@ -126,6 +126,48 @@ const queue = createPriorityQueue({ concurrency: 10 })
 await enqueueWithPriority(queue, 1, async () => fetchData())
 ```
 
+### SSE — AI 流式响应
+
+```typescript
+import { createSSEStream } from '@eric8810/catcher-http'
+
+// 一次性流式请求（OpenAI / Anthropic / Gemini 兼容）
+const stream = createSSEStream({
+  url: 'https://api.openai.com/v1/chat/completions',
+  method: 'POST',
+  headers: { Authorization: `Bearer ${apiKey}` },
+  body: { model: 'gpt-4', messages: [{ role: 'user', content: 'Hello' }], stream: true },
+})
+
+for await (const line of stream) {
+  if (!line.startsWith('data:')) continue
+  const payload = line.startsWith('data: ') ? line.slice(6) : line.slice(5)
+  if (payload === '[DONE]') break
+  process.stdout.write(JSON.parse(payload).choices[0]?.delta?.content ?? '')
+}
+// 循环结束 = 连接关闭，无需手动清理
+```
+
+### SSE — 长连接推送（自动重连）
+
+```typescript
+import { createSSEClient } from '@eric8810/catcher-http'
+
+const client = createSSEClient({
+  url: 'https://api.example.com/events',
+  headers: { Authorization: 'Bearer xxx' },
+  reconnect: { initialDelay: 1000, maxDelay: 30_000 },
+  circuitBreaker: { failureThreshold: 5, resetTimeout: 30_000 },
+})
+
+for await (const line of client) {
+  if (line.startsWith('data: ')) console.log(line.slice(6))
+}
+
+// 永不主动断开。如需断开：
+client.close()
+```
+
 ---
 
 ## 三、Electron

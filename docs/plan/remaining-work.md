@@ -9,7 +9,7 @@
 | 组件 | 状态 |
 |------|------|
 | catcher-core / catcher-http / catcher-ws (Rust) | ✅ 完整实现 |
-| @eric8810/catcher-core / http / ws (TS) | ✅ 完整实现，含拦截器 |
+| @eric8810/catcher-core / http / ws (TS) | ✅ 完整实现，含拦截器 + SSE |
 | @eric8810/catcher-napi-http / napi-ws (.node 已编译) | ✅ 基础 API 可用 |
 | proxy.ts — 6 种损伤模型 | ✅ |
 | presets.ts — 17 个 profile | ✅ |
@@ -74,3 +74,5 @@ P3:  10(proxy补全) → 11(npm发布) → 12(crates.io发布)
 | `docs/user-manual/rust.md` | Rust crate 使用指南（代码已有，文档没写） |
 | `docs/user-manual/uniffi.md` | UniFFI 使用指南 |
 | `docs/arch-ts/10-web.md` | @eric8810/catcher-web 架构设计 |
+
+> **SSE 设计文档** 已完成：[`docs/arch-ts/10-sse.md`](../arch-ts/10-sse.md) — 覆盖 TS + Rust 两侧 SSE 设计、API、类型定义、测试方案。

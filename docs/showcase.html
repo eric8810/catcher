@@ -479,6 +479,26 @@ ws.<span class="fn">addEventListener</span>(<span class="str">'message'</span>, 
 <span class="kw">import</span> { pack, unpack } <span class="kw">from</span> <span class="str">'@eric8810/catcher-ws'</span>
 ws.<span class="fn">send</span>(<span class="fn">pack</span>({ event: <span class="str">'msg'</span>, data }))</pre>
     </div>
+
+    <div class="code-block">
+      <pre><span class="cm">// SSE — AI streaming (OpenAI / Anthropic / Gemini compatible)</span>
+<span class="kw">import</span> { createSSEStream } <span class="kw">from</span> <span class="str">'@eric8810/catcher-http'</span>
+
+<span class="kw">const</span> stream = <span class="fn">createSSEStream</span>({
+  url: <span class="str">'https://api.openai.com/v1/chat/completions'</span>,
+  method: <span class="str">'POST'</span>,
+  headers: { Authorization: <span class="str">'Bearer ...'</span> },
+  body: { model: <span class="str">'gpt-4'</span>, messages: [{ role: <span class="str">'user'</span>, content: <span class="str">'Hello'</span> }], stream: <span class="kw">true</span> },
+})
+
+<span class="kw">for await</span> (<span class="kw">const</span> line <span class="kw">of</span> stream) {
+  <span class="kw">if</span> (!line.<span class="fn">startsWith</span>(<span class="str">'data:'</span>)) <span class="kw">continue</span>
+  <span class="kw">const</span> payload = line.<span class="fn">slice</span>(<span class="str">6</span>)
+  <span class="kw">if</span> (payload === <span class="str">'[DONE]'</span>) <span class="kw">break</span>
+  process.stdout.<span class="fn">write</span>(JSON.<span class="fn">parse</span>(payload).choices[<span class="str">0</span>]?.delta?.content ?? <span class="str">''</span>)
+}
+<span class="cm">// loop ends = connection closed, no manual cleanup</span></pre>
+    </div>
   </div>
 </section>
 
@@ -526,6 +546,11 @@ ws.<span class="fn">send</span>(<span class="fn">pack</span>({ event: <span clas
         <div class="icon">🛡️</div>
         <h4>Route Black Hole Detection</h4>
         <p>Silently dropped packets? CB trips, connections evicted, automatic recovery when network returns.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon">📡</div>
+        <h4>Server-Sent Events (SSE)</h4>
+        <p>AI streaming made simple. createSSEStream for one-shot chat, createSSEClient for long-lived push with auto-reconnect, Last-Event-ID resume, and circuit breaker protection.</p>
       </div>
     </div>
   </div>

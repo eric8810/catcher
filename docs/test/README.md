@@ -22,6 +22,11 @@
 ├──────────────────────────────────────────────────┤
 │  测试服务 (servers/)                              │
 │  HTTP API Gateway + WebSocket Server             │
+├──────────────────────────────────────────────────┤
+│  单元测试 (packages/*/src/**/__tests__/)          │
+│  HTTP retry/interceptors/client/agent/queue       │
+│  WS codec/reconnect/multi-endpoint/client         │
+│  SSE router/stream/strict/client                  │
 └──────────────────────────────────────────────────┘
 ```
 
@@ -58,6 +63,12 @@ packages/test/
 │   └── ws-server.ts           ← WebSocket 测试服务
 └── reporters/
     └── comparison-reporter.ts ← vanilla vs catcher 对比报表
+
+# SSE 单元测试（catcher-http-ts/src/sse/__tests__/）
+#   router.test.ts       #24 行路由（24 tests）
+#   stream.test.ts       # SSEStream 流式请求（23 tests）
+#   strict.test.ts       # SSE 严格模式（10 tests）
+#   client.test.ts       # SSEClient 长连接 + 自动重连（11 tests）
 ```
 
 ## 设计哲学

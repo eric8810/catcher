@@ -1,4 +1,4 @@
-# 02 — 模块树 (v0.2)
+# 02 — 模块树 (v0.3)
 
 > 代码位置：`packages/catcher-*-ts/`
 
@@ -27,9 +27,14 @@ catcher-http-ts/
     ├── agent/
     │   ├── index.ts
     │   └── shared-agent.ts
-    └── queue/
-        ├── index.ts
-        └── priority-queue.ts
+    ├── queue/
+    │   ├── index.ts
+    │   └── priority-queue.ts
+    └── sse/
+        ├── index.ts              # 导出 createSSEStream, createSSEClient
+        ├── router.ts             # SSE 行路由（~30 行）
+        ├── stream.ts             # SSEStream — 一次性流式请求
+        └── client.ts             # SSEClient — 长连接 + 自动重连
 ```
 
 ## @eric8810/catcher-ws
@@ -55,6 +60,11 @@ catcher-web/
 ├── tsconfig.json
 └── src/
     ├── index.ts
-    └── http/
-        └── client.ts               # fetch-based HTTP client
+    ├── http/
+    │   └── client.ts               # fetch-based HTTP client
+    └── sse/
+        ├── index.ts                 # 导出 createSSEStream, createSSEClient
+        ├── router.ts                # 同 catcher-http-ts 版
+        ├── stream.ts                # 浏览器版 SSEStream
+        └── client.ts                # 浏览器版 SSEClient
 ```

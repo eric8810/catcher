@@ -53,12 +53,58 @@ client.interceptors.request.use(config => {
 | | @eric8810/catcher-http (Node.js) | @eric8810/catcher-web (Browser) |
 |--|------------------------|----------------------|
 | HTTP 底层 | axios → node:http | fetch() |
+| SSE 底层 | fetch + ReadableStream | fetch + ReadableStream |
 | keepAlive | ✅ Node.js Agent 连接池 | ❌ 浏览器自动管理 |
 | DNS 缓存 | ✅ cacheable-lookup | ❌ 浏览器 DNS |
 | WebSocket | `ws` 库 | 原生 `WebSocket` |
 | CORS | 无关 | ⚠️ 需要服务端配合 |
 | 响应流 | stream | ReadableStream |
 | 超时 | axios timeout | AbortController + setTimeout |
+
+---
+
+## SSE — AI 流式响应（浏览器）
+
+`@eric8810/catcher-web` 支持与 Node.js 版相同的 SSE API，底层使用浏览器原生 `fetch` + `ReadableStream`。
+
+```typescript
+import { createSSEStream } from '@eric8810/catcher-web'
+
+// AI 流式对话
+const stream = createSSEStream({
+  url: 'https://api.openai.com/v1/chat/completions',
+  method: 'POST',
+  headers: { Authorization: `Bearer ${apiKey}` },
+  body: { model: 'gpt-4', messages: [{ role: 'user', content: 'Hello' }], stream: true },
+})
+
+for await (const line of stream) {
+  if (!line.startsWith('data:')) continue
+  const payload = line.startsWith('data: ') ? line.slice(6) : line.slice(5)
+  if (payload === '[DONE]') break
+  document.getElementById('output')!.textContent += JSON.parse(payload).choices[0]?.delta?.content ?? ''
+}
+```
+
+```typescript
+// 长连接推送（自动重连 + Last-Event-ID 断点续传）
+import { createSSEClient } from '@eric8810/catcher-web'
+
+const client = createSSEClient({
+  url: 'https://api.example.com/events',
+  reconnect: { initialDelay: 1000, maxDelay: 30_000 },
+})
+
+for await (const line of client) {
+  if (line.startsWith('data: ')) {
+    console.log(line.slice(6))
+  }
+}
+
+client.close()  // 主动断开
+```
+
+> **注意**：浏览器 SSE 依赖 `fetch` + `ReadableStream`（Chrome 43+, Firefox 65+, Safari 10.1+）。CORS 需要服务端配合。
 
 ---
 
@@ -72,4 +118,6 @@ client.interceptors.request.use(config => {
 | 优先级队列 | ✅ 已实现（p-queue） |
 | 动态拦截器 | ⏳ stub（待完集成） |
 | keepAlive / DNS 缓存 | ❌ 浏览器不支持 |
+| SSE Stream | ✅ 已实现（fetch + ReadableStream） |
+| SSE Client (auto-reconnect) | ✅ 已实现（指数退避 + Last-Event-ID） |
 | WebSocket client | ⏳ 待建（原生 WebSocket 封装） |
