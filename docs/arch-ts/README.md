@@ -27,6 +27,8 @@
 | 08 | [`08-queue.md`](./08-queue.md) | 优先级队列（@eric8810/catcher-http） |
 | 09 | [`09-interceptors.md`](./09-interceptors.md) | 拦截器系统 + Per-request Options 设计 |
 | 10 | [`10-sse.md`](./10-sse.md) | **Server-Sent Events 客户端（AI 流式响应）** |
+| 11 | [`11-http-tests.md`](./11-http-tests.md) | **HTTP 客户端测试设计**（TS + Rust） |
+| 12 | [`12-ws-tests.md`](./12-ws-tests.md) | **WebSocket 客户端测试设计**（TS） |
 
 > `07-codec.md` 已移除 — codec 不再是独立包，作为 `@eric8810/catcher-ws` 的内置能力。
 
