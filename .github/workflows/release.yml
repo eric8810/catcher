@@ -54,7 +54,6 @@ jobs:
             build: |
               cd packages/catcher-napi-http
               pnpm exec napi build --platform --release --target x86_64-unknown-linux-gnu
-              pnpm exec napi build --platform --release --target x86_64-unknown-linux-musl
           - host: ubuntu-latest
             target: x86_64-unknown-linux-musl
             build: |
@@ -208,25 +207,25 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: packages -> target
-      # Publish in dependency order
+      # Publish in dependency order (tolerate already-published versions)
       - name: Publish catcher-core
-        run: cd packages/catcher-core && cargo publish
+        run: cd packages/catcher-core && cargo publish || true
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
       - name: Publish catcher-http
-        run: cd packages/catcher-http && cargo publish
+        run: cd packages/catcher-http && cargo publish || true
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
       - name: Publish catcher-ws
-        run: cd packages/catcher-ws && cargo publish
+        run: cd packages/catcher-ws && cargo publish || true
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
       - name: Publish catcher-ffi
-        run: cd packages/catcher-ffi && cargo publish
+        run: cd packages/catcher-ffi && cargo publish || true
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
       - name: Publish catcher-uniffi
-        run: cd packages/catcher-uniffi && cargo publish
+        run: cd packages/catcher-uniffi && cargo publish || true
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
