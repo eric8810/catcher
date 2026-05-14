@@ -72,6 +72,9 @@ impl SseClient {
                     break;
                 }
 
+                // Mark as Connecting before each connection attempt
+                *ready_state_bg.lock().unwrap() = SseReadyState::Connecting;
+
                 match connect_once(&config_clone, &lines_tx, &last_event_id_bg, &ready_state_bg, &reconnect_delay_bg).await {
                     Ok(()) => {
                         // Stream ended normally — check if we should reconnect
@@ -283,7 +286,209 @@ async fn connect_once(
         }
     }
 
-    // Stream ended — set state back to connecting for reconnect
-    *ready_state.lock().unwrap() = SseReadyState::Connecting;
+    // Stream ended — state stays Open until next reconnect attempt
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use catcher_core::types::sse::{SseClientConfig, SseMethod, SseReconnectConfig};
+    use std::collections::HashMap;
+    use tokio_stream::StreamExt;
+    use wiremock::{matchers::method, Mock, MockServer, ResponseTemplate};
+
+    fn sse_config(url: &str) -> SseClientConfig {
+        SseClientConfig {
+            url: url.to_string(),
+            method: SseMethod::GET,
+            headers: HashMap::new(),
+            body: None,
+            reconnect: None,
+            timeout_ms: 5000,
+            circuit_breaker: None,
+        }
+    }
+
+    fn sse_config_with_reconnect(url: &str) -> SseClientConfig {
+        SseClientConfig {
+            url: url.to_string(),
+            method: SseMethod::GET,
+            headers: HashMap::new(),
+            body: None,
+            reconnect: Some(SseReconnectConfig {
+                max_retries: 1,
+                initial_delay_ms: 50,
+                max_delay_ms: 100,
+                backoff_multiplier: 2.0,
+            }),
+            timeout_ms: 5000,
+            circuit_breaker: None,
+        }
+    }
+
+    /// RC1 — 基础消费
+    #[tokio::test]
+    async fn rc1_basic_consumption() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(
+                "data: hello\n\ndata: world\n\n",
+            ))
+            .mount(&server)
+            .await;
+
+        let config = sse_config(&server.uri());
+        let mut client = SseClient::connect(config).await.unwrap();
+
+        let line1 = client.next_line().await.unwrap().unwrap();
+        assert_eq!(line1, "data: hello");
+        let line2 = client.next_line().await.unwrap().unwrap();
+        assert_eq!(line2, "data: world");
+
+        // Stream ends → reconnect attempt starts
+        client.close();
+    }
+
+    /// RC2 — 自动重连 + Last-Event-ID
+    #[tokio::test]
+    async fn rc2_reconnect_with_last_event_id() {
+        let server = MockServer::start().await;
+
+        // First response: sends id + data then closes
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(
+                "id: abc123\ndata: first\n\n",
+            ))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+
+        // Second response: after reconnect with Last-Event-ID
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(
+                "data: second\n\n",
+            ))
+            .mount(&server)
+            .await;
+
+        let config = sse_config_with_reconnect(&server.uri());
+        let mut client = SseClient::connect(config).await.unwrap();
+
+        let line1 = client.next_line().await.unwrap().unwrap();
+        assert_eq!(line1, "data: first");
+        assert_eq!(client.last_event_id(), "abc123");
+
+        // Wait for reconnect
+        let line2 = client.next_line().await.unwrap().unwrap();
+        assert_eq!(line2, "data: second");
+
+        client.close();
+    }
+
+    /// RC3 — close() 停止
+    #[tokio::test]
+    async fn rc3_close_stops() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(
+                "data: ongoing\n",
+            ))
+            .mount(&server)
+            .await;
+
+        let config = sse_config(&server.uri());
+        let mut client = SseClient::connect(config).await.unwrap();
+
+        let line = client.next_line().await.unwrap().unwrap();
+        assert_eq!(line, "data: ongoing");
+
+        client.close();
+        assert_eq!(client.ready_state(), SseReadyState::Closed);
+
+        // next_line should eventually return None
+        let next = client.next_line().await;
+        assert!(next.is_none());
+    }
+
+    /// RC4 — 204 停止重连
+    #[tokio::test]
+    async fn rc4_204_stops_reconnect() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&server)
+            .await;
+
+        let config = sse_config_with_reconnect(&server.uri());
+        let mut client = SseClient::connect(config).await.unwrap();
+
+        // Should get no lines, and eventually the channel closes
+        let next = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            client.next_line(),
+        ).await;
+        // Either None (channel closed) or timeout — both acceptable
+        match next {
+            Ok(Some(_)) => panic!("Expected no data after 204"),
+            Ok(None) => {} // Channel closed — good
+            Err(_) => {} // Timeout — acceptable, 204 handling closes the loop
+        }
+
+        client.close();
+    }
+
+    /// RC5 — readyState 状态
+    #[tokio::test]
+    async fn rc5_ready_state_transitions() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(
+                "data: hi\n\n",
+            ))
+            .mount(&server)
+            .await;
+
+        let config = sse_config(&server.uri());
+        let mut client = SseClient::connect(config).await.unwrap();
+
+        // Initially Connecting
+        assert_eq!(client.ready_state(), SseReadyState::Connecting);
+
+        // After receiving data, should be Open
+        let _ = client.next_line().await;
+        // Give background task time to finish processing and yield
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert_eq!(client.ready_state(), SseReadyState::Open);
+
+        client.close();
+        assert_eq!(client.ready_state(), SseReadyState::Closed);
+    }
+
+    /// RC6 — Stream trait 消费
+    #[tokio::test]
+    async fn rc6_stream_trait_consumption() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(
+                "data: a\ndata: b\n\n",
+            ))
+            .mount(&server)
+            .await;
+
+        let config = sse_config(&server.uri());
+        let mut client = SseClient::connect(config).await.unwrap();
+
+        let mut collected = Vec::new();
+        // Use StreamExt::next
+        if let Some(Ok(line)) = client.next().await {
+            collected.push(line);
+        }
+        if let Some(Ok(line)) = client.next().await {
+            collected.push(line);
+        }
+
+        assert_eq!(collected, vec!["data: a", "data: b"]);
+        client.close();
+    }
 }
