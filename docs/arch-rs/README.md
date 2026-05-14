@@ -88,7 +88,7 @@ flutter pub add catcher_core
 | 08 | [`08-observability.md`](./08-observability.md) | 网络质量评估 + 指标收集 |
 | 09 | [`09-ffi.md`](./09-ffi.md) | FFI 接口契约（C ABI / napi / dart:ffi） |
 | 13 | [`13-dart-ffi.md`](./13-dart-ffi.md) | Dart FFI 绑定设计（dart:ffi ✅, flutter_rust_bridge ❌） |
-| 14 | [`14-workspace.md`](./14-workspace.md) | v0.2 workspace 架构总览 |
+| 14 | [`14-workspace.md`](./14-workspace.md) | v0.3 workspace 架构总览 |
 | 15 | [`15-ffi-layering.md`](./15-ffi-layering.md) | FFI 分层策略：TS vs Rust 职责边界 |
 
 ## 阅读路径

@@ -25,7 +25,7 @@ SSE 不是交互协议——没有握手、没有状态机、没有双向协商�
 HTTP 请求 → 服务端慢慢吐文本 → 读完了就完了
 ```
 
-因此 Catcher 的 SSE 模块定位为：**一个会重连的文本流行，不介入业务解析。**
+因此 Catcher 的 SSE 模块定位为：**一个会重连的文本流，不介入业务解析。**
 
 ### 用户的体验目标
 
@@ -86,7 +86,7 @@ Catcher 的本分（库静默处理）：            用户的事（用户自己
 | `data:  world` | `"data:  world"` |
 | `data: [DONE]` | `"data: [DONE]"` |
 
-用户拿到的是 **内容行（content lines）**——所有以 `event:`、`data:`、`id:`、`retry:` 开头的有效字段行，原样输出，不做任何结构化或解析。
+用户拿到的是 **内容行（content lines）**——所有以 `event:`、`data:` 开头的内容行，原样输出，不做任何结构化或解析。
 
 ---
 
@@ -540,6 +540,11 @@ impl SseClient {
     pub fn close(&mut self) { let _ = self.cancel_tx.send(()); }
     pub fn ready_state(&self) -> SseReadyState { ... }
     pub fn last_event_id(&self) -> String { ... }
+}
+
+impl Stream for SseClient {
+    type Item = Result<String, CatcherError>;
+    // 内部调用 next_line()，支持 while let line = client.next().await { ... }
 }
 ```
 
