@@ -1,14 +1,14 @@
 [package]
 name = "catcher-ws"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 description = "WebSocket client for catcher — resilient reconnect, heartbeat, multi-endpoint racing"
 license = "MIT"
 repository = "https://github.com/eric8810/catcher"
 
 [dependencies]
-catcher-core = { path = "../catcher-core", version = "0.2.0" }
-tokio = { version = "1", features = ["rt", "sync", "time", "net", "io-util", "macros"] }
+catcher-core = { path = "../catcher-core", version = "0.2.1" }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "net", "io-util", "macros"] }
 tokio-tungstenite = "0.24"
 futures-util = "0.3"
 backon = "1"

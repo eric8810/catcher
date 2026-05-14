@@ -20,7 +20,7 @@ Resilient network communication toolkit — Rust core, TypeScript wrappers, Flut
 | **Web** | `@eric8810/catcher-web` | ✅ Published |
 | **Rust** | `catcher-http` / `catcher-ws` / `catcher-core` | ✅ Published |
 | **Flutter** | `catcher_core` (dart:ffi) | ✅ Published |
-| **Android + iOS** | `catcher-uniffi` (UniFFI) | ⚠️ WIP |
+| **Android + iOS** | `catcher-uniffi` (UniFFI) | ⚠️ Published (crates.io publish failed) |
 
 ## Architecture
 
@@ -85,7 +85,7 @@ catcher  catcher              @eric8810  @eric8810
 | [`catcher-http`](https://crates.io/crates/catcher-http) | [![crates.io](https://img.shields.io/crates/v/catcher-http.svg)](https://crates.io/crates/catcher-http) | HTTP — reqwest, retry, CB |
 | [`catcher-ws`](https://crates.io/crates/catcher-ws) | [![crates.io](https://img.shields.io/crates/v/catcher-ws.svg)](https://crates.io/crates/catcher-ws) | WS — tokio-tungstenite, codec |
 | [`catcher-ffi`](https://crates.io/crates/catcher-ffi) | [![crates.io](https://img.shields.io/crates/v/catcher-ffi.svg)](https://crates.io/crates/catcher-ffi) | cdylib umbrella — 16 C ABI symbols |
-| `catcher-uniffi` | — | UniFFI → Swift + Kotlin (WIP) |
+| `catcher-uniffi` | — | UniFFI → Swift + Kotlin (crates.io pending) |
 
 ## Quick Start
 
@@ -111,7 +111,7 @@ npm install @eric8810/catcher-web
 
 ```yaml
 dependencies:
-  catcher_core: ^0.2.0
+  catcher_core: ^0.2.1
 ```
 
 ### Usage
@@ -199,10 +199,34 @@ for await (const line of client) {
 // Flutter — HTTP via Rust FFI
 import 'package:catcher_core/catcher_core.dart';
 
-final client = CatcherHttpClient();
-final resp = await client.get('https://httpbin.org/get');
-print(resp.body);
-await client.close();
+void main() async {
+  final client = CatcherHttpClient(HttpClientConfig(
+    baseUrl: 'https://httpbin.org',
+    retry: RetryConfig(maxAttempts: 3),
+  ));
+
+  final resp = await client.get('/get');
+  print('Status: ${resp.status}, Body: ${resp.bodyAsString}');
+
+  // POST
+  final created = await client.post('/post', body: {'key': 'value'});
+
+  client.dispose();
+
+  // WebSocket via Rust FFI
+  final ws = CatcherWsClient(WsClientConfig(
+    urls: ['wss://echo.example.com'],
+    reconnect: WsReconnectConfig(initialDelayMs: 1000),
+  ));
+
+  ws.events.listen((event) {
+    if (event is WsMessageEvent) print('Received: ${event.text}');
+  });
+
+  ws.sendText('hello');
+  await Future.delayed(Duration(seconds: 5));
+  ws.dispose();
+}
 ```
 
 ## Features

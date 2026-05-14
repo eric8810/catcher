@@ -1,6 +1,6 @@
 {
   "name": "@eric8810/catcher-web",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Catcher HTTP client for browsers — fetch-based with retry, circuit breaker & priority queue",
   "type": "module",
   "main": "./dist/index.js",
