@@ -92,9 +92,12 @@ jobs:
         if: matrix.settings.target == 'x86_64-unknown-linux-musl'
         run: sudo apt-get update && sudo apt-get install -y musl-tools
       - run: pnpm install
-      - name: Ensure cargo path
+      - name: Ensure cargo path (macOS)
         if: runner.os == 'macOS'
-        run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+        run: |
+          echo "PATH=$HOME/.cargo/bin:$PATH" >> $GITHUB_ENV
+          which cargo
+          cargo --version
       - run: ${{ matrix.settings.build }}
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -153,9 +156,12 @@ jobs:
         if: matrix.settings.target == 'x86_64-unknown-linux-musl'
         run: sudo apt-get update && sudo apt-get install -y musl-tools
       - run: pnpm install
-      - name: Ensure cargo path
+      - name: Ensure cargo path (macOS)
         if: runner.os == 'macOS'
-        run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+        run: |
+          echo "PATH=$HOME/.cargo/bin:$PATH" >> $GITHUB_ENV
+          which cargo
+          cargo --version
       - run: ${{ matrix.settings.build }}
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -184,19 +190,26 @@ jobs:
           merge-multiple: false
       - name: Assemble and publish catcher-napi-http
         run: |
-          mkdir -p packages/catcher-napi-http/npm
-          cp napi-artifacts/napi-http-*/*.node packages/catcher-napi-http/ || true
+          ls napi-artifacts/ || true
+          for dir in napi-artifacts/napi-http-*; do
+            [ -d "$dir" ] || continue
+            cp "$dir"/*.node packages/catcher-napi-http/ || true
+          done
+          ls packages/catcher-napi-http/*.node || true
           cd packages/catcher-napi-http
-          pnpm exec napi artifacts -d npm --package-name @eric8810/catcher-napi-http
+          pnpm exec napi prepublish -t npm --skip-gh-release
           npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Assemble and publish catcher-napi-ws
         run: |
-          mkdir -p packages/catcher-napi-ws/npm
-          cp napi-artifacts/napi-ws-*/*.node packages/catcher-napi-ws/ || true
+          for dir in napi-artifacts/napi-ws-*; do
+            [ -d "$dir" ] || continue
+            cp "$dir"/*.node packages/catcher-napi-ws/ || true
+          done
+          ls packages/catcher-napi-ws/*.node || true
           cd packages/catcher-napi-ws
-          pnpm exec napi artifacts -d npm --package-name @eric8810/catcher-napi-ws
+          pnpm exec napi prepublish -t npm --skip-gh-release
           npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
