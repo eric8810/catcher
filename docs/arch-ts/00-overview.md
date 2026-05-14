@@ -52,8 +52,8 @@ const stream = createSSEStream({
   body: { model: 'gpt-4', messages: [{ role: 'user', content: 'Hello' }], stream: true },
 })
 for await (const event of stream) {
-  if (event.data === '[DONE]') break
-  const chunk = JSON.parse(event.data)
+  if (event.data === '[DONE]') break  // 业务逻辑：自行判断终止
+  const chunk = JSON.parse(event.data)  // 业务逻辑：自行解析
   process.stdout.write(chunk.choices[0]?.delta?.content ?? '')
 }
 

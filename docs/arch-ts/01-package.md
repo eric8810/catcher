@@ -13,7 +13,7 @@
 
 **依赖**：`@eric8810/catcher-core`, `cacheable-lookup`, `cockatiel`, `p-retry`, `p-queue`  
 **Optional peer**：`axios`  
-**导出**：`createHttpClient`, `createRetryWrapper`, `createSharedAgent`, `clearDnsCache`, `createPriorityQueue`, `enqueueWithPriority`, **`createSSEClient`**, **`createSSEStream`**
+**导出**：`createHttpClient`, `createRetryWrapper`, `createSharedAgent`, `clearDnsCache`, `createPriorityQueue`, `enqueueWithPriority`, **`createSSEClient`**, **`createSSEStream`**, **`SseParser`**
 
 ## @eric8810/catcher-ws
 
@@ -24,6 +24,6 @@
 ## @eric8810/catcher-web
 
 **依赖**：`@eric8810/catcher-core`, `cockatiel`, `p-retry`, `p-queue`  
-**导出**：`createHttpClient`, **`createSSEClient`**, **`createSSEStream`**
+**导出**：`createHttpClient`, **`createSSEClient`**, **`createSSEStream`**, **`SseParser`**
 
 > SSE 模块零新增依赖 — Node.js 18+ 和浏览器原生支持 `fetch` + `ReadableStream`。

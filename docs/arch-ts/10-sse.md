@@ -174,6 +174,39 @@ for await (const event of stream) {
 }
 ```
 
+**Rust 自定义策略示例：**
+
+```rust
+use catcher_core::types::sse::{SseParseStrategy, LineType, SseStrategy, SseClientConfig};
+use catcher_http::sse::SseStream;
+
+// 自定义策略：用 "---" 分隔事件，# 开头为注释
+struct CustomSeparator;
+
+impl SseParseStrategy for CustomSeparator {
+    fn classify_line(&self, line: &str) -> LineType {
+        if line == "---" { return LineType::Blank; }
+        if line.starts_with('#') { return LineType::Comment; }
+        LineType::Data
+    }
+
+    fn is_event_boundary(&self, line: &str) -> bool {
+        line == "---"
+    }
+}
+
+let config = SseClientConfig {
+    url: "https://api.example.com/custom".into(),
+    parse_strategy: SseStrategy::Custom(Box::new(CustomSeparator)),
+    ..Default::default()
+};
+let mut stream = SseStream::connect(config).await?;
+while let Some(event) = stream.next().await {
+    let event = event?;
+    println!("data: {}", event.data);
+}
+```
+
 ---
 
 ## 全平台支持
@@ -329,6 +362,38 @@ pub enum SseBuiltinStrategy {
     Lenient,
 }
 
+/// 行分类结果
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LineType {
+    Data,
+    Event,
+    Id,
+    Retry,
+    Comment,
+    Blank,
+    Custom,
+}
+
+/// 自定义解析策略 trait（与 TS 侧 SSEParseStrategy 对等）
+pub trait SseParseStrategy: Send + Sync {
+    /// 行分类器：判断一行是什么类型
+    fn classify_line(&self, line: &str) -> LineType;
+    /// 事件分隔判定：当前行是否标志一个事件结束
+    fn is_event_boundary(&self, line: &str) -> bool { line.is_empty() }
+    /// data 解码：对原始 data 字符串做后处理
+    fn decode_data(&self, raw: &str) -> &str { raw }
+}
+
+/// 解析策略：内置名称 或 自定义 trait 实现
+pub enum SseStrategy {
+    Builtin(SseBuiltinStrategy),
+    Custom(Box<dyn SseParseStrategy>),
+}
+
+impl Default for SseStrategy {
+    fn default() -> Self { Self::Builtin(SseBuiltinStrategy::default()) }
+}
+
 /// SSE 客户端配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SseClientConfig {
@@ -337,10 +402,12 @@ pub struct SseClientConfig {
     pub method: SseMethod,
     #[serde(default)]
     pub headers: HashMap<String, String>,
+    /// 请求 body（JSON 字符串，调用方自行序列化）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub body: Option<String>,
-    #[serde(default)]
-    pub parse_strategy: SseBuiltinStrategy,
+    /// 解析策略：内置名称 或 自定义 trait。默认 Standard
+    #[serde(skip)]
+    pub parse_strategy: SseStrategy,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reconnect: Option<SseReconnectConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -396,16 +463,16 @@ packages/catcher-core/src/types/
 ```rust
 // packages/catcher-http/src/sse/parser.rs
 
-use catcher_core::types::sse::{SseBuiltinStrategy, SseEvent};
+use catcher_core::types::sse::{SseStrategy, SseEvent};
 
 /// SSE 文本流解析器
 ///
 /// 设计要点：
-/// - 策略化：支持 standard / lenient（可扩展自定义策略）
+/// - 策略化：支持 standard / lenient / 自定义 trait
 /// - 缓冲区：处理网络分片导致的不完整行
 /// - 零拷贝：尽可能避免不必要的 String clone
 pub struct SseParser {
-    strategy: SseBuiltinStrategy,
+    strategy: SseStrategy,
     data_buffer: String,
     event_type_buffer: String,
     last_event_id_buffer: String,
@@ -413,7 +480,7 @@ pub struct SseParser {
 }
 
 impl SseParser {
-    pub fn new(strategy: SseBuiltinStrategy) -> Self { ... }
+    pub fn new(strategy: SseStrategy) -> Self { ... }
 
     /// 处理一行文本，返回已组装完成的 SseEvent（可能有多个）
     /// 在空行（或自定义分隔符）时触发事件组装
@@ -649,6 +716,12 @@ pub mod sse;
 
 // Re-export
 pub use sse::{SseClient, SseStream, SseParser};
+
+// catcher-core re-exports
+pub use catcher_core::types::sse::{
+    SseEvent, SseBuiltinStrategy, SseStrategy, SseParseStrategy, LineType,
+    SseClientConfig, SseStreamOptions,
+};
 ```
 
 ---
