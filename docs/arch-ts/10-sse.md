@@ -710,3 +710,308 @@ SSE 通过 Rust 实现后，自动获得跨语言绑定路径：
 | `catcher-ffi` | `sse_connect` / `sse_stream` | C ABI 回调函数 |
 | `catcher-uniffi` | `SseClient` / `SseStream` | UniFFI 自动生成 Swift/Kotlin |
 | Flutter (`catcher_core`) | `sseConnect()` | dart:ffi 调用 C ABI |
+
+---
+
+## 测试方案
+
+### 测试分层
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     E2E / 手动验证                            │
+│  （调用真实 SSE 端点，验证端到端体验，不纳入 CI）               │
+└─────────────────────────────────────────────────────────────┘
+                            ▲
+┌─────────────────────────────────────────────────────────────┐
+│               集成测试（Mock HTTP Server）                    │
+│  TS: vitest + 拦截 fetch 返回模拟 ReadableStream             │
+│  Rust: wiremock + tokio::test                                │
+│  验证: createSSEStream / createSSEClient 完整流程             │
+└─────────────────────────────────────────────────────────────┘
+                            ▲
+┌─────────────────────────────────────────────────────────────┐
+│                  单元测试（纯函数，零网络）                     │
+│  Line Router: route_line() 全路径覆盖                         │
+│  TS: vitest                                                  │
+│  Rust: #[test]                                               │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 测试工具
+
+| 平台 | 框架 | Mock 方式 | 已有依赖？ |
+|------|------|-----------|-----------|
+| TypeScript | vitest | 拦截 `globalThis.fetch`，返回模拟 ReadableStream | 是 |
+| Rust | `#[tokio::test]` + wiremock | wiremock MockServer 返回 SSE 响应 | 是 |
+
+### 测试文件结构
+
+```
+packages/catcher-http-ts/src/sse/
+├── __tests__/
+│   ├── router.test.ts       # Line Router 单元测试
+│   ├── stream.test.ts       # createSSEStream 集成测试
+│   └── client.test.ts       # createSSEClient 集成测试
+
+packages/catcher-web/src/sse/
+├── __tests__/
+│   ├── router.test.ts       # 同 catcher-http-ts 版（代码相同）
+│   ├── stream.test.ts       # 浏览器版 stream 测试
+│   └── client.test.ts       # 浏览器版 client 测试
+
+packages/catcher-http/src/sse/
+├── router.rs                # #[cfg(test)] mod tests { } 内联
+├── stream.rs                # #[cfg(test)] mod tests { } 内联
+└── client.rs                # #[cfg(test)] mod tests { } 内联
+```
+
+> **设计决策**：TS 测试放在 `__tests__/` 子目录（vitest 默认发现），Rust 测试内联在 `#[cfg(test)] mod tests`。
+
+### TS Mock 工具函数
+
+```typescript
+// 模拟 SSE 服务端响应
+function mockSSEResponse(lines: string[], options?: { status?: number }) {
+  const encoder = new TextEncoder()
+  const stream = new ReadableStream({
+    start(controller) {
+      for (const line of lines) {
+        controller.enqueue(encoder.encode(line + '\n'))
+      }
+      controller.close()
+    }
+  })
+  vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+    ok: (options?.status ?? 200) < 400,
+    status: options?.status ?? 200,
+    body: stream,
+  } as Response)
+}
+
+// 模拟分片 SSE 响应（控制 chunk 边界）
+function mockSSEChunked(chunks: string[], options?: { status?: number }) {
+  const encoder = new TextEncoder()
+  let i = 0
+  const stream = new ReadableStream({
+    pull(controller) {
+      if (i < chunks.length) {
+        controller.enqueue(encoder.encode(chunks[i++]))
+      } else {
+        controller.close()
+      }
+    }
+  })
+  vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+    ok: (options?.status ?? 200) < 400,
+    status: options?.status ?? 200,
+    body: stream,
+  } as Response)
+}
+```
+
+---
+
+### 一、Line Router 单元测试
+
+纯函数，零网络，零 mock。TS 和 Rust 共享相同测试矩阵。
+
+#### 1.1 控制行 → Silent
+
+| # | 输入 | 期望 | 说明 |
+|---|------|------|------|
+| 1 | `""` | Silent | SSE 事件分隔符 |
+| 2 | `": keepalive"` | Silent | 心跳 |
+| 3 | `": this is a comment"` | Silent | 任意注释 |
+| 4 | `":"` | Silent | 最短注释 |
+
+#### 1.2 id: 行 → SetLastEventId
+
+| # | 输入 | 期望值 | 说明 |
+|---|------|--------|------|
+| 5 | `"id: msg_001"` | `"msg_001"` | 标准格式 |
+| 6 | `"id:msg_002"` | `"msg_002"` | 无空格 |
+| 7 | `"id:  multi  space"` | `"multi  space"` | trimStart 只去前导空格 |
+| 8 | `"id:"` | `""` | 空 id |
+| 9 | `"id: 42"` | `"42"` | 数字 id |
+
+#### 1.3 retry: 行 → SetRetry
+
+| # | 输入 | 期望 | 说明 |
+|---|------|------|------|
+| 10 | `"retry: 5000"` | SetRetry(5000) | 标准格式 |
+| 11 | `"retry:1000"` | SetRetry(1000) | 无空格 |
+| 12 | `"retry: abc"` | Yield 原样 | 非数字 |
+| 13 | `"retry: -1"` | Yield 原样 | 负数 |
+| 14 | `"retry: 0"` | SetRetry(0) | 零合法 |
+
+#### 1.4 内容行 → Yield 原样输出
+
+| # | 输入 | 期望输出 | 说明 |
+|---|------|---------|------|
+| 15 | `"data: Hello"` | `"data: Hello"` | 标准数据行 |
+| 16 | `"data: {\"type\":\"start\"}"` | 原样 | JSON payload |
+| 17 | `"data:  world"` | `"data:  world"` | 两个空格保留 |
+| 18 | `"data: [DONE]"` | `"data: [DONE]"` | 终止标记原样 |
+| 19 | `"event: message_start"` | 原样 | event 行 |
+| 20 | `"data:"` | `"data:"` | 空 data |
+| 21 | `"custom: value"` | 原样 | 非标准前缀 |
+| 22 | `"just text"` | 原样 | 无前缀行 |
+| 23 | `"ID: uppercase"` | 原样 | 大写不是 id: |
+| 24 | `" "` | 原样 | 空格非控制前缀 |
+
+> **关键断言**：Yield 行完全原样——库不做任何前缀剥离或结构化解析。
+
+---
+
+### 二、createSSEStream 集成测试
+
+#### 2.1 基础流式消费
+
+| # | 测试名 | 模拟输入 | 断言 |
+|---|--------|---------|------|
+| S1 | 完整 SSE 事件 | `"data: Hello\n\ndata: World\n\n"` | `["data: Hello", "data: World"]` |
+| S2 | 混合控制行和内容行 | `": comment\ndata: A\nid: 1\n\ndata: B\n"` | `["data: A", "data: B"]`，lastEventId=`"1"` |
+| S3 | 心跳行被过滤 | `": ping\n: pong\ndata: real\n\n"` | `["data: real"]` |
+| S4 | 空行被过滤 | `"data: X\n\n\ndata: Y\n\n"` | `["data: X", "data: Y"]` |
+
+#### 2.2 Chunk 分片处理
+
+| # | 测试名 | 模拟方式 | 断言 |
+|---|--------|---------|------|
+| S5 | 跨 chunk 的行 | chunk1:`"data: Hel"`, chunk2:`"lo\n"` | `["data: Hello"]`，无半行 |
+| S6 | 单 chunk 多行 | `"data: A\ndata: B\n"` | `["data: A", "data: B"]` |
+| S7 | 空 chunk + 数据 chunk | chunk1:`""`, chunk2:`"data: X\n"` | `["data: X"]` |
+
+#### 2.3 行尾处理
+
+| # | 测试名 | 模拟输入 | 断言 |
+|---|--------|---------|------|
+| S8 | `\r\n` 换行 | `"data: A\r\n\r\n"` | `["data: A"]` |
+| S9 | 混合 `\n` 和 `\r\n` | `"data: A\ndata: B\r\n"` | `["data: A", "data: B"]` |
+| S10 | 最后一行无 `\n` | `"data: end"` | `["data: end"]` |
+
+#### 2.4 id: 和 retry: 提取
+
+| # | 测试名 | 模拟输入 | 断言 |
+|---|--------|---------|------|
+| S11 | lastEventId 提取 | `"id: msg_42\ndata: X\n"` | `stream.lastEventId === "msg_42"` |
+| S12 | 多次 id 覆盖 | `"id: first\ndata: A\n\nid: second\ndata: B\n"` | 最终 `lastEventId === "second"` |
+
+#### 2.5 错误处理
+
+| # | 测试名 | 模拟方式 | 断言 |
+|---|--------|---------|------|
+| S13 | HTTP 非 200 | fetch 返回 500 | throw，含 `"HTTP 500"` |
+| S14 | AbortSignal 中断 | 读到一半 abort | `for await` 正常结束 |
+
+#### 2.6 只能迭代一次
+
+| # | 测试名 | 断言 |
+|---|--------|------|
+| S15 | 第二次迭代抛错 | 第二次 `[Symbol.asyncIterator]()` throw |
+
+---
+
+### 三、createSSEClient 集成测试
+
+#### 3.1 基础连接和消费
+
+| # | 测试名 | 断言 |
+|---|--------|------|
+| C1 | 连接并消费内容行 | mock 返回 SSE → 收到正确内容行数组 |
+| C2 | readyState 变化 | CONNECTING → OPEN(收到数据时) → CLOSED(close后) |
+| C3 | close() 停止迭代 | close() 后 `for await` 结束 |
+| C4 | lastEventId 提取 | 从 `id:` 行提取，`.lastEventId` 可访问 |
+
+#### 3.2 自动重连
+
+| # | 测试名 | 模拟方式 | 断言 |
+|---|--------|---------|------|
+| C5 | 流结束后自动重连 | 第一次响应结束 → 延迟 → 第二次响应 | 两次内容都收到 |
+| C6 | 重连携带 Last-Event-ID | 第一次含 `id: abc`，第二次请求 headers 含 `Last-Event-ID: abc` | headers 正确 |
+| C7 | 网络错误后重连 | 第一次 fetch throw → 第二次成功 | 最终收到数据 |
+| C8 | 达到 maxRetries 停止 | `maxRetries: 2`，连续失败 3 次 | `for await` 结束 |
+| C9 | enabled: false 不重连 | `enabled: false` | 流结束后不重连 |
+
+#### 3.3 204 停止重连
+
+| # | 测试名 | 模拟方式 | 断言 |
+|---|--------|---------|------|
+| C10 | 204 停止重连 | fetch 返回 204 | `for await` 结束 |
+
+#### 3.4 熔断器
+
+| # | 测试名 | 模拟方式 | 断言 |
+|---|--------|---------|------|
+| C11 | circuitBreaker 集成 | `failureThreshold: 2`，连续失败后停止重连 | `for await` 结束 |
+
+---
+
+### 四、Rust 专项测试
+
+使用 `wiremock::MockServer`，与 TS 测试用例一一对应。
+
+#### 4.1 Line Router 单元测试
+
+同「一、Line Router」全部用例（#1 ~ #24），以 `#[test]` 内联在 `router.rs`。
+
+#### 4.2 SseStream 集成测试
+
+| # | 测试名 | MockServer 响应 | 断言 |
+|---|--------|----------------|------|
+| RS1 | 完整事件消费 | `"data: Hello\n\ndata: World\n\n"` | 收集 2 行 |
+| RS2 | 控制行过滤 | `": comment\ndata: A\nid: 1\n"` | 仅 `["data: A"]`，last_event_id=`"1"` |
+| RS3 | `\r\n` 容错 | `"data: X\r\n\r\n"` | 正确切行 |
+| RS4 | HTTP 错误 | 500 | `Err(HttpError { status: 500 })` |
+| RS5 | Stream trait 消费 | 正常 SSE 响应 | `while let Some(line) = stream.next().await` 编译+正确 |
+
+#### 4.3 SseClient 集成测试
+
+| # | 测试名 | MockServer 配置 | 断言 |
+|---|--------|----------------|------|
+| RC1 | 基础消费 | 单次 SSE 响应 | 正确收集内容行 |
+| RC2 | 自动重连 + Last-Event-ID | 第一次响应结束 → 第二次请求到达 | headers 含 `Last-Event-ID` |
+| RC3 | close() 停止 | 发数据 → close() | 迭代结束 |
+| RC4 | 204 停止重连 | 返回 204 | 迭代结束，无第二次请求 |
+| RC5 | readyState 状态 | 各阶段验证 | Connecting → Open → Closed |
+| RC6 | Stream trait 消费 | 正常 SSE | `while let Some(line) = client.next().await` 编译+正确 |
+
+---
+
+### 五、测试覆盖矩阵
+
+| 设计要点 | Router | Stream | Client | TS | Rust |
+|---------|:------:|:------:|:------:|:--:|:----:|
+| 空行 → Silent | ✅ | | | ✅ | ✅ |
+| `:` 注释 → Silent | ✅ | | | ✅ | ✅ |
+| `id:` → SetLastEventId | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `retry:` → SetRetry | ✅ | | ✅ | ✅ | ✅ |
+| `data:`/`event:` → Yield 原样 | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Chunk 缓冲（无半行） | | ✅ | | ✅ | ✅ |
+| `\r\n` 容错 | | ✅ | | ✅ | ✅ |
+| 最后一行无 `\n` | | ✅ | | ✅ | |
+| createSSEStream 一次性 | | ✅ | | ✅ | ✅ |
+| AbortSignal 中断 | | ✅ | ✅ | ✅ | |
+| HTTP 错误 throw | | ✅ | ✅ | ✅ | ✅ |
+| SSETimeoutError | | ✅ | | ✅ | |
+| 单次迭代限制 | | ✅ | | ✅ | |
+| createSSEClient 自动重连 | | | ✅ | ✅ | ✅ |
+| Last-Event-ID 携带 | | | ✅ | ✅ | ✅ |
+| 204 停止重连 | | | ✅ | ✅ | ✅ |
+| maxRetries 限制 | | | ✅ | ✅ | |
+| reconnect.enabled 控制 | | | ✅ | ✅ | |
+| close() 停止 | | | ✅ | ✅ | ✅ |
+| readyState 状态 | | | ✅ | ✅ | ✅ |
+| circuitBreaker 集成 | | | ✅ | ✅ | |
+| 无业务解析 | ✅ | ✅ | ✅ | ✅ | ✅ |
+
+### 六、不测试的范围
+
+| 不测试 | 原因 |
+|--------|------|
+| 真实 OpenAI API 调用 | 需要 API key，不稳定，属于 E2E |
+| napi-rs / UniFFI 绑定 | SSE FFI 尚未实现 |
+| 浏览器 DOM 兼容性 | 需要 Playwright，属于 E2E |
+| 并发性能压测 | 非 Catcher SSE 的职责 |
+| SSE 服务端实现 | Catcher 是客户端库 |
