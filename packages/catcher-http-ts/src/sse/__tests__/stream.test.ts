@@ -62,6 +62,23 @@ function mockSSEIdleHang(options?: { status?: number }) {
   )
 }
 
+/** Spy on fetch and mock a single SSE response, returning the spy for assertions */
+function setupFetchSpy(lines: string[], options?: { status?: number }) {
+  const encoder = new TextEncoder()
+  const stream = new ReadableStream({
+    start(controller) {
+      for (const line of lines) {
+        controller.enqueue(encoder.encode(line + '\n'))
+      }
+      controller.close()
+    },
+  })
+  const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+    mockResponse(stream, options?.status),
+  )
+  return { fetchSpy }
+}
+
 async function collectStream(stream: AsyncIterable<string>): Promise<string[]> {
   const result: string[] = []
   for await (const line of stream) {
@@ -124,6 +141,25 @@ describe('createSSEStream', () => {
       mockSSEChunked(['', 'data: X\n'])
       const stream = createSSEStream({ url: 'http://test/sse' })
       expect(await collectStream(stream)).toEqual(['data: X'])
+    })
+
+    it('S8 UTF-8 多字节跨 chunk — 无乱码', async () => {
+      // "é" = UTF-8 bytes 0xc3 0xa9, split across two chunks
+      const prefix = new TextEncoder().encode('data: Héll')
+      const chunk1 = new Uint8Array([...prefix, 0xc3])
+      const chunk2 = new Uint8Array([0xa9, ...new TextEncoder().encode('\n')])
+
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(chunk1)
+          controller.enqueue(chunk2)
+          controller.close()
+        },
+      })
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(mockResponse(stream))
+
+      const sse = createSSEStream({ url: 'http://test/sse' })
+      expect(await collectStream(sse)).toEqual(['data: Héllé'])
     })
   })
 
@@ -244,10 +280,74 @@ describe('createSSEStream', () => {
     })
   })
 
-  // ── 2.8 只能迭代一次 ────────────────────────────────────
+  // ── 2.8 POST / headers 验证 ─────────────────────────────
+
+  describe('POST / headers 验证', () => {
+    it('S19 POST + JSON body — fetch 请求构造正确', async () => {
+      const { fetchSpy, response } = setupFetchSpy(['data: ok', ''])
+
+      const body = { model: 'gpt-4', messages: [{ role: 'user', content: 'hi' }] }
+      const stream = createSSEStream({ url: 'http://test/sse', method: 'POST', body })
+      await collectStream(stream)
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1)
+      const [url, init] = fetchSpy.mock.calls[0]
+      expect(url).toBe('http://test/sse')
+      expect((init as RequestInit).method).toBe('POST')
+      expect((init as RequestInit).body).toBe(JSON.stringify(body))
+      const headers = (init as RequestInit).headers as Record<string, string>
+      expect(headers['Content-Type']).toBe('application/json')
+    })
+
+    it('S20 自定义 headers 透传', async () => {
+      const { fetchSpy } = setupFetchSpy(['data: ok', ''])
+
+      const stream = createSSEStream({
+        url: 'http://test/sse',
+        headers: { Authorization: 'Bearer sk-xxx' },
+      })
+      await collectStream(stream)
+
+      const init = fetchSpy.mock.calls[0][1] as RequestInit
+      const headers = init.headers as Record<string, string>
+      expect(headers['Authorization']).toBe('Bearer sk-xxx')
+    })
+
+    it('S21 POST + 已有 Content-Type 不覆盖', async () => {
+      const { fetchSpy } = setupFetchSpy(['data: ok', ''])
+
+      const stream = createSSEStream({
+        url: 'http://test/sse',
+        method: 'POST',
+        body: 'raw text',
+        headers: { 'Content-Type': 'text/plain' },
+      })
+      await collectStream(stream)
+
+      const init = fetchSpy.mock.calls[0][1] as RequestInit
+      const headers = init.headers as Record<string, string>
+      expect(headers['Content-Type']).toBe('text/plain')
+    })
+
+    it('S22 string body 不 JSON.stringify', async () => {
+      const { fetchSpy } = setupFetchSpy(['data: ok', ''])
+
+      const stream = createSSEStream({
+        url: 'http://test/sse',
+        method: 'POST',
+        body: 'raw string',
+      })
+      await collectStream(stream)
+
+      const init = fetchSpy.mock.calls[0][1] as RequestInit
+      expect(init.body).toBe('raw string')
+    })
+  })
+
+  // ── 2.9 只能迭代一次 ────────────────────────────────────
 
   describe('只能迭代一次', () => {
-    it('S18 第二次迭代抛错', async () => {
+    it('S23 第二次迭代抛错', async () => {
       mockSSEResponse(['data: once'])
       const stream = createSSEStream({ url: 'http://test/sse' })
       await collectStream(stream)

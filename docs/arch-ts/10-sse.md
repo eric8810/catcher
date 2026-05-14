@@ -770,7 +770,7 @@ packages/catcher-http/src/sse/
 
 > **catcher-web 测试策略**：代码与 `catcher-http-ts` 相同（同一 router/client 实现），测试用例也相同。catcher-web 仅额外验证浏览器 `fetch` 环境差异（如 `Response.body` 可用性），不单独列用例表。
 
-> **用例编号规则**：Router `#1-24`，Stream `S1-S18`，Client `C1-C11`，Rust Stream `RS1-RS7`，Rust Client `RC1-RC6`。新增用例接续现有最大编号。
+> **用例编号规则**：Router `#1-24`，Stream `S1-S23`，Client `C1-C11`，Rust Stream `RS1-RS7`，Rust Client `RC1-RC6`。新增用例接续现有最大编号。
 
 ### TS Mock 工具函数
 
@@ -910,47 +910,61 @@ function mockSSEIdleHang(options?: { status?: number }) {
 | S5 | 跨 chunk 的行 | chunk1:`"data: Hel"`, chunk2:`"lo\n"` | `["data: Hello"]`，无半行 |
 | S6 | 单 chunk 多行 | `"data: A\ndata: B\n"` | `["data: A", "data: B"]` |
 | S7 | 空 chunk + 数据 chunk | chunk1:`""`, chunk2:`"data: X\n"` | `["data: X"]` |
+| S8 | UTF-8 多字节跨 chunk | chunk1:`"data: Héll"` + `0xc3`（`é` 截断），chunk2:`0xa9`（补齐）+ `"\n"` | `["data: Héllé"]`，无乱码 |
+
+> **S8 说明**：UTF-8 多字节字符（如 `é` = `0xc3 0xa9`）可能被 chunk 边界切开。`TextDecoder` 的 `{ stream: true }` 会缓冲不完整字节到下一个 chunk。此用例验证该机制在 SSE 管道中正确工作。AI 流式场景中 emoji 和 CJK 字符是常见触发源。
 
 #### 2.3 行尾处理
 
 | # | 测试名 | 模拟输入 | 断言 |
 |---|--------|---------|------|
-| S8 | `\r\n` 换行 | `"data: A\r\n\r\n"` | `["data: A"]` |
-| S9 | 混合 `\n` 和 `\r\n` | `"data: A\ndata: B\r\n"` | `["data: A", "data: B"]` |
-| S10 | 最后一行无 `\n` | `"data: end"` | `["data: end"]` |
+| S9 | `\r\n` 换行 | `"data: A\r\n\r\n"` | `["data: A"]` |
+| S10 | 混合 `\n` 和 `\r\n` | `"data: A\ndata: B\r\n"` | `["data: A", "data: B"]` |
+| S11 | 最后一行无 `\n` | `"data: end"` | `["data: end"]` |
 
 #### 2.4 id: 和 retry: 提取
 
 | # | 测试名 | 模拟输入 | 断言 |
 |---|--------|---------|------|
-| S11 | lastEventId 提取 | `"id: msg_42\ndata: X\n"` | `stream.lastEventId === "msg_42"` |
-| S12 | 多次 id 覆盖 | `"id: first\ndata: A\n\nid: second\ndata: B\n"` | 最终 `lastEventId === "second"` |
+| S12 | lastEventId 提取 | `"id: msg_42\ndata: X\n"` | `stream.lastEventId === "msg_42"` |
+| S13 | 多次 id 覆盖 | `"id: first\ndata: A\n\nid: second\ndata: B\n"` | 最终 `lastEventId === "second"` |
 
 #### 2.5 错误处理
 
 | # | 测试名 | 模拟方式 | 断言 |
 |---|--------|---------|------|
-| S13 | HTTP 非 200 | fetch 返回 500 | throw，含 `"HTTP 500"` |
-| S14 | AbortSignal 中断 | 读到一半 abort | 抛出 `Error('Aborted')` |
+| S14 | HTTP 非 200 | fetch 返回 500 | throw，含 `"HTTP 500"` |
+| S15 | AbortSignal 中断 | 读到一半 abort | 抛出 `Error('Aborted')` |
 
 #### 2.6 Idle Timeout
 
 | # | 测试名 | 模拟方式 | 断言 |
 |---|--------|---------|------|
-| S15 | idle timeout 触发 | `mockSSEIdleHang()`，`timeout: 100` | throw `SSETimeoutError`，`error.type === 'SSE_TIMEOUT'` |
+| S16 | idle timeout 触发 | `mockSSEIdleHang()`，`timeout: 100` | throw `SSETimeoutError`，`error.type === 'SSE_TIMEOUT'` |
 
 #### 2.7 event: 行原样通过
 
 | # | 测试名 | 模拟输入 | 断言 |
 |---|--------|---------|------|
-| S16 | `event:` 行原样输出 | `"event: message_start\ndata: {\"role\":\"assistant\"}\n\n"` | `["event: message_start", "data: {\"role\":\"assistant\"}"]` |
-| S17 | 多个 `event:` + `data:` 混合 | `"event: ping\ndata: ok\n\nevent: message\ndata: hi\n\n"` | 4 行原样输出，顺序一致 |
+| S17 | `event:` 行原样输出 | `"event: message_start\ndata: {\"role\":\"assistant\"}\n\n"` | `["event: message_start", "data: {\"role\":\"assistant\"}"]` |
+| S18 | 多个 `event:` + `data:` 混合 | `"event: ping\ndata: ok\n\nevent: message\ndata: hi\n\n"` | 4 行原样输出，顺序一致 |
 
-#### 2.8 只能迭代一次
+#### 2.8 POST / headers 验证
+
+> **AI 场景主路径**：OpenAI、Anthropic、Gemini 全部使用 POST + JSON body + Authorization header。以下用例验证请求构造的正确性。
+
+| # | 测试名 | 配置 | 断言 |
+|---|--------|------|------|
+| S19 | POST + JSON body | `{ method: 'POST', body: { model: 'gpt-4', messages: [...] } }` | fetch 的 `init.method === 'POST'`，`init.body` 为 JSON 字符串，`Content-Type: application/json` |
+| S20 | 自定义 headers 透传 | `{ headers: { Authorization: 'Bearer sk-xxx' } }` | fetch 的 `init.headers` 包含 `Authorization: 'Bearer sk-xxx'` |
+| S21 | POST + 已有 Content-Type 不覆盖 | `{ method: 'POST', body: 'text', headers: { 'Content-Type': 'text/plain' } }` | fetch 的 `init.headers['Content-Type']` 仍为 `text/plain`，不被覆盖 |
+| S22 | string body 不 JSON.stringify | `{ method: 'POST', body: 'raw string' }` | fetch 的 `init.body === 'raw string'` |
+
+#### 2.9 只能迭代一次
 
 | # | 测试名 | 断言 |
 |---|--------|------|
-| S18 | 第二次迭代抛错 | 第二次 `[Symbol.asyncIterator]()` throw |
+| S23 | 第二次迭代抛错 | 第二次 `[Symbol.asyncIterator]()` throw |
 
 ---
 
@@ -1024,7 +1038,7 @@ function mockSSEIdleHang(options?: { status?: number }) {
 
 ### 五、测试覆盖矩阵
 
-> **编号规则**：Router `#1-24`，Stream `S1-S18`，Client `C1-C11`，Rust Stream `RS1-RS7`，Rust Client `RC1-RC6`。新增用例接续现有最大编号。
+> **编号规则**：Router `#1-24`，Stream `S1-S23`，Client `C1-C11`，Rust Stream `RS1-RS7`，Rust Client `RC1-RC6`。新增用例接续现有最大编号。
 
 | 设计要点 | Router | Stream | Client | TS | Rust |
 |---------|:------:|:------:|:------:|:--:|:----:|
@@ -1034,6 +1048,7 @@ function mockSSEIdleHang(options?: { status?: number }) {
 | `retry:` → SetRetry | ✅ | | ✅ | ✅ | ✅ |
 | `data:`/`event:` → Yield 原样 | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `event:` 行原样通过 | ✅ | ✅ | | ✅ | ✅ |
+| UTF-8 多字节跨 chunk | | ✅ | | ✅ | |
 | Chunk 缓冲（无半行） | | ✅ | | ✅ | ✅ |
 | `\r\n` 容错 | | ✅ | | ✅ | ✅ |
 | 最后一行无 `\n` | | ✅ | | ✅ | ✅ |
@@ -1041,6 +1056,8 @@ function mockSSEIdleHang(options?: { status?: number }) {
 | AbortSignal 中断 | | ✅ | ✅ | ✅ | |
 | HTTP 错误 throw | | ✅ | ✅ | ✅ | ✅ |
 | SSETimeoutError（idle timeout） | | ✅ | | ✅ | ✅ |
+| POST + JSON body | | ✅ | ✅ | ✅ | |
+| 自定义 headers 透传 | | ✅ | ✅ | ✅ | |
 | 单次迭代限制 | | ✅ | | ✅ | ✅ |
 | createSSEClient 自动重连 | | | ✅ | ✅ | ✅ |
 | Last-Event-ID 携带 | | | ✅ | ✅ | ✅ |
