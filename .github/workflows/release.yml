@@ -96,6 +96,7 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           echo "PATH=$HOME/.cargo/bin:$PATH" >> $GITHUB_ENV
+          echo "CARGO=$HOME/.cargo/bin/cargo" >> $GITHUB_ENV
           which cargo
           cargo --version
       - run: ${{ matrix.settings.build }}
@@ -160,6 +161,7 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           echo "PATH=$HOME/.cargo/bin:$PATH" >> $GITHUB_ENV
+          echo "CARGO=$HOME/.cargo/bin/cargo" >> $GITHUB_ENV
           which cargo
           cargo --version
       - run: ${{ matrix.settings.build }}
@@ -198,7 +200,7 @@ jobs:
           ls packages/catcher-napi-http/*.node || true
           cd packages/catcher-napi-http
           pnpm exec napi prepublish -t npm --skip-gh-release
-          npm publish --access public
+          npm publish --access public --ignore-scripts
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Assemble and publish catcher-napi-ws
@@ -210,7 +212,7 @@ jobs:
           ls packages/catcher-napi-ws/*.node || true
           cd packages/catcher-napi-ws
           pnpm exec napi prepublish -t npm --skip-gh-release
-          npm publish --access public
+          npm publish --access public --ignore-scripts
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
