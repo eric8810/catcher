@@ -8,6 +8,7 @@
 //! - Priority-based request queue with concurrency control
 //! - Network quality evaluation
 //! - FFI C ABI for cross-language bindings
+//! - SSE streaming client with auto-reconnect
 
 pub mod types;
 pub mod transport;
@@ -15,6 +16,7 @@ pub mod resilience;
 pub mod scheduler;
 pub mod observability;
 pub mod ffi;
+pub mod sse;
 
 // Re-export key types
 pub use transport::HttpTransport;
@@ -23,3 +25,5 @@ pub use resilience::{
 };
 pub use scheduler::{concurrency_for_quality, PriorityRequestQueue};
 pub use observability::{MetricsCollector, MetricsSnapshot, NetworkQualityEvaluator};
+pub use sse::{SseClient, SseStream};
+pub use catcher_core::types::sse::{SseClientConfig, SseMethod, SseReconnectConfig};

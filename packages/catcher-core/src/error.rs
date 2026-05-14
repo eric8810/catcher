@@ -45,6 +45,9 @@ pub enum CatcherError {
     #[error("invalid configuration: {0}")]
     InvalidConfig(String),
 
+    #[error("SSE stream timeout after {0}ms")]
+    SseTimeout(u64),
+
     #[error("internal error: {0}")]
     Internal(String),
 }
@@ -90,7 +93,8 @@ impl CatcherError {
             | CatcherError::DecodeError(_)
             | CatcherError::InvalidConfig(_)
             | CatcherError::Internal(_)
-            | CatcherError::QueueTimeout(_) => ErrorCategory::NonRetryable,
+            | CatcherError::QueueTimeout(_)
+            | CatcherError::SseTimeout(_) => ErrorCategory::NonRetryable,
         }
     }
 }

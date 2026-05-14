@@ -201,3 +201,59 @@ export interface RetryOptions {
   /** Called on each retry attempt. attemptNum: 1-based retry number (1 = first retry) */
   onRetry?: (attemptNum: number) => void
 }
+
+// === SSE ===
+
+export interface SSEStreamOptions {
+  /** SSE endpoint URL */
+  url: string
+  /** HTTP method, default 'GET'. AI scenarios typically use 'POST' */
+  method?: 'GET' | 'POST'
+  /** Request headers (e.g. Authorization) */
+  headers?: Record<string, string>
+  /** Request body (POST). Objects are auto JSON.stringify'd */
+  body?: string | Record<string, unknown>
+  /** Request timeout in ms, default 30_000 */
+  timeout?: number
+  /** Abort signal */
+  signal?: AbortSignal
+}
+
+export interface SSEClientOptions extends SSEStreamOptions {
+  /** Auto-reconnect configuration */
+  reconnect?: {
+    enabled?: boolean
+    maxRetries?: number
+    initialDelay?: number
+    maxDelay?: number
+    backoffMultiplier?: number
+  }
+  /** Circuit breaker configuration */
+  circuitBreaker?: { failureThreshold: number; resetTimeout: number }
+}
+
+/**
+ * SSE content line stream — yields content lines, silently filters control lines.
+ *
+ * Library silently handles:
+ * - `id:` → records lastEventId for reconnect
+ * - `retry:` → adjusts reconnect interval
+ * - `: comment` → heartbeat, consumed
+ * - empty line → event separator, consumed
+ * - chunk buffering → guarantees complete lines per yield
+ */
+export interface SSEStream extends AsyncIterable<string> {
+  /** Extracted from `id:` lines, used for reconnect Last-Event-ID */
+  readonly lastEventId: string
+}
+
+export interface SSEClient extends AsyncIterable<string> {
+  readonly readyState: 'CONNECTING' | 'OPEN' | 'CLOSED'
+  readonly lastEventId: string
+  /** Close the connection (only for createSSEClient) */
+  close(): void
+}
+
+export interface SSETimeoutError extends Error {
+  readonly type: 'SSE_TIMEOUT'
+}

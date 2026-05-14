@@ -19,3 +19,4 @@ pub use types::observability::{
 };
 pub use types::resilience::{BackoffKind, CbState, CircuitBreakerConfig, RetryConfig};
 pub use types::scheduler::{ConcurrencyMode, QueueConfig};
+pub use types::sse::{SseClientConfig, SseMethod, SseReconnectConfig};

@@ -325,6 +325,7 @@ name = "catcher-http"
 version = "0.1.0"
 dependencies = [
  "backon",
+ "bytes",
  "catcher-core",
  "hickory-resolver",
  "napi",
@@ -337,6 +338,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tokio-stream",
  "tokio-test",
  "wiremock",
 ]

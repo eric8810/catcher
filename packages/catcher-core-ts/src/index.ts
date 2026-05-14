@@ -13,4 +13,9 @@ export type {
   InterceptorRejected,
   InterceptorHandler,
   InterceptorManager,
+  SSEStreamOptions,
+  SSEClientOptions,
+  SSEStream,
+  SSEClient,
+  SSETimeoutError,
 } from './types.js'
