@@ -162,19 +162,19 @@ import { createSSEStream } from '@eric8810/catcher-http'
 const stream = createSSEStream({
   url: 'https://api.openai.com/v1/chat/completions',
   method: 'POST',
-  parseStrategy: 'openai',  // auto-handles [DONE], lenient parsing
+  parseStrategy: 'lenient',  // tolerates transport quirks (\r\n, missing space)
   headers: { Authorization: `Bearer ${apiKey}` },
   body: { model: 'gpt-4', messages: [{ role: 'user', content: 'Hello' }], stream: true },
 })
 for await (const event of stream) {
-  if (event.data === '[DONE]') break
-  const chunk = JSON.parse(event.data)
+  if (event.data === '[DONE]') break  // business logic: handle termination yourself
+  const chunk = JSON.parse(event.data)  // business logic: parse yourself
   process.stdout.write(chunk.choices[0]?.delta?.content ?? '')
 }
 
 // SSE — Rust (reqwest + tokio_stream)
 // use catcher_http::sse::{SseStream, SseClientConfig};
-// let config = SseClientConfig { url: "...".into(), parse_strategy: SseBuiltinStrategy::Openai, ..Default::default() };
+// let config = SseClientConfig { url: "...".into(), parse_strategy: SseBuiltinStrategy::Lenient, ..Default::default() };
 // let mut stream = SseStream::connect(config).await?;
 // while let Some(Ok(event)) = stream.next().await { println!("{}", event.data); }
 
@@ -205,7 +205,7 @@ await client.close();
 - **Auto-retry** — exponential backoff with jitter, destroys stale keepAlive sockets on retry
 - **Circuit Breaker** — trips on consecutive failures, auto-recovers, prevents retry storms
 - **Resilient WebSocket** — perMessageDeflate compression, exponential reconnect, multi-endpoint racing
-- **Server-Sent Events (SSE)** — AI streaming (OpenAI/Anthropic compatible), auto-reconnect, `Last-Event-ID` resume, flexible parser (standard/lenient/jsonl/openai/anthropic/custom), cross-platform (Rust + TS + Browser)
+- **Server-Sent Events (SSE)** — AI streaming, auto-reconnect, `Last-Event-ID` resume, flexible parser (standard/lenient/custom), cross-platform (Rust + TS + Browser)
 - **Binary codec** — msgpack / msgpackr (2-4x faster than JSON, ~47% smaller)
 - **Priority queue** — POST before prefetch, concurrency-aware scheduling
 - **Dynamic interceptors** — use/eject/clear at runtime, per-request retry/timeout/signal overrides

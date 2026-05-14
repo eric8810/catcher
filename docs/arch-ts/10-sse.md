@@ -49,22 +49,31 @@ data: [DONE]
 
 ### 问题
 
-**现实中的 SSE 流并非总是严格遵循 WHATWG 规范。** 以下是实际生产环境中遇到的变体：
+**现实中的 SSE 流并非总是严格遵循 WHATWG 规范。** 以下是实际生产环境中遇到的传输层变体：
 
 | 变体 | 描述 | 示例 |
 |------|------|------|
-| **无 `data:` 前缀** | 有些服务端直接推送裸 JSON | `{"token":"hello"}\n\n` |
-| **`\n\n` 分隔缺失** | 用单 `\n` 而非双换行分隔事件 | `data: foo\ndata: bar\n` |
 | **`\r\n` 混用** | Windows 风格换行 | `data: foo\r\n\r\n` |
-| **无空行分隔** | 用特殊标记结尾 | `data: foo\n---END---\n` |
-| **JSON 行流（JSONL）** | 不是 SSE，只是连续 JSON 行 | `{"a":1}\n{"a":2}\n` |
 | **前缀变体** | `data:` 后无空格 | `data:foo` vs `data: foo` |
-| **多行 data 拼接问题** | 多行 data 拼接时丢失 `\n` | 影响代码/Markdown 格式 |
 | **不完整 chunk** | 网络分片导致一行被切断 | 见 [elysiajs/eden#222](https://github.com/elysiajs/eden/issues/222) |
+| **多行 data 拼接问题** | 多行 data 拼接时丢失 `\n` | 影响代码/Markdown 格式 |
 
-### 设计对策：灵活解析器架构
+> **注意**：裸 JSON、JSONL、自定义分隔符等属于**业务层协议**，Catcher 作为传输韧性库不介入。我们只处理 SSE 协议本身的传输层问题。
 
-不采用单一的硬编码 WHATWG 解析器，而是设计为**可配置、可扩展的解析管线**：
+### 设计原则：传输层只做传输层的事
+
+```
+❌ 错误做法：在传输库里内置 OpenAI / Anthropic / JSONL 解析
+   → 每多一个 API 变体就多一种策略，永无止境
+   → 库的职责边界模糊，与业务耦合
+
+✅ 正确做法：
+   - 内置两种策略：standard（严格 WHATWG）+ lenient（容错传输层变体）
+   - 提供干净的扩展接口，开发者按需实现业务解析
+   - 库的职责：可靠地把 SSE 事件从网络层搬到调用方手里
+```
+
+### 解析器架构
 
 ```
 原始字节流
@@ -78,113 +87,87 @@ data: [DONE]
                ▼
 ┌──────────────────────────────┐
 │ Line Classifier              │  识别行类型
-│ (可扩展的自定义分类器)         │  内置：data/event/id/retry/comment/blank/unknown
+│ (内置两种，可自定义扩展)       │  data / event / id / retry / comment / blank
 └──────────────┬───────────────┘
                │
                ▼
 ┌──────────────────────────────┐
 │ Event Assembler              │  组装完整事件
-│ (按分隔符策略分组)            │  默认：空行分隔
-│                              │  可配：自定义分隔标记
-└──────────────┬───────────────┘
-               │
-               ▼
-┌──────────────────────────────┐
-│ Data Decoder                 │  解码 data 字段
-│ (可插拔的解码策略)            │  内置：raw string / JSON parse
-│                              │  可配：自定义解码函数
+│ (空行分隔，WHATWG 标准)       │
 └──────────────┬───────────────┘
                │
                ▼
          SSEEvent { event, data, id, retry }
 ```
 
-### 解析策略类型
+### 内置策略（仅两种）
+
+| | `standard`（默认） | `lenient` |
+|---|---|---|
+| 定位 | 严格 WHATWG 规范 | 容错真实世界的传输层毛刺 |
+| `data:` 行解析 | 严格 `data: ` 前缀（有空格） | 允许 `data:` 后无空格 |
+| 裸行（无 `data:` 前缀） | 忽略 | 忽略 |
+| 分隔符 | `\n\n`（空行） | `\n\n`（空行） |
+| `\r\n` | 不处理 | 自动 strip `\r` |
+| 不完整 chunk | 缓冲至行完整 | 缓冲至行完整 |
+| 未知字段 | 忽略 | 忽略 |
+
+### 自定义策略接口
+
+开发者遇到非标准服务端时，自行实现：
 
 ```typescript
-// TS (catcher-core-ts)
-// Rust (catcher-core)
-
 interface SSEParseStrategy {
   /** 行分类器：判断一行是什么类型 */
-  classifyLine?(line: string): 'data' | 'event' | 'id' | 'retry' | 'comment' | 'blank' | 'custom'
+  classifyLine?(line: string): 'data' | 'event' | 'id' | 'retry' | 'comment' | 'blank'
 
   /** 事件分隔判定：当前行是否标志一个事件结束 */
   isEventBoundary?(line: string): boolean
 
   /** data 解码：对原始 data 字符串做后处理 */
   decodeData?(raw: string): string
-
-  /** 自定义字段处理：遇到无法识别的字段时 */
-  onUnknownField?(fieldName: string, value: string, ctx: SSEParseContext): void
 }
-
-/** 内置策略 */
-type BuiltinStrategy = 'standard'   // 严格 WHATWG
-                     | 'lenient'    // 宽松模式：容错常见变体
-                     | 'jsonl'      // JSON Lines 模式：每行是一个完整 JSON
-                     | 'openai'     // OpenAI 兼容：data + [DONE]
-                     | 'anthropic'  // Anthropic 兼容：event + data
 ```
-
-### 预定义策略对比
-
-| 行为 | `standard` | `lenient` | `jsonl` | `openai` | `anthropic` |
-|------|-----------|-----------|---------|----------|-------------|
-| `data:` 行解析 | 严格 `data: ` 前缀 | 允许无空格 | N/A | 同 lenient | 同 lenient |
-| 裸行（无 `data:` 前缀） | 忽略 | 当作 data | 当作 data | 当作 data | 忽略 |
-| 分隔符 | `\n\n` (空行) | `\n\n` 或 `\n` | `\n` | `\n\n` | `\n\n` |
-| `\r\n` | 不处理 | 自动 strip `\r` | strip `\r` | strip `\r` | strip `\r` |
-| `event:` 字段 | 处理 | 处理 | 忽略 | 忽略 | 处理 |
-| `[DONE]` | 当作 data | 当作 data | 不处理 | 特殊标记（终止流） | 不处理 |
-| 不完整 chunk | 缓冲至行完整 | 缓冲至行完整 | 缓冲至行完整 | 缓冲至行完整 | 缓冲至行完整 |
 
 ### 使用示例
 
 ```typescript
-// 严格标准模式（默认）
+// 默认：严格 WHATWG
 const stream = createSSEStream({ url: '/api/events' })
 
-// 宽松模式（兼容非标准服务端）
+// lenient：容错传输层变体（\r\n、无空格等）
 const stream = createSSEStream({
   url: '/api/stream',
   parseStrategy: 'lenient',
 })
 
-// JSONL 模式（不是 SSE，但类似的使用方式）
-const stream = createSSEStream({
-  url: '/api/logs',
-  parseStrategy: 'jsonl',
-})
-
-// OpenAI 模式（自动处理 [DONE] 终止）
-const stream = createSSEStream({
-  url: 'https://api.openai.com/v1/chat/completions',
-  method: 'POST',
-  parseStrategy: 'openai',
-  headers: { Authorization: `Bearer ${apiKey}` },
-  body: { model: 'gpt-4', messages: [{ role: 'user', content: 'Hi' }], stream: true },
-})
-for await (const event of stream) {
-  // event.data 已经是解析后的 JSON string
-  const chunk = JSON.parse(event.data)
-  process.stdout.write(chunk.choices[0]?.delta?.content ?? '')
-}
-
-// 完全自定义解析器
+// 自定义：开发者自行处理业务格式
+// 例：某服务端用 --- 分隔，每行是裸 JSON
 const stream = createSSEStream({
   url: '/api/custom',
   parseStrategy: {
     classifyLine(line) {
-      if (line.startsWith('>> ')) return 'data'
-      if (line === '---') return 'blank'  // 自定义分隔符
+      if (line === '---') return 'blank'
       if (line.startsWith('#')) return 'comment'
-      return 'unknown'
+      return 'data'  // 所有其他行都当 data
     },
     isEventBoundary(line) { return line === '---' },
-    decodeData(raw) { return raw.startsWith('>> ') ? raw.slice(3) : raw },
   },
 })
+
+// OpenAI 场景：开发者自己在业务层处理 [DONE] 和 delta 解析
+const stream = createSSEStream({
+  url: 'https://api.openai.com/v1/chat/completions',
+  method: 'POST',
+  headers: { Authorization: `Bearer ${apiKey}` },
+  body: { model: 'gpt-4', messages: [{ role: 'user', content: 'Hi' }], stream: true },
+  parseStrategy: 'lenient',
+})
+for await (const event of stream) {
+  if (event.data === '[DONE]') break  // 业务逻辑：自行判断终止
+  const chunk = JSON.parse(event.data)  // 业务逻辑：自行解析
+  process.stdout.write(chunk.choices[0]?.delta?.content ?? '')
+}
 ```
 
 ---
@@ -231,7 +214,7 @@ SSE 模块覆盖所有 Catcher 平台：
 // === SSE ===
 
 /** 内置解析策略名称 */
-export type SSEBuiltinStrategy = 'standard' | 'lenient' | 'jsonl' | 'openai' | 'anthropic'
+export type SSEBuiltinStrategy = 'standard' | 'lenient'
 
 /** 自定义解析策略 */
 export interface SSEParseStrategy {
@@ -419,7 +402,7 @@ use catcher_core::types::sse::{SseBuiltinStrategy, SseEvent};
 /// SSE 文本流解析器
 ///
 /// 设计要点：
-/// - 策略化：支持 standard / lenient / jsonl / openai / anthropic
+/// - 策略化：支持 standard / lenient（可扩展自定义策略）
 /// - 缓冲区：处理网络分片导致的不完整行
 /// - 零拷贝：尽可能避免不必要的 String clone
 pub struct SseParser {
@@ -619,7 +602,7 @@ SseParser {
 
   process_line(line) → Option<SseEvent>:
     switch strategy:
-      standard / openai / anthropic:
+      standard:
         if line is empty → assemble_event()
         if line starts with "data:" → append data_buffer (+ trim space)
         if line starts with "event:" → set event_type_buffer
@@ -634,10 +617,6 @@ SseParser {
           - lines without recognized prefix → treat as data
           - allow "data:" without trailing space
           - treat single \n as event boundary if no blank line seen after 1 event
-
-      jsonl:
-        if line is empty → skip
-        else → data_buffer = line, event_type_buffer = "message", assemble immediately
 
   assemble_event() → Option<SseEvent>:
     if data_buffer is empty → reset buffers, return null
