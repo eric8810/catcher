@@ -39,4 +39,4 @@
 | `@eric8810/catcher-ws` | `catcher-ws` / `catcher-napi-ws` (napi-rs) |
 | `@eric8810/catcher-web` | — (纯 TS, fetch-based) |
 
-> **SSE 模块**仅存在于 TS 层（`catcher-http` + `catcher-web`），不涉及 Rust / FFI / napi。SSE 基于 `fetch` + `ReadableStream`，是纯 TypeScript 实现。
+> **SSE 模块**跨 TS 和 Rust 两侧实现。TS 侧基于 `fetch` + `ReadableStream`（`catcher-http` + `catcher-web`），Rust 侧基于 `reqwest` + `tokio_stream`（`catcher-http`），并通过 napi-rs / UniFFI / dart:ffi 桥接到各平台。详见 [`10-sse.md`](./10-sse.md)。

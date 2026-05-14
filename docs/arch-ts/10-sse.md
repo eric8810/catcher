@@ -2,6 +2,7 @@
 
 > 新增模块 · 设计文档
 > 基于 WHATWG Server-Sent Events 规范，面向 AI 流式响应场景
+> 本文档同时覆盖 TypeScript 和 Rust 两侧的 SSE 设计
 
 ## 需求背景
 
@@ -106,7 +107,7 @@ data: [DONE]
 |---|---|---|
 | 定位 | 严格 WHATWG 规范 | 容错真实世界的传输层毛刺 |
 | `data:` 行解析 | 严格 `data: ` 前缀（有空格） | 允许 `data:` 后无空格 |
-| 裸行（无 `data:` 前缀） | 忽略 | 忽略 |
+| 裸行（无 `data:` 前缀） | 忽略 | 当作 data |
 | 分隔符 | `\n\n`（空行） | `\n\n`（空行） |
 | `\r\n` | 不处理 | 自动 strip `\r` |
 | 不完整 chunk | 缓冲至行完整 | 缓冲至行完整 |
@@ -119,13 +120,16 @@ data: [DONE]
 ```typescript
 interface SSEParseStrategy {
   /** 行分类器：判断一行是什么类型 */
-  classifyLine?(line: string): 'data' | 'event' | 'id' | 'retry' | 'comment' | 'blank'
+  classifyLine?(line: string): 'data' | 'event' | 'id' | 'retry' | 'comment' | 'blank' | 'custom'
 
   /** 事件分隔判定：当前行是否标志一个事件结束 */
   isEventBoundary?(line: string): boolean
 
   /** data 解码：对原始 data 字符串做后处理 */
   decodeData?(raw: string): string
+
+  /** 自定义字段处理：遇到无法识别的字段时 */
+  onUnknownField?(fieldName: string, value: string, ctx: SSEParseContext): void
 }
 ```
 
@@ -278,6 +282,7 @@ export interface ISSEClient {
   close(): void
 }
 
+/** SSE 一次性消费流配置（SSEClientConfig 的简化版，无重连/熔断） */
 export interface SSEStreamOptions {
   url: string
   method?: 'GET' | 'POST'
@@ -320,14 +325,8 @@ pub enum SseBuiltinStrategy {
     /// 严格 WHATWG 规范
     #[default]
     Standard,
-    /// 宽松模式：容错常见变体
+    /// 宽松模式：容错传输层变体（\r\n、缺少空格等）
     Lenient,
-    /// JSON Lines 模式
-    Jsonl,
-    /// OpenAI 兼容
-    Openai,
-    /// Anthropic 兼容
-    Anthropic,
 }
 
 /// SSE 客户端配置
@@ -743,9 +742,8 @@ createSSEClient()
 ## 不涉及的范围
 
 - **不创建新 npm 包 / crate** — SSE 是现有 HTTP 包的扩展能力
-- **不支持 IE** — 需要 `fetch` + `ReadableStream`
+- **不支持 IE** — 需要 `fetch` + `ReadableStream`，且 AI 场景需要 POST + 自定义 headers
 - **不实现 SSE 服务端** — Catcher 是客户端库
-- **不支持 IE 的 `EventSource` polyfill** — AI 场景必须用 POST + headers
 
 ## FFI / napi / UniFFI 扩展
 
