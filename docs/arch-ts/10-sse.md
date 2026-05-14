@@ -768,10 +768,27 @@ packages/catcher-http/src/sse/
 
 > **设计决策**：TS 测试放在 `__tests__/` 子目录（vitest 默认发现），Rust 测试内联在 `#[cfg(test)] mod tests`。
 
+> **catcher-web 测试策略**：代码与 `catcher-http-ts` 相同（同一 router/client 实现），测试用例也相同。catcher-web 仅额外验证浏览器 `fetch` 环境差异（如 `Response.body` 可用性），不单独列用例表。
+
+> **用例编号规则**：Router `#1-24`，Stream `S1-S18`，Client `C1-C11`，Rust Stream `RS1-RS7`，Rust Client `RC1-RC6`。新增用例接续现有最大编号。
+
 ### TS Mock 工具函数
 
+> **注意**：`mockSSEResponse` 使用 `start()` 同步 enqueue 所有行，不会触发真实的流式背压行为。对于需要模拟"读一半暂停"的场景（如 idle timeout），请使用 `mockSSEChunked` 并在 chunk 间加入延时。
+
 ```typescript
-// 模拟 SSE 服务端响应
+// 构造最小可用的 Mock Response
+// stream.ts 访问 response.ok、response.status、response.body、response.body.getReader()
+function mockResponse(stream: ReadableStream, status = 200) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: new Headers({ 'Content-Type': 'text/event-stream' }),
+    body: stream,
+  } as Response
+}
+
+// 模拟 SSE 服务端响应（一次性写入所有行）
 function mockSSEResponse(lines: string[], options?: { status?: number }) {
   const encoder = new TextEncoder()
   const stream = new ReadableStream({
@@ -782,14 +799,12 @@ function mockSSEResponse(lines: string[], options?: { status?: number }) {
       controller.close()
     }
   })
-  vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
-    ok: (options?.status ?? 200) < 400,
-    status: options?.status ?? 200,
-    body: stream,
-  } as Response)
+  vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+    mockResponse(stream, options?.status),
+  )
 }
 
-// 模拟分片 SSE 响应（控制 chunk 边界）
+// 模拟分片 SSE 响应（控制 chunk 边界，可测跨 chunk 拼接）
 function mockSSEChunked(chunks: string[], options?: { status?: number }) {
   const encoder = new TextEncoder()
   let i = 0
@@ -802,11 +817,24 @@ function mockSSEChunked(chunks: string[], options?: { status?: number }) {
       }
     }
   })
-  vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
-    ok: (options?.status ?? 200) < 400,
-    status: options?.status ?? 200,
-    body: stream,
-  } as Response)
+  vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+    mockResponse(stream, options?.status),
+  )
+}
+
+// 模拟空闲超时：第一个 chunk 后不再 pull，模拟服务端停发数据
+function mockSSEIdleHang(options?: { status?: number }) {
+  const encoder = new TextEncoder()
+  const stream = new ReadableStream({
+    pull(controller) {
+      // 只发一行然后永远不 resolve 下一次 pull
+      controller.enqueue(encoder.encode('data: first\n'))
+      // 故意不 close，也不 enqueue 后续数据
+    }
+  })
+  vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+    mockResponse(stream, options?.status),
+  )
 }
 ```
 
@@ -843,7 +871,7 @@ function mockSSEChunked(chunks: string[], options?: { status?: number }) {
 | 11 | `"retry:1000"` | SetRetry(1000) | 无空格 |
 | 12 | `"retry: abc"` | Yield 原样 | 非数字 |
 | 13 | `"retry: -1"` | Yield 原样 | 负数 |
-| 14 | `"retry: 0"` | SetRetry(0) | 零合法 |
+| 14 | `"retry: 0"` | SetRetry(0) | 零合法。语义为"立即重连"，client 层可自行 clamp 到最小值 |
 
 #### 1.4 内容行 → Yield 原样输出
 
@@ -905,11 +933,24 @@ function mockSSEChunked(chunks: string[], options?: { status?: number }) {
 | S13 | HTTP 非 200 | fetch 返回 500 | throw，含 `"HTTP 500"` |
 | S14 | AbortSignal 中断 | 读到一半 abort | `for await` 正常结束 |
 
-#### 2.6 只能迭代一次
+#### 2.6 Idle Timeout
+
+| # | 测试名 | 模拟方式 | 断言 |
+|---|--------|---------|------|
+| S15 | idle timeout 触发 | `mockSSEIdleHang()`，`timeout: 100` | throw `SSETimeoutError`，`error.type === 'SSE_TIMEOUT'` |
+
+#### 2.7 event: 行原样通过
+
+| # | 测试名 | 模拟输入 | 断言 |
+|---|--------|---------|------|
+| S16 | `event:` 行原样输出 | `"event: message_start\ndata: {\"role\":\"assistant\"}\n\n"` | `["event: message_start", "data: {\"role\":\"assistant\"}"]` |
+| S17 | 多个 `event:` + `data:` 混合 | `"event: ping\ndata: ok\n\nevent: message\ndata: hi\n\n"` | 4 行原样输出，顺序一致 |
+
+#### 2.8 只能迭代一次
 
 | # | 测试名 | 断言 |
 |---|--------|------|
-| S15 | 第二次迭代抛错 | 第二次 `[Symbol.asyncIterator]()` throw |
+| S18 | 第二次迭代抛错 | 第二次 `[Symbol.asyncIterator]()` throw |
 
 ---
 
@@ -965,6 +1006,8 @@ function mockSSEChunked(chunks: string[], options?: { status?: number }) {
 | RS3 | `\r\n` 容错 | `"data: X\r\n\r\n"` | 正确切行 |
 | RS4 | HTTP 错误 | 500 | `Err(HttpError { status: 500 })` |
 | RS5 | Stream trait 消费 | 正常 SSE 响应 | `while let Some(line) = stream.next().await` 编译+正确 |
+| RS6 | `event:` 行原样输出 | `"event: message_start\ndata: hi\n\n"` | 收集 `["event: message_start", "data: hi"]` |
+| RS7 | idle timeout 触发 | 返回一行后停发数据，idle_timeout = 100ms | `Err(SseTimeout)` |
 
 #### 4.3 SseClient 集成测试
 
@@ -981,6 +1024,8 @@ function mockSSEChunked(chunks: string[], options?: { status?: number }) {
 
 ### 五、测试覆盖矩阵
 
+> **编号规则**：Router `#1-24`，Stream `S1-S18`，Client `C1-C11`，Rust Stream `RS1-RS7`，Rust Client `RC1-RC6`。新增用例接续现有最大编号。
+
 | 设计要点 | Router | Stream | Client | TS | Rust |
 |---------|:------:|:------:|:------:|:--:|:----:|
 | 空行 → Silent | ✅ | | | ✅ | ✅ |
@@ -988,18 +1033,19 @@ function mockSSEChunked(chunks: string[], options?: { status?: number }) {
 | `id:` → SetLastEventId | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `retry:` → SetRetry | ✅ | | ✅ | ✅ | ✅ |
 | `data:`/`event:` → Yield 原样 | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `event:` 行原样通过 | ✅ | ✅ | | ✅ | ✅ |
 | Chunk 缓冲（无半行） | | ✅ | | ✅ | ✅ |
 | `\r\n` 容错 | | ✅ | | ✅ | ✅ |
-| 最后一行无 `\n` | | ✅ | | ✅ | |
+| 最后一行无 `\n` | | ✅ | | ✅ | ✅ |
 | createSSEStream 一次性 | | ✅ | | ✅ | ✅ |
 | AbortSignal 中断 | | ✅ | ✅ | ✅ | |
 | HTTP 错误 throw | | ✅ | ✅ | ✅ | ✅ |
-| SSETimeoutError | | ✅ | | ✅ | |
-| 单次迭代限制 | | ✅ | | ✅ | |
+| SSETimeoutError（idle timeout） | | ✅ | | ✅ | ✅ |
+| 单次迭代限制 | | ✅ | | ✅ | ✅ |
 | createSSEClient 自动重连 | | | ✅ | ✅ | ✅ |
 | Last-Event-ID 携带 | | | ✅ | ✅ | ✅ |
 | 204 停止重连 | | | ✅ | ✅ | ✅ |
-| maxRetries 限制 | | | ✅ | ✅ | |
+| maxRetries 限制 | | | ✅ | ✅ | ✅ |
 | reconnect.enabled 控制 | | | ✅ | ✅ | |
 | close() 停止 | | | ✅ | ✅ | ✅ |
 | readyState 状态 | | | ✅ | ✅ | ✅ |
