@@ -931,7 +931,7 @@ function mockSSEIdleHang(options?: { status?: number }) {
 | # | 测试名 | 模拟方式 | 断言 |
 |---|--------|---------|------|
 | S13 | HTTP 非 200 | fetch 返回 500 | throw，含 `"HTTP 500"` |
-| S14 | AbortSignal 中断 | 读到一半 abort | `for await` 正常结束 |
+| S14 | AbortSignal 中断 | 读到一半 abort | 抛出 `Error('Aborted')` |
 
 #### 2.6 Idle Timeout
 
