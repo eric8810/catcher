@@ -142,13 +142,7 @@ describe('WS — message latency with perMessageDeflate', () => {
       console.log(`  vanilla avg latency: ${avg(vanillaLatencies).toFixed(1)}ms (${vanillaLatencies.length} msgs)`)
       console.log(`  catcher avg latency: ${avg(catcherLatencies).toFixed(1)}ms (${catcherLatencies.length} msgs)`)
 
-      // Good network should reliably deliver messages; weak network may lose all
-      if (key === 'good') {
-        expect(catcherLatencies.length).toBeGreaterThan(0)
-      } else {
-        // Weak network: connection may fail entirely — just verify no crash/unhandled error
-        expect(true).toBe(true)
-      }
+      expect(catcherLatencies.length).toBeGreaterThan(0)
     }, TIMEOUT)
   }
 })
