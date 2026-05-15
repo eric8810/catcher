@@ -1,0 +1,251 @@
+# catcher_core API Reference
+
+> Flutter dart:ffi 绑定 — CatcherHttpClient, CatcherWsClient, codec, quality
+
+```yaml
+# pubspec.yaml
+dependencies:
+  catcher_core: ^0.2.2
+```
+
+---
+
+## 导入
+
+```dart
+import 'package:catcher_core/catcher_core.dart';
+```
+
+---
+
+## CatcherHttpClient
+
+```dart
+class CatcherHttpClient {
+  CatcherHttpClient(HttpClientConfig config);
+  Future<HttpResponse> get(String path, {Map<String, String>? queryParams, CancelToken? cancelToken});
+  Future<HttpResponse> post(String path, {dynamic body, String? contentType, CancelToken? cancelToken});
+  Future<HttpResponse> put(String path, {dynamic body, String? contentType, CancelToken? cancelToken});
+  Future<HttpResponse> delete(String path, {CancelToken? cancelToken});
+  Future<HttpResponse> patch(String path, {dynamic body, String? contentType, CancelToken? cancelToken});
+  CircuitBreakerState get circuitBreakerState;
+  int get queueDepth;
+  void dispose();
+}
+```
+
+### HttpClientConfig
+
+| 参数 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `baseUrl` | `String` | **必填** | 基础 URL |
+| `connectTimeoutMs` | `int` | `5000` | 连接超时（ms） |
+| `responseTimeoutMs` | `int` | `30000` | 响应超时（ms） |
+| `keepAlive` | `bool` | `true` | TCP keep-alive |
+| `retry` | `RetryConfig?` | — | 重试配置 |
+| `circuitBreaker` | `CircuitBreakerConfig?` | — | 熔断器配置 |
+
+### RetryConfig
+
+| 参数 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `maxAttempts` | `int` | `3` | 最多尝试次数 |
+| `backoff` | `String` | `'exponential'` | `'fixed'` 或 `'exponential'` |
+
+### CircuitBreakerConfig
+
+| 参数 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `failureThreshold` | `int` | `5` | 连续失败 N 次后 OPEN |
+| `resetTimeoutMs` | `int` | `30000` | OPEN → HALF_OPEN 等待（ms） |
+
+### HttpResponse
+
+```dart
+class HttpResponse {
+  int status;
+  Map<String, String> headers;
+  Uint8List body;
+  String? bodyAsString;
+  int elapsedMs;
+}
+```
+
+### CancelToken
+
+```dart
+class CancelToken {
+  void cancel();
+  bool get isCancelled;
+}
+```
+
+### 示例
+
+```dart
+final client = CatcherHttpClient(HttpClientConfig(
+  baseUrl: 'https://api.example.com',
+  connectTimeoutMs: 5000,
+  responseTimeoutMs: 30000,
+  retry: RetryConfig(maxAttempts: 3, backoff: 'exponential'),
+  circuitBreaker: CircuitBreakerConfig(
+    failureThreshold: 5,
+    resetTimeoutMs: 30000,
+  ),
+));
+
+// GET
+final resp = await client.get('/users/1');
+print('Status: ${resp.status}, Body: ${resp.bodyAsString}');
+
+// POST
+await client.post('/messages', body: {'text': 'hello'});
+
+// 带查询参数
+await client.get('/search', queryParams: {'q': 'test', 'page': '1'});
+
+// 取消
+final token = CancelToken();
+Future.delayed(Duration(seconds: 5), () => token.cancel());
+await client.get('/slow', cancelToken: token);
+
+// 释放
+client.dispose();
+```
+
+---
+
+## CatcherWsClient
+
+```dart
+class CatcherWsClient {
+  CatcherWsClient(WsClientConfig config);
+  Stream<WsEvent> get events;
+  void sendText(String data);
+  void sendBinary(Uint8List data);
+  void close([int code = 1000, String reason = 'normal']);
+  void dispose();
+}
+```
+
+### WsClientConfig
+
+| 参数 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `urls` | `List<String>` | **必填** | WebSocket URL(s) |
+| `perMessageDeflate` | `bool` | `true` | per-message deflate |
+| `reconnect` | `ReconnectConfig?` | — | 重连 |
+| `reconnect.initialDelayMs` | `int` | `1000` | 初始延迟（ms） |
+| `reconnect.maxDelayMs` | `int` | `30000` | 最大延迟（ms） |
+| `reconnect.maxAttempts` | `int` | `20` | 最多重连次数 |
+| `heartbeat` | `HeartbeatConfig?` | — | 心跳 |
+| `heartbeat.intervalMs` | `int` | `30000` | 心跳间隔（ms） |
+| `heartbeat.adaptive` | `bool` | `true` | 自适应间隔 |
+
+### WsEvent 类型
+
+```dart
+class WsConnectedEvent { String url; int latencyMs; }
+class WsMessageEvent { String? text; Uint8List? binary; bool isBinary; }
+class WsDisconnectedEvent { int code; String reason; }
+class WsReconnectingEvent { int attempt; int delayMs; }
+class WsHeartbeatRttEvent { int rttMs; }
+class WsErrorEvent { String message; }
+```
+
+### 示例
+
+```dart
+final ws = CatcherWsClient(WsClientConfig(
+  urls: ['wss://cn.example.com', 'wss://sg.example.com'],
+  reconnect: ReconnectConfig(
+    initialDelayMs: 1000,
+    maxDelayMs: 30000,
+    maxAttempts: 20,
+  ),
+  heartbeat: HeartbeatConfig(intervalMs: 30000, adaptive: true),
+));
+
+ws.events.listen((event) {
+  if (event is WsConnectedEvent) {
+    print('Connected to ${event.url} (${event.latencyMs}ms)');
+  } else if (event is WsMessageEvent) {
+    print('Received: ${event.text}');
+  } else if (event is WsDisconnectedEvent) {
+    print('Disconnected: ${event.code} ${event.reason}');
+  } else if (event is WsReconnectingEvent) {
+    print('Reconnecting attempt ${event.attempt} in ${event.delayMs}ms');
+  } else if (event is WsHeartbeatRttEvent) {
+    print('Heartbeat RTT: ${event.rttMs}ms');
+  } else if (event is WsErrorEvent) {
+    print('Error: ${event.message}');
+  }
+});
+
+ws.sendText('hello');
+ws.sendBinary(Uint8List.fromList([1, 2, 3]));
+ws.close();
+ws.dispose();
+```
+
+---
+
+## 编解码
+
+```dart
+// pack — Dart value → msgpack binary (Uint8List)
+Uint8List pack(dynamic value);
+
+// unpack — msgpack binary → Dart value
+dynamic unpack(Uint8List data);
+```
+
+```dart
+final packed = pack({'event': 'message', 'data': {'text': 'hello'}});
+ws.sendBinary(packed);
+
+final data = unpack(packed);  // Map<String, dynamic>
+```
+
+---
+
+## NetworkQuality
+
+```dart
+class NetworkQualityEvaluator {
+  void recordRtt(int rttMs);
+  void recordFailure();
+  NetworkQuality evaluate();
+  void reset();
+}
+
+enum NetworkQuality { excellent, good, fair, poor }
+```
+
+---
+
+## 内存管理
+
+Dart 侧通过 `Finalizer` 自动释放 Rust 侧资源。调用 `dispose()` 可手动提前释放：
+
+```dart
+client.dispose();  // 释放 HTTP 客户端 + Rust handle
+ws.dispose();      // 释放 WebSocket 客户端 + Rust handle
+```
+
+---
+
+## 与 Node.js 的 API 对应
+
+| Node.js | Flutter |
+|---------|---------|
+| `createHttpClient(config)` | `CatcherHttpClient(config)` |
+| `client.get(url)` | `client.get(path)` |
+| `client.post(url, body)` | `client.post(path, body: data)` |
+| `createResilientWS(options)` | `CatcherWsClient(config)` |
+| `ws.addEventListener('message', fn)` | `ws.events.listen(fn)` |
+| `ws.send(data)` | `ws.sendText(data)` / `ws.sendBinary(data)` |
+| `pack(obj)` / `unpack(buf)` | `pack(obj)` / `unpack(buf)` |
+| `client.interceptors.request.use(fn)` | ❌ 不支持（dart:ffi 回调限制） |
+| `client.circuitBreakerState()` | `client.circuitBreakerState` |
+| `client.queueDepth()` | `client.queueDepth` |
