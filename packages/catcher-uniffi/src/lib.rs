@@ -408,18 +408,9 @@ impl WsClient {
             return Err(CatcherError::Config("urls cannot be empty".into()));
         }
 
-        // Multi-endpoint racing: try all URLs, first to succeed wins
+        // Multi-endpoint racing, reconnect, heartbeat handled by WsTransport::connect
         let handle = block_on_aux_thread(async move {
-            let mut last_error = None;
-            for url in &urls {
-                match WsTransport::connect(url, &config).await {
-                    Ok(result) => return Ok(result),
-                    Err(e) => last_error = Some(CatcherError::from(e)),
-                }
-            }
-            Err(last_error.unwrap_or_else(|| {
-                CatcherError::Network("all endpoints failed".into())
-            }))
+            WsTransport::connect(&config).await
         });
         let (ws_handle, mut rx) = handle.join()
             .map_err(|_| CatcherError::Network("connect thread panicked".into()))?

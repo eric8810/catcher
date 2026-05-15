@@ -80,6 +80,11 @@ impl ReconnectManager {
     pub fn delay_ms(&self) -> u64 {
         self.current_delay_ms
     }
+
+    /// 当前重连尝试次数
+    pub fn attempt(&self) -> u32 {
+        self.attempt
+    }
 }
 
 #[cfg(test)]

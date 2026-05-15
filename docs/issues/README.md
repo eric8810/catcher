@@ -50,9 +50,9 @@
 | # | Issue | 优先级 | 状态 | 文件 |
 |---|-------|:------:|:----:|------|
 | N-01 | Multipart/FormData 文件上传 | 🟢 P2 | 📐 设计中 | [native-layer-capability-gaps.md](./native-layer-capability-gaps.md) |
-| N-02 | 流式文件下载 (`responseType: stream`) | 🟡 P1 | 📐 设计中 | 同上 |
-| N-03 | 单请求级 cancel（非 `cancelAll`） | 🟡 P1 | 📐 设计中 | 同上 |
-| N-04 | 网络质量实时事件推送 | 🟢 P2 | 📐 设计中 | 同上 |
+| N-02 | 流式文件下载 (`responseType: stream`) | 🟡 P1 | ✅ 已实现 | 同上 |
+| N-03 | 单请求级 cancel（非 `cancelAll`） | 🟡 P1 | ✅ 已实现 | 同上 |
+| N-04 | 网络质量实时事件推送 | 🟢 P2 | ✅ 已实现 | 同上 |
 
 详见 → [native-layer-capability-gaps.md](./native-layer-capability-gaps.md)
 

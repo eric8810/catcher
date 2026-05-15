@@ -343,6 +343,7 @@ impl HttpTransport {
 
     /// 流式执行 HTTP 请求（N-02），逐 chunk 通过回调推送。
     /// chunk_callback(event) 在每次收到数据块、响应头、或错误时调用。
+    /// 支持 cancel_all() / cancel_request() 中断流式下载。
     pub async fn execute_stream(
         &self,
         request: HttpRequest,
@@ -372,7 +373,18 @@ impl HttpTransport {
         let timeout_ms = request.timeout_ms.unwrap_or(self.config.response_timeout_ms);
         req = req.timeout(Duration::from_millis(timeout_ms));
 
-        let response = req.send().await.map_err(|e| map_middleware_error(e, &self.config))?;
+        let global_token = {
+            let token = self.cancel_token.lock().unwrap();
+            token.clone()
+        };
+
+        let response = tokio::select! {
+            r = req.send() => r.map_err(|e| map_middleware_error(e, &self.config))?,
+            _ = global_token.cancelled() => {
+                chunk_callback(StreamEvent::Error("request cancelled".into()));
+                return Err(CatcherError::Internal("request cancelled".into()));
+            }
+        };
 
         let status = response.status().as_u16();
         let headers: HashMap<String, String> = response.headers().iter()
@@ -382,14 +394,23 @@ impl HttpTransport {
         // Notify headers first
         chunk_callback(StreamEvent::Headers { status, headers });
 
-        // Stream chunks
+        // Stream chunks with cancel monitoring
         let mut stream = response.bytes_stream();
-        while let Some(chunk_result) = stream.next().await {
-            match chunk_result {
-                Ok(chunk) => chunk_callback(StreamEvent::Chunk(chunk.to_vec())),
-                Err(e) => {
-                    chunk_callback(StreamEvent::Error(format!("stream read error: {e}")));
-                    return Err(CatcherError::Internal(format!("stream read: {e}")));
+        loop {
+            tokio::select! {
+                chunk_opt = stream.next() => {
+                    match chunk_opt {
+                        Some(Ok(chunk)) => chunk_callback(StreamEvent::Chunk(chunk.to_vec())),
+                        Some(Err(e)) => {
+                            chunk_callback(StreamEvent::Error(format!("stream read error: {e}")));
+                            return Err(CatcherError::Internal(format!("stream read: {e}")));
+                        }
+                        None => break, // stream exhausted
+                    }
+                }
+                _ = global_token.cancelled() => {
+                    chunk_callback(StreamEvent::Error("request cancelled".into()));
+                    return Err(CatcherError::Internal("request cancelled".into()));
                 }
             }
         }
@@ -638,5 +659,212 @@ mod tests {
         assert_eq!(base64_encode("ab"), "YWI=");
         assert_eq!(base64_encode("abc"), "YWJj");
         assert_eq!(base64_encode("test"), "dGVzdA==");
+    }
+
+    // ── N-02: Stream download tests ──
+
+    #[tokio::test]
+    async fn ns02_stream_receives_body_via_callback() {
+        use wiremock::{MockServer, Mock, ResponseTemplate};
+        use wiremock::matchers::method;
+        use crate::types::http::StreamEvent;
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("hello world"))
+            .mount(&server).await;
+        let config = HttpClientConfig { base_url: server.uri(), ..Default::default() };
+        let transport = HttpTransport::new(config).unwrap();
+        let events = Arc::new(Mutex::new(Vec::<StreamEvent>::new()));
+        let ec = events.clone();
+        let request = HttpRequest {
+            method: HttpMethod::GET, url: "/test".to_string(),
+            headers: HashMap::new(), body: None, content_type: None, timeout_ms: None,
+        };
+        transport.execute_stream(request, move |e| { ec.lock().unwrap().push(e); }).await.unwrap();
+        let evts = events.lock().unwrap();
+        assert!(evts.len() >= 3);
+        assert!(matches!(&evts[0], StreamEvent::Headers { status: 200, .. }));
+        assert!(matches!(evts.last(), Some(StreamEvent::Done)));
+        let body: Vec<u8> = evts.iter().filter_map(|e| match e {
+            StreamEvent::Chunk(d) => Some(d.clone()), _ => None,
+        }).flatten().collect();
+        assert_eq!(String::from_utf8(body).unwrap(), "hello world");
+    }
+
+    #[tokio::test]
+    async fn ns02_stream_empty_body() {
+        use wiremock::{MockServer, Mock, ResponseTemplate};
+        use wiremock::matchers::method;
+        use crate::types::http::StreamEvent;
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET")).respond_with(ResponseTemplate::new(200)).mount(&server).await;
+        let config = HttpClientConfig { base_url: server.uri(), ..Default::default() };
+        let transport = HttpTransport::new(config).unwrap();
+        let events = Arc::new(Mutex::new(Vec::<StreamEvent>::new()));
+        let ec = events.clone();
+        let request = HttpRequest {
+            method: HttpMethod::GET, url: "/test".to_string(),
+            headers: HashMap::new(), body: None, content_type: None, timeout_ms: None,
+        };
+        transport.execute_stream(request, move |e| { ec.lock().unwrap().push(e); }).await.unwrap();
+        let evts = events.lock().unwrap();
+        assert_eq!(evts.iter().filter(|e| matches!(e, StreamEvent::Chunk(_))).count(), 0);
+        assert!(matches!(&evts[0], StreamEvent::Headers { .. }));
+        assert!(matches!(evts.last(), Some(StreamEvent::Done)));
+    }
+
+    #[tokio::test]
+    async fn ns02_stream_cancel_interrupts() {
+        use wiremock::{MockServer, Mock, ResponseTemplate};
+        use wiremock::matchers::method;
+        use crate::types::http::StreamEvent;
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200)
+                .set_body_string("x".repeat(65536))
+                .set_delay(std::time::Duration::from_secs(30)))
+            .mount(&server).await;
+        let config = HttpClientConfig {
+            base_url: server.uri(), response_timeout_ms: 60000, ..Default::default()
+        };
+        let transport = Arc::new(HttpTransport::new(config).unwrap());
+        let events = Arc::new(Mutex::new(Vec::<StreamEvent>::new()));
+        let ec = events.clone();
+        let ct = transport.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            ct.cancel_all();
+        });
+        let request = HttpRequest {
+            method: HttpMethod::GET, url: "/test".to_string(),
+            headers: HashMap::new(), body: None, content_type: None, timeout_ms: None,
+        };
+        let result = transport.execute_stream(request, move |e| { ec.lock().unwrap().push(e); }).await;
+        assert!(result.is_err());
+        assert!(events.lock().unwrap().iter().any(|e| matches!(e, StreamEvent::Error(m) if m.contains("cancelled"))));
+    }
+
+    #[tokio::test]
+    async fn ns02_stream_connection_error() {
+        let config = HttpClientConfig {
+            base_url: "http://127.0.0.1:1".to_string(),
+            connect_timeout_ms: 500, response_timeout_ms: 500, ..Default::default()
+        };
+        let transport = HttpTransport::new(config).unwrap();
+        let request = HttpRequest {
+            method: HttpMethod::GET, url: "/test".to_string(),
+            headers: HashMap::new(), body: None, content_type: None, timeout_ms: None,
+        };
+        assert!(transport.execute_stream(request, |_| {}).await.is_err());
+    }
+
+    // ── N-03: Per-request cancel tests ──
+
+    #[tokio::test]
+    async fn ns03_execute_returns_unique_ids() {
+        use wiremock::{MockServer, Mock, ResponseTemplate};
+        use wiremock::matchers::method;
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok": true})))
+            .mount(&server).await;
+        let config = HttpClientConfig { base_url: server.uri(), ..Default::default() };
+        let transport = Arc::new(HttpTransport::new(config).unwrap());
+        let mut ids = Vec::new();
+        for _ in 0..3 {
+            let (rid, token) = transport.allocate_pending_request();
+            let t = transport.clone();
+            let request = HttpRequest {
+                method: HttpMethod::GET, url: "/test".to_string(),
+                headers: HashMap::new(), body: None, content_type: None, timeout_ms: None,
+            };
+            let (returned_id, result) = t.execute_with_token(rid, token, request).await;
+            assert!(result.is_ok());
+            ids.push(returned_id);
+        }
+        assert_eq!(ids.len(), 3);
+        for i in 1..ids.len() { assert!(ids[i] > ids[i - 1]); }
+    }
+
+    #[tokio::test]
+    async fn ns03_cancel_request_nonexistent_returns_false() {
+        let config = HttpClientConfig::default();
+        let transport = HttpTransport::new(config).unwrap();
+        assert!(!transport.cancel_request(99999));
+    }
+
+    #[tokio::test]
+    async fn ns03_cancel_all_cancels_everything() {
+        use wiremock::{MockServer, Mock, ResponseTemplate};
+        use wiremock::matchers::method;
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_delay(std::time::Duration::from_secs(30)))
+            .mount(&server).await;
+        let config = HttpClientConfig {
+            base_url: server.uri(), response_timeout_ms: 60000, ..Default::default()
+        };
+        let transport = Arc::new(HttpTransport::new(config).unwrap());
+        let mut handles = Vec::new();
+        for _ in 0..3 {
+            let (rid, token) = transport.allocate_pending_request();
+            let t = transport.clone();
+            let request = HttpRequest {
+                method: HttpMethod::GET, url: "/test".to_string(),
+                headers: HashMap::new(), body: None, content_type: None, timeout_ms: None,
+            };
+            handles.push(tokio::spawn(async move { t.execute_with_token(rid, token, request).await }));
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        transport.cancel_all();
+        for h in handles {
+            let (_, result) = h.await.unwrap();
+            assert!(result.is_err(), "all requests should be cancelled");
+        }
+    }
+
+    #[tokio::test]
+    async fn ns03_cancel_all_then_new_requests_work() {
+        use wiremock::{MockServer, Mock, ResponseTemplate};
+        use wiremock::matchers::method;
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok": true})))
+            .mount(&server).await;
+        let config = HttpClientConfig { base_url: server.uri(), ..Default::default() };
+        let transport = HttpTransport::new(config).unwrap();
+        transport.cancel_all();
+        let request = HttpRequest {
+            method: HttpMethod::GET, url: "/test".to_string(),
+            headers: HashMap::new(), body: None, content_type: None, timeout_ms: None,
+        };
+        assert!(transport.execute(request).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn ns03_cancel_idempotent() {
+        use wiremock::{MockServer, Mock, ResponseTemplate};
+        use wiremock::matchers::method;
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok": true})))
+            .mount(&server).await;
+        let config = HttpClientConfig { base_url: server.uri(), ..Default::default() };
+        let transport = HttpTransport::new(config).unwrap();
+        let (rid, token) = transport.allocate_pending_request();
+        let request = HttpRequest {
+            method: HttpMethod::GET, url: "/test".to_string(),
+            headers: HashMap::new(), body: None, content_type: None, timeout_ms: None,
+        };
+        let (_, result) = transport.execute_with_token(rid, token, request).await;
+        assert!(result.is_ok());
+        assert!(!transport.cancel_request(rid), "completed request should not be cancellable");
     }
 }

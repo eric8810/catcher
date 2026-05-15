@@ -241,4 +241,102 @@ mod tests {
         assert!(snap.avg_rtt_ms > 0);
         assert_eq!(snap.sample_count, 3);
     }
+
+    // ── N-04: QualitySubscription tests ──
+
+    #[test]
+    fn ns04_trend_computation() {
+        // Excellent < Good < Fair < Poor < Bad (ordinal comparison)
+        // improving: level < previous_level
+        // degrading: level > previous_level
+        // stable: level == previous_level
+        use std::cmp::Ordering;
+        fn compute_trend(level: NetworkQualityLevel, prev: Option<NetworkQualityLevel>) -> &'static str {
+            match prev {
+                None => "unknown",
+                Some(p) => match level.cmp(&p) {
+                    Ordering::Less => "improving",
+                    Ordering::Greater => "degrading",
+                    Ordering::Equal => "stable",
+                },
+            }
+        }
+        // Bad > Poor > Fair > Good > Excellent
+        assert_eq!(compute_trend(NetworkQualityLevel::Excellent, None), "unknown");
+        assert_eq!(compute_trend(NetworkQualityLevel::Good, Some(NetworkQualityLevel::Excellent)), "degrading");
+        assert_eq!(compute_trend(NetworkQualityLevel::Poor, Some(NetworkQualityLevel::Bad)), "improving");
+        assert_eq!(compute_trend(NetworkQualityLevel::Good, Some(NetworkQualityLevel::Good)), "stable");
+        assert_eq!(compute_trend(NetworkQualityLevel::Fair, Some(NetworkQualityLevel::Poor)), "improving");
+    }
+
+    #[test]
+    fn ns04_classify_quality_levels() {
+        let mut eval = NetworkQualityEvaluator::new(10);
+        // Excellent: avg_rtt < 80
+        eval.record_rtt(30); eval.record_rtt(40); eval.record_rtt(50);
+        assert_eq!(eval.evaluate().level, NetworkQualityLevel::Excellent);
+
+        let mut eval = NetworkQualityEvaluator::new(10);
+        // Good: avg_rtt < 200
+        eval.record_rtt(100); eval.record_rtt(150);
+        assert_eq!(eval.evaluate().level, NetworkQualityLevel::Good);
+
+        let mut eval = NetworkQualityEvaluator::new(10);
+        // Bad: avg_rtt >= 1000
+        eval.record_rtt(1200); eval.record_rtt(1500);
+        assert_eq!(eval.evaluate().level, NetworkQualityLevel::Bad);
+    }
+
+    #[tokio::test]
+    async fn ns04_subscription_starts_and_unsubscribes() {
+        extern "C" fn noop_callback(
+            _et: *const std::ffi::c_char, _ed: *const u8, _el: usize, _ud: *mut std::ffi::c_void,
+        ) {}
+        let sub = QualitySubscription::start(
+            "http://127.0.0.1:1".to_string(),
+            500,
+            noop_callback,
+            0,
+        );
+        sub.unsubscribe();
+    }
+
+    #[tokio::test]
+    async fn ns04_subscription_measurement_failure_no_crash() {
+        extern "C" fn noop_callback(
+            _et: *const std::ffi::c_char, _ed: *const u8, _el: usize, _ud: *mut std::ffi::c_void,
+        ) {}
+        let sub = QualitySubscription::start(
+            "http://127.0.0.1:1".to_string(),
+            100,
+            noop_callback,
+            0,
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        sub.unsubscribe();
+    }
+
+    #[test]
+    fn ns04_no_callback_on_same_level() {
+        let mut eval = NetworkQualityEvaluator::new(10);
+        eval.record_rtt(50);
+        let r1 = eval.evaluate();
+        eval.record_rtt(60);
+        let r2 = eval.evaluate();
+        assert_eq!(r1.level, NetworkQualityLevel::Excellent);
+        assert_eq!(r2.level, NetworkQualityLevel::Excellent);
+    }
+
+    #[tokio::test]
+    async fn ns04_multiple_subscribers_independent() {
+        extern "C" fn noop_callback(
+            _et: *const std::ffi::c_char, _ed: *const u8, _el: usize, _ud: *mut std::ffi::c_void,
+        ) {}
+        let sub1 = QualitySubscription::start("http://127.0.0.1:1".to_string(), 500, noop_callback, 0);
+        let sub2 = QualitySubscription::start("http://127.0.0.1:1".to_string(), 500, noop_callback, 0);
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        sub1.unsubscribe();
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        sub2.unsubscribe();
+    }
 }

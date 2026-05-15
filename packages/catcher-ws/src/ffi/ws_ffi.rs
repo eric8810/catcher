@@ -70,23 +70,19 @@ pub unsafe extern "C" fn catcher_ws_create(
         Ok(c) => c,
         Err(_) => return std::ptr::null_mut(),
     };
-    let urls = config.urls.clone();
-    let first_url = match urls.first().cloned() {
-        Some(u) => u,
-        None => {
-            // Return error via callback instead of silently connecting to localhost
-            let json = error_json("urls cannot be empty");
-            invoke_event_callback(event_callback, "ws_error", json, user_data as usize);
-            return std::ptr::null_mut();
-        }
-    };
+    if config.urls.is_empty() {
+        // Return error via callback instead of silently connecting to localhost
+        let json = error_json("urls cannot be empty");
+        invoke_event_callback(event_callback, "ws_error", json, user_data as usize);
+        return std::ptr::null_mut();
+    }
 
     let id = WS_NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let cb = event_callback;
     let ud = user_data as usize;
 
     runtime().spawn(async move {
-        match WsTransport::connect(&first_url, &config).await {
+        match WsTransport::connect(&config).await {
             Ok((handle, mut rx)) => {
                 let ws_handle = Arc::new(handle);
                 ws_handles()

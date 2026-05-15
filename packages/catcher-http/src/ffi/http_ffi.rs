@@ -264,7 +264,12 @@ pub unsafe extern "C" fn catcher_http_execute_with_id(
                     }).to_string()
                 }
                 Err(e) => {
-                    serde_json::json!({"error": e.to_string(), "request_id": request_id}).to_string()
+                    let msg = e.to_string();
+                    if msg.contains("cancelled") {
+                        serde_json::json!({"type": "cancelled", "request_id": request_id}).to_string()
+                    } else {
+                        serde_json::json!({"error": msg, "request_id": request_id}).to_string()
+                    }
                 }
             };
             invoke_http_callback(callback, "http_result", json, ud);

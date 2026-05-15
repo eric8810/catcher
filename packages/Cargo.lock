@@ -351,6 +351,7 @@ dependencies = [
 name = "catcher-napi-http"
 version = "0.2.2"
 dependencies = [
+ "base64",
  "catcher-core",
  "catcher-http",
  "napi",
@@ -358,6 +359,7 @@ dependencies = [
  "napi-derive",
  "serde_json",
  "tokio",
+ "tokio-stream",
 ]
 
 [[package]]
