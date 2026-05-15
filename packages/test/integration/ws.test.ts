@@ -106,7 +106,7 @@ describe('WS — message latency with perMessageDeflate', () => {
           url: proxyUrl,
           perMessageDeflate: true,
           handshakeTimeout: 30_000,
-          reconnect: { maxAttempts: 0 }, // no reconnect for this test
+          reconnect: { maxAttempts: 3, initialDelay: 500, maxDelay: 2000 },
         })
 
         let sent = 0
