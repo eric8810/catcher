@@ -127,6 +127,81 @@ fn classify_quality(snapshot: &RttSnapshot) -> NetworkQualityLevel {
     }
 }
 
+/// 质量订阅 — N-04 实时推送
+pub struct QualitySubscription {
+    cancel_tx: tokio::sync::watch::Sender<bool>,
+    _task: tokio::task::JoinHandle<()>,
+}
+
+impl QualitySubscription {
+    /// 启动后台质量监测任务，每 `interval_ms` 测量一次。
+    /// 仅在质量等级变化时触发 callback。
+    pub fn start(
+        host: String,
+        interval_ms: u64,
+        callback: catcher_core::EventCallback,
+        user_data: usize,
+    ) -> Self {
+        let (cancel_tx, mut cancel_rx) = tokio::sync::watch::channel(false);
+        let mut evaluator = NetworkQualityEvaluator::new(50);
+        let host_clone = host.clone();
+
+        let task = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_millis(interval_ms));
+            let mut previous_level: Option<NetworkQualityLevel> = None;
+
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        if let Ok(_) = evaluator.measure_http_rtt(&host_clone, "/").await {
+                            let result = evaluator.evaluate();
+                            let level = result.level;
+                            if previous_level.map_or(true, |prev| prev != level) {
+                                let trend = match previous_level {
+                                    None => "unknown",
+                                    Some(prev) => {
+                                        if level < prev { "improving" }
+                                        else if level > prev { "degrading" }
+                                        else { "stable" }
+                                    }
+                                };
+                                let json = serde_json::json!({
+                                    "level": format!("{:?}", level),
+                                    "previous_level": previous_level.map(|p| format!("{:?}", p)),
+                                    "trend": trend,
+                                    "avg_rtt_ms": result.avg_rtt_ms,
+                                    "jitter_ms": result.jitter_ms,
+                                    "sample_count": evaluator.rtt_snapshot().sample_count,
+                                }).to_string();
+                                let c_event = std::ffi::CString::new("quality_change").unwrap_or_default();
+                                let c_json = std::ffi::CString::new(json.replace('\0', "")).unwrap_or_default();
+                                let json_len = c_json.as_bytes().len();
+                                callback(
+                                    c_event.into_raw(),
+                                    c_json.into_raw() as *const u8,
+                                    json_len,
+                                    user_data as *mut std::ffi::c_void,
+                                );
+                                previous_level = Some(level);
+                            }
+                        }
+                    }
+                    _ = cancel_rx.changed() => {
+                        if *cancel_rx.borrow() { break; }
+                    }
+                }
+            }
+        });
+
+        Self { cancel_tx, _task: task }
+    }
+
+    /// 取消订阅，停止后台 task
+    pub fn unsubscribe(self) {
+        let _ = self.cancel_tx.send(true);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

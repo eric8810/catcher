@@ -1,6 +1,7 @@
 # 08 — 可观测性层
 
 > 对应源文件：`src/observability/`
+> 相关 Issue：[N-04](../issues/native-layer-capability-gaps.md)
 
 ---
 
@@ -144,3 +145,110 @@ impl MetricsCollector {
     }
 }
 ```
+
+---
+
+## 待实现：Quality Push Events（N-04）
+
+> 设计详见 [../issues/native-layer-capability-gaps.md](../issues/native-layer-capability-gaps.md) N-04
+
+当前 `NetworkQualityEvaluator` 只有同步查询方法（`rtt_snapshot()` / `evaluate()`），FFI 层提供 `catcher_evaluate_quality`（一次性回调）和 `catcher_quality_history`（一次性 JSON 查询）。缺少持久推送机制。
+
+### 目标架构
+
+```rust
+use tokio::sync::watch;
+
+struct QualitySubscription {
+    host: String,
+    interval_ms: u64,
+    callback: EventCallback,
+    user_data: usize,
+    cancel_tx: watch::Sender<bool>,
+    _task: tokio::task::JoinHandle<()>,
+}
+
+impl QualitySubscription {
+    fn start(
+        host: String,
+        interval_ms: u64,
+        callback: EventCallback,
+        user_data: usize,
+    ) -> Self {
+        let (cancel_tx, mut cancel_rx) = watch::channel(false);
+        let mut evaluator = NetworkQualityEvaluator::new(50);
+        let host_clone = host.clone();
+
+        let task = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(
+                Duration::from_millis(interval_ms)
+            );
+            let mut previous_level: Option<NetworkQualityLevel> = None;
+
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        if let Ok(_) = evaluator.measure_http_rtt(&host_clone, "/").await {
+                            let result = evaluator.evaluate();
+                            let trend = compute_trend(&result.level, &previous_level);
+                            if previous_level != Some(result.level) || previous_level.is_none() {
+                                let json = build_quality_event_json(
+                                    &result, &previous_level, &trend
+                                );
+                                invoke_callback(callback, "quality_change", &json, user_data);
+                                previous_level = Some(result.level);
+                            }
+                        }
+                    }
+                    _ = cancel_rx.changed() => {
+                        if *cancel_rx.borrow() { break; }
+                    }
+                }
+            }
+        });
+
+        Self { host, interval_ms, callback, user_data, cancel_tx, _task: task }
+    }
+
+    fn unsubscribe(self) {
+        let _ = self.cancel_tx.send(true);
+        // task 在 select! 分支收到 cancel 后自动退出
+    }
+}
+
+/// 趋势计算：比较两次评估等级
+fn compute_trend(
+    current: &NetworkQualityLevel,
+    previous: &Option<NetworkQualityLevel>,
+) -> &'static str {
+    match previous {
+        None => "unknown",
+        Some(prev) => {
+            if current < prev { "improving" }
+            else if current > prev { "degrading" }
+            else { "stable" }
+        }
+    }
+}
+```
+
+### 回调事件 JSON 格式
+
+```json
+{
+  "level": "good",
+  "previous_level": "fair",
+  "trend": "improving",
+  "avg_rtt_ms": 85,
+  "jitter_ms": 12,
+  "sample_count": 5
+}
+```
+
+### FFI 影响
+
+新增 2 个 C ABI 符号：
+- `catcher_quality_subscribe(host, interval_ms, callback, user_data) → *mut c_void`
+- `catcher_quality_unsubscribe(sub_handle)`
+
+与现有 `catcher_evaluate_quality` / `catcher_quality_history` 共存，互不取代。

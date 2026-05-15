@@ -89,7 +89,7 @@ flutter pub add catcher_core
 | 09 | [`09-ffi.md`](./09-ffi.md) | FFI 接口契约（C ABI / napi / dart:ffi） |
 | 13 | [`13-dart-ffi.md`](./13-dart-ffi.md) | Dart FFI 绑定设计（dart:ffi ✅, flutter_rust_bridge ❌） |
 | 14 | [`14-workspace.md`](./14-workspace.md) | v0.3 workspace 架构总览 |
-| 15 | [`15-ffi-layering.md`](./15-ffi-layering.md) | FFI 分层策略：TS vs Rust 职责边界 |
+| 15 | [`15-ffi-layering.md`](./15-ffi-layering.md) | FFI 分层策略：TS vs Rust 职责边界 + 待实现原生能力缺口 |
 
 ## 阅读路径
 
@@ -97,3 +97,4 @@ flutter pub add catcher_core
 - **写代码**：在对应 `packages/catcher-*/` 下开发
 - **了解决策**：[`research/`](../research/) 下的分析文档
 - **理解分层**：[`15-ffi-layering.md`](./15-ffi-layering.md) — 什么放 Rust，什么放 TS
+- **原生层缺口**：[`../issues/native-layer-capability-gaps.md`](../issues/native-layer-capability-gaps.md) — TS 已有但 Rust 原生层未对等覆盖的能力

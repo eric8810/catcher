@@ -2,6 +2,7 @@
 
 > 对应源文件：`src/transport/`
 > 连接池：reqwest 内置基于 `hyper-util` 的连接池，通过 `pool_max_idle_per_host()` / `pool_idle_timeout()` 暴露配置
+> 相关 Issue：[N-01~N-03](../issues/native-layer-capability-gaps.md)
 
 ---
 
@@ -258,3 +259,109 @@ pub fn build_dns_resolver(_: &DnsConfig) -> Result<Option<()>, CatcherError> {
     Ok(None) // fallback to system DNS
 }
 ```
+
+---
+
+## 待实现：Per-request Cancel（N-03）
+
+> 设计详见 [../issues/native-layer-capability-gaps.md](../issues/native-layer-capability-gaps.md) N-03
+
+当前 `cancel_token` 是全局单一实例，`cancel_all()` 取消全部飞行请求。需扩展为支持单请求级取消。
+
+### 目标架构
+
+```rust
+use std::collections::HashMap;
+use std::sync::atomic::AtomicU64;
+use tokio_util::sync::CancellationToken;
+
+pub struct HttpTransport {
+    // ...existing fields...
+    cancel_token: Arc<Mutex<CancellationToken>>,          // 全局 cancel（保留）
+    pending_requests: Mutex<HashMap<u64, CancellationToken>>, // per-request
+    next_request_id: AtomicU64,
+}
+
+impl HttpTransport {
+    /// 执行请求并返回 request_id。
+    /// select! 同时监听 per-request token 和 全局 token。
+    pub async fn execute(
+        &self, request: HttpRequest,
+    ) -> (u64, Result<HttpResponse, CatcherError>) { ... }
+
+    /// 取消单个飞行请求
+    pub fn cancel_request(&self, request_id: u64) -> bool { ... }
+
+    /// 取消全部（全局 + per-request 双路 cancel）
+    pub fn cancel_all(&self) { ... }
+}
+```
+
+### Ffi 影响
+
+`catcher_http_execute` 返回值从 `void` 变为 `u64`（request_id）。新增 `catcher_http_cancel_request(handle, request_id) → i32`。
+
+---
+
+## 待实现：流式下载（N-02）
+
+> 设计详见 [../issues/native-layer-capability-gaps.md](../issues/native-layer-capability-gaps.md) N-02
+
+当前 `do_execute()` 第 243 行硬编码 `response.bytes().await`，强制全量读入内存。大文件下载有 OOM 风险。
+
+### 目标架构
+
+```rust
+impl HttpTransport {
+    /// 流式执行 — 逐 chunk 通过 callback 推送
+    pub async fn execute_stream(
+        &self,
+        request: HttpRequest,
+        chunk_callback: impl Fn(StreamEvent) + Send + 'static,
+    ) -> Result<HttpResponse, CatcherError> { ... }
+}
+
+enum StreamEvent {
+    Headers { status: u16, headers: HashMap<String, String> },
+    Chunk(Vec<u8>),
+    Done,
+    Error(String),
+}
+```
+
+内部使用 `response.bytes_stream()` (来自 `futures_util::StreamExt`) 替代 `response.bytes().await`。
+
+### Ffi 影响
+
+新增 `catcher_http_execute_stream(handle, method, url, body, body_len, content_type, headers_json, timeout_ms, chunk_size_hint, callback, user_data)`。
+
+---
+
+## 待实现：Multipart/FormData（N-01）
+
+> 设计详见 [../issues/native-layer-capability-gaps.md](../issues/native-layer-capability-gaps.md) N-01
+
+### P2 方案（调用方编码）
+
+当前 `catcher_http_post` 已接受 `content_type: FfiString`，调用方可自行编码 multipart 后传入 `multipart/form-data; boundary=...`。Rust 层无需改动。
+
+### P3 方案（Rust 原生 MultipartBuilder）
+
+```rust
+// catcher-http/src/multipart/builder.rs (新增模块)
+pub struct MultipartBuilder {
+    boundary: String,
+    parts: Vec<MultipartPart>,
+}
+
+impl MultipartBuilder {
+    pub fn new() -> Self { ... }
+    pub fn add_text(&mut self, name: &str, value: &str) -> &mut Self { ... }
+    pub fn add_file(&mut self, name: &str, filename: &str,
+                    data: Vec<u8>, content_type: &str) -> &mut Self { ... }
+    pub fn build(&self) -> (Vec<u8>, String) { ... }
+    // → (encoded_body, "multipart/form-data; boundary=...")
+}
+```
+
+Ffi 暴露 5 个符号：`catcher_multipart_create` / `add_text` / `add_file` / `build` / `destroy`。

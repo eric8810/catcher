@@ -37,6 +37,15 @@ pub struct HttpResponse {
     pub elapsed_ms: u64,
 }
 
+/// 流式 HTTP 响应事件（N-02）
+#[derive(Debug, Clone)]
+pub enum StreamEvent {
+    Headers { status: u16, headers: HashMap<String, String> },
+    Chunk(Vec<u8>),
+    Done,
+    Error(String),
+}
+
 /// 连接池配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PoolConfig {

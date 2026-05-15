@@ -3,6 +3,7 @@ use reqwest_middleware::{ClientBuilder as MiddlewareBuilder, ClientWithMiddlewar
 use reqwest_retry::RetryTransientMiddleware;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use catcher_core::CatcherError;
@@ -20,6 +21,7 @@ use catcher_core::types::resilience::CbState;
 /// Phase 3: 使用 reqwest-middleware + RetryTransientMiddleware + CircuitBreaker
 /// Phase 4: 增加 tokio CancellationToken 支持请求取消 + MetricsCollector
 /// Phase 5: 增加 AdaptiveTimeout 基于滑动窗口 P90 RTT 自适应超时
+/// Phase 6: 增加 per-request cancel (N-03)
 pub struct HttpTransport {
     client: ClientWithMiddleware,
     config: HttpClientConfig,
@@ -27,6 +29,9 @@ pub struct HttpTransport {
     cancel_token: Arc<Mutex<tokio_util::sync::CancellationToken>>,
     metrics: MetricsCollector,
     adaptive_timeout: Mutex<Option<AdaptiveTimeout>>,
+    /// Per-request cancel tokens, keyed by request_id (N-03)
+    pending_requests: Mutex<HashMap<u64, tokio_util::sync::CancellationToken>>,
+    next_request_id: AtomicU64,
 }
 
 impl HttpTransport {
@@ -120,15 +125,38 @@ impl HttpTransport {
             cancel_token: Arc::new(Mutex::new(tokio_util::sync::CancellationToken::new())),
             metrics: MetricsCollector::new(),
             adaptive_timeout: Mutex::new(None),
+            pending_requests: Mutex::new(HashMap::new()),
+            next_request_id: AtomicU64::new(1),
         })
     }
 
     /// 发起 HTTP 请求（带熔断器检查 + cancel 支持 + metrics 记录 + 自适应超时）
-    pub async fn execute(&self, mut request: HttpRequest) -> Result<HttpResponse, CatcherError> {
+    pub async fn execute(&self, request: HttpRequest) -> Result<HttpResponse, CatcherError> {
+        let (_, result) = self.execute_with_token(
+            0,  // dummy request_id, not registered for cancel
+            tokio_util::sync::CancellationToken::new(),  // uncancellable per-request token
+            request,
+        ).await;
+        result
+    }
+
+    /// 使用预分配的 token 执行请求（N-03，供 FFI 层使用）。
+    /// request_id 由调用方通过 allocate_pending_request() 预分配，
+    /// 以便在 execute 返回前就能通过 cancel_request(request_id) 取消。
+    pub async fn execute_with_token(
+        &self,
+        request_id: u64,
+        per_request_token: tokio_util::sync::CancellationToken,
+        mut request: HttpRequest,
+    ) -> (u64, Result<HttpResponse, CatcherError>) {
         let start = Instant::now();
 
         if let Some(ref cb) = self.circuit_breaker {
-            cb.before_request()?;
+            if let Err(e) = cb.before_request() {
+                self.pending_requests.lock().unwrap().remove(&request_id);
+                self.metrics.record_http_request(false, start.elapsed().as_micros() as u64, false);
+                return (request_id, Err(e));
+            }
         }
 
         // Apply adaptive timeout if enabled and no per-request override
@@ -138,19 +166,26 @@ impl HttpTransport {
             }
         }
 
-        let cancel = {
+        let global_token = {
             let token = self.cancel_token.lock().unwrap();
             token.clone()
         };
 
         let result = tokio::select! {
             r = self.do_execute(request) => r,
-            _ = cancel.cancelled() => {
+            _ = per_request_token.cancelled() => {
                 let elapsed_us = start.elapsed().as_micros() as u64;
                 self.metrics.record_http_request(false, elapsed_us, false);
-                return Err(CatcherError::Internal("request cancelled".into()));
+                return (request_id, Err(CatcherError::Internal("request cancelled".into())));
+            }
+            _ = global_token.cancelled() => {
+                let elapsed_us = start.elapsed().as_micros() as u64;
+                self.metrics.record_http_request(false, elapsed_us, false);
+                return (request_id, Err(CatcherError::Internal("request cancelled".into())));
             }
         };
+
+        self.pending_requests.lock().unwrap().remove(&request_id);
 
         let elapsed_us = start.elapsed().as_micros() as u64;
 
@@ -177,7 +212,7 @@ impl HttpTransport {
             }
         }
 
-        result
+        (request_id, result)
     }
 
     /// 取消所有飞行中的请求。新请求不受影响。
@@ -186,7 +221,51 @@ impl HttpTransport {
         token.cancel();
         // Replace with a fresh token so new requests can proceed
         *token = tokio_util::sync::CancellationToken::new();
+        drop(token);
+        // Also cancel all per-request tokens (N-03)
+        let pending: Vec<tokio_util::sync::CancellationToken> =
+            self.pending_requests.lock().unwrap().drain().map(|(_, t)| t).collect();
+        for t in &pending {
+            t.cancel();
+        }
     }
+
+    /// 取消单个飞行请求（N-03）。
+    /// 返回 true 表示找到并取消，false 表示 request_id 不存在或已完成。
+    pub fn cancel_request(&self, request_id: u64) -> bool {
+        if let Some(token) = self.pending_requests.lock().unwrap().get(&request_id) {
+            token.cancel();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// 分配一个新的 request_id 和对应的 CancellationToken（N-03）。
+    /// 调用方负责在请求完成后调用 cleanup_pending_request()。
+    pub fn allocate_pending_request(&self) -> (u64, tokio_util::sync::CancellationToken) {
+        let request_id = self.next_request_id.fetch_add(1, Ordering::Relaxed);
+        let token = tokio_util::sync::CancellationToken::new();
+        self.pending_requests.lock().unwrap().insert(request_id, token.clone());
+        (request_id, token)
+    }
+
+    /// 获取下一个 request_id（不注册 pending token，供 FFI 层使用）。
+    pub fn next_request_id(&self) -> u64 {
+        self.next_request_id.fetch_add(1, Ordering::Relaxed)
+    }
+
+    /// 注册一个 per-request CancellationToken 供 cancel 使用（N-03）。
+    pub fn insert_pending_request(&self, request_id: u64, token: tokio_util::sync::CancellationToken) {
+        self.pending_requests.lock().unwrap().insert(request_id, token);
+    }
+
+    /// 清理已完成的请求（N-03）。
+    pub fn cleanup_pending_request(&self, request_id: u64) {
+        self.pending_requests.lock().unwrap().remove(&request_id);
+    }
+
+    /// 使用预分配的 token 执行请求（N-03，供 FFI 层使用）。
 
     async fn do_execute(&self, request: HttpRequest) -> Result<HttpResponse, CatcherError> {
         let start = Instant::now();
@@ -262,6 +341,63 @@ impl HttpTransport {
         })
     }
 
+    /// 流式执行 HTTP 请求（N-02），逐 chunk 通过回调推送。
+    /// chunk_callback(event) 在每次收到数据块、响应头、或错误时调用。
+    pub async fn execute_stream(
+        &self,
+        request: HttpRequest,
+        chunk_callback: impl Fn(StreamEvent) + Send + 'static,
+    ) -> Result<(), CatcherError> {
+        use tokio_stream::StreamExt;
+
+        let method = match request.method {
+            HttpMethod::GET => reqwest::Method::GET,
+            HttpMethod::POST => reqwest::Method::POST,
+            HttpMethod::PUT => reqwest::Method::PUT,
+            HttpMethod::DELETE => reqwest::Method::DELETE,
+            HttpMethod::PATCH => reqwest::Method::PATCH,
+        };
+
+        let url = if request.url.starts_with("http") {
+            request.url
+        } else {
+            format!("{}{}", self.config.base_url.trim_end_matches('/'), request.url)
+        };
+
+        let mut req = self.client.request(method, &url);
+        for (k, v) in &self.config.default_headers { req = req.header(k, v); }
+        for (k, v) in &request.headers { req = req.header(k, v); }
+        if let Some(body) = &request.body { req = req.body(body.clone()); }
+        if let Some(ct) = &request.content_type { req = req.header("Content-Type", ct); }
+        let timeout_ms = request.timeout_ms.unwrap_or(self.config.response_timeout_ms);
+        req = req.timeout(Duration::from_millis(timeout_ms));
+
+        let response = req.send().await.map_err(|e| map_middleware_error(e, &self.config))?;
+
+        let status = response.status().as_u16();
+        let headers: HashMap<String, String> = response.headers().iter()
+            .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
+            .collect();
+
+        // Notify headers first
+        chunk_callback(StreamEvent::Headers { status, headers });
+
+        // Stream chunks
+        let mut stream = response.bytes_stream();
+        while let Some(chunk_result) = stream.next().await {
+            match chunk_result {
+                Ok(chunk) => chunk_callback(StreamEvent::Chunk(chunk.to_vec())),
+                Err(e) => {
+                    chunk_callback(StreamEvent::Error(format!("stream read error: {e}")));
+                    return Err(CatcherError::Internal(format!("stream read: {e}")));
+                }
+            }
+        }
+
+        chunk_callback(StreamEvent::Done);
+        Ok(())
+    }
+
     /// GET 快捷方法
     pub async fn get(&self, url: &str) -> Result<HttpResponse, CatcherError> {
         let request = HttpRequest {
@@ -272,7 +408,8 @@ impl HttpTransport {
             content_type: None,
             timeout_ms: None,
         };
-        self.execute(request).await
+        let result = self.execute(request).await;
+        result
     }
 
     /// POST 快捷方法
@@ -290,7 +427,8 @@ impl HttpTransport {
             content_type: Some(content_type.to_string()),
             timeout_ms: None,
         };
-        self.execute(request).await
+        let result = self.execute(request).await;
+        result
     }
 
     /// 返回熔断器状态（用于 metrics）

@@ -2,6 +2,7 @@
 
 > 设计文档 · 部分实现
 > 配套阅读：[09-ffi.md](./09-ffi.md)（FFI 接口契约）、[../arch-ts/09-interceptors.md](../arch-ts/09-interceptors.md)（TS 拦截器）
+> 相关 Issue：[native-layer-capability-gaps.md](../issues/native-layer-capability-gaps.md)
 
 ---
 
@@ -321,37 +322,69 @@ await client.post('/upload', formData, {
 JS/Dart                  FFI 边界                    Rust
   │                         │                         │
   │── cancelAll() ─────────▶│                         │
+  │── cancelRequest(id) ───▶│                         │
   │                         │── cancel_token.cancel()─▶│
   │                         │                         │── select! {
   │                         │                         │     result = reqwest
-  │                         │                         │     _ = token.cancelled()
+  │                         │                         │     _ = per_request_token.cancelled()
+  │                         │                         │     _ = global_token.cancelled()
   │                         │                         │   }
 ```
+
+### 两级取消粒度
+
+| 粒度 | FFI 符号 | 用途 |
+|------|----------|------|
+| 客户端级 | `catcher_http_client_cancel_all` | 页面退出/切换，取消所有飞行请求 |
+| 请求级 | `catcher_http_cancel_request(handle, request_id)` | 列表页切换 Tab，只取消 1 个请求 |
 
 ### Rust 层实现
 
 ```rust
 use tokio_util::sync::CancellationToken;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::sync::atomic::AtomicU64;
 
 pub struct HttpTransport {
     client: Client,
     config: HttpClientConfig,
-    cancel_token: CancellationToken,  // 根 token
-    // ...
+    cancel_token: Arc<Mutex<CancellationToken>>,  // 全局根 token（cancel_all 用）
+    pending_requests: Mutex<HashMap<u64, CancellationToken>>, // per-request
+    next_request_id: AtomicU64,
 }
 
 impl HttpTransport {
-    pub async fn execute(&self, request: HttpRequest) -> Result<HttpResponse, CatcherError> {
-        let cancel = self.cancel_token.child_token();
-        tokio::select! {
-            result = self.execute_inner(request) => result,
-            _ = cancel.cancelled() => Err(CatcherError::Cancelled),
-        }
+    pub async fn execute(&self, request: HttpRequest) -> (u64, Result<HttpResponse, CatcherError>) {
+        let request_id = self.next_request_id.fetch_add(1, Ordering::Relaxed);
+        let per_request = CancellationToken::new();
+        self.pending_requests.lock().unwrap().insert(request_id, per_request.clone());
+
+        let result = tokio::select! {
+            r = self.do_execute(request) => r,
+            _ = per_request.cancelled() => Err(CatcherError::Cancelled),
+            _ = self.cancel_token.cancelled() => Err(CatcherError::Cancelled),
+        };
+
+        self.pending_requests.lock().unwrap().remove(&request_id);
+        (request_id, result)
+    }
+
+    pub fn cancel_request(&self, request_id: u64) -> bool {
+        if let Some(token) = self.pending_requests.lock().unwrap().get(&request_id) {
+            token.cancel();
+            true
+        } else { false }
     }
 
     pub fn cancel_all(&self) {
+        // 1. 取消全局 token
         self.cancel_token.cancel();
-        // 重置 token 以允许后续请求
+        // 2. 遍历取消所有 per-request token
+        let pending: Vec<_> = self.pending_requests.lock().unwrap()
+            .drain().map(|(_, t)| t).collect();
+        for t in &pending { t.cancel(); }
+        // 3. 重置全局 token
         // self.cancel_token = CancellationToken::new();
     }
 }
@@ -360,10 +393,20 @@ impl HttpTransport {
 ### C ABI 暴露
 
 ```rust
+/// 客户端级取消
 #[no_mangle]
 pub extern "C" fn catcher_http_client_cancel_all(
     handle: *mut c_void,
 )
+
+/// 单请求级取消（N-03）
+#[no_mangle]
+pub extern "C" fn catcher_http_cancel_request(
+    handle: *mut c_void,
+    request_id: u64,
+) -> i32  // 0=成功, -1=未找到
+
+// catcher_http_execute 返回值从 void 改为 u64 (request_id)
 ```
 
 ### 为什么不在 JS 侧做取消
@@ -404,6 +447,50 @@ pub struct SseReporter {
 
 ---
 
+## 通用 HTTP 流式下载的 FFI 分层（N-02）
+
+> 设计详见 [../issues/native-layer-capability-gaps.md](../issues/native-layer-capability-gaps.md) N-02
+
+### 与 SSE 流的区别
+
+| 维度 | SSE 流 | 通用 HTTP 流式下载 |
+|------|--------|-------------------|
+| 协议 | `text/event-stream` 有行格式 | 任意 Content-Type |
+| 数据单元 | SSE 行 (`data:`/`event:`/`id:`) | 原始字节 chunk |
+| 解析位置 | Rust 侧解析行结构 | 不解析，透传原始 bytes |
+| 回调内容 | 结构化 JSON `{type, data, event, id}` | 原始字节 + 元信息 header |
+| 适用场景 | OpenAI/Anthropic API | 大文件下载、二进制流 |
+
+### 为什么通用流式下载也需要 Rust 侧实现
+
+1. **reqwest 的 `bytes_stream()` 天然支持** — 不需要读完整响应体
+2. **避免 OOM** — 当前 `response.bytes().await` 强制全量加载
+3. **统一 callback 模式** — 与 SSE stream 使用相同的 `EventCallback` 机制
+4. **进度回调基础** — 逐 chunk 推送是上传/下载进度回调的前提
+
+### 回调协议
+
+```
+event_type = "headers"   → event_data = {"status":200,"headers":{"content-length":"104857600"}}
+event_type = "chunk"     → event_data = <raw bytes>
+event_type = "done"      → event_data = {"elapsed_ms":1234}
+event_type = "error"     → event_data = {"message":"connection reset"}
+```
+
+### 频率控制
+
+```rust
+pub struct StreamReporter {
+    last_report: Instant,
+    min_interval: Duration,  // 默认 0（无节流，流式下载追求实时性）
+    chunk_size_hint: usize,  // 默认 8192
+}
+```
+
+> SSE 需要节流因为行可能非常密集；通用流式下载由 `chunk_size_hint` 控制粒度，通常不需要额外节流。
+
+---
+
 ## 总结
 
 ```
@@ -423,8 +510,13 @@ pub struct SseReporter {
 │    否 → Rust 独立完成                         │
 │                                              │
 │  "Cancel/Abort 需要传播到 Rust 吗？"            │
-│    是 → CancellationToken 桥接               │
-│    否 → JS 侧 Promise.reject 即可             │
+│    是 → CancellationToken 桥接                   │
+│          (全局 cancelAll + per-request cancel)    │
+│    否 → JS 侧 Promise.reject 即可                │
+│                                              │
+│  "响应体太大需要流式读取吗？"                     │
+│    是 → execute_stream 逐 chunk callback → 避免 OOM │
+│    否 → execute 全量 bytes().await → 简单       │
 └──────────────────────────────────────────────┘
 ```
 

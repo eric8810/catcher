@@ -43,6 +43,19 @@
 
 详见 → [api-gap-features.md](./api-gap-features.md)
 
+## FFI / 原生层能力缺口
+
+> 来源：对照 `ffi-uniffi-capability-gaps.md` 已修复项目，逐项审查 Rust 原生层 vs TS 层对等能力
+
+| # | Issue | 优先级 | 状态 | 文件 |
+|---|-------|:------:|:----:|------|
+| N-01 | Multipart/FormData 文件上传 | 🟢 P2 | 📐 设计中 | [native-layer-capability-gaps.md](./native-layer-capability-gaps.md) |
+| N-02 | 流式文件下载 (`responseType: stream`) | 🟡 P1 | 📐 设计中 | 同上 |
+| N-03 | 单请求级 cancel（非 `cancelAll`） | 🟡 P1 | 📐 设计中 | 同上 |
+| N-04 | 网络质量实时事件推送 | 🟢 P2 | 📐 设计中 | 同上 |
+
+详见 → [native-layer-capability-gaps.md](./native-layer-capability-gaps.md)
+
 ## 间题之间的关联
 
 ```

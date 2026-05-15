@@ -38,7 +38,8 @@ docs/test/
 ├── 00-overview.md      ← 测试框架概览 + 设计哲学
 ├── 01-proxy.md         ← 网络损伤代理设计（损伤模型）
 ├── 02-profiles.md      ← 网络 Profile 体系（对标标准）
-└── 03-scenarios.md     ← 测试场景体系（S1-S16）
+├── 03-scenarios.md     ← 测试场景体系（S1-S16）
+└── native-gap-test-design.md ← N-01~N-04 原生能力缺口测试设计
 
 packages/test/
 ├── harness.ts                 ← 并发对比 Harness
@@ -64,6 +65,18 @@ packages/test/
 └── reporters/
     └── comparison-reporter.ts ← vanilla vs catcher 对比报表
 
+# Rust FFI 集成测试（packages/catcher-ffi/tests/）
+#   http_test.rs          # HTTP C ABI (7 tests) + N-02/N-03 (10 new)
+#   sse_test.rs           # SSE C ABI (3 tests)
+#   codec_quality_test.rs # codec + quality C ABI (4 tests)
+#   quality_test.rs       # N-04 quality push FFI (6 new, 📐)
+#   multipart_test.rs     # N-01 multipart FFI (8 new, 📐 P3)
+
+# Dart 绑定测试（packages/catcher_core/test/）
+#   http_client_test.dart # N-03 cancel + N-02 stream (8 new, 📐)
+#   quality_test.dart     # N-04 subscribe (4 new, 📐)
+#   multipart_encoder_test.dart # N-01 encoder (3 new, 📐)
+
 # SSE 单元测试（catcher-http-ts/src/sse/__tests__/）
 #   router.test.ts       #24 行路由（24 tests）
 #   stream.test.ts       # SSEStream 流式请求（23 tests）
@@ -85,3 +98,4 @@ packages/test/
 - **写测试**：[`03-scenarios.md`](./03-scenarios.md) 看场景模板
 - **改损伤**：[`01-proxy.md`](./01-proxy.md) 看损伤模型
 - **加 Profile**：[`02-profiles.md`](./02-profiles.md) 看标准值
+- **原生能力缺口**：[`native-gap-test-design.md`](./native-gap-test-design.md) 看 N-01~N-04 测试方案

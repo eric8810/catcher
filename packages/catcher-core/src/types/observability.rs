@@ -11,7 +11,7 @@ pub enum Priority {
 }
 
 /// 网络质量等级
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum NetworkQualityLevel {
     Excellent,
     Good,

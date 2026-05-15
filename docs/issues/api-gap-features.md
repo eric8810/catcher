@@ -196,6 +196,8 @@ interface HttpClientConfig {
 
 ## G5: FormData / 文件上传
 
+> **原生层设计**：[native-layer-capability-gaps.md](./native-layer-capability-gaps.md) N-01 — Rust 原生层 multipart 编码器 + FFI 导出方案
+
 **优先级**: 🟡 P1
 **影响范围**: `catcher-http-ts`, `catcher-web`, `catcher-http` (Rust), FFI
 
@@ -357,6 +359,8 @@ pub trait Transport: Send + Sync {
 
 ## G10: 流式响应 (Response Stream)
 
+> **原生层设计**：[native-layer-capability-gaps.md](./native-layer-capability-gaps.md) N-02 — Rust `execute_stream` + `catcher_http_execute_stream` C ABI 方案
+
 **优先级**: 🟡 P1
 **影响范围**: `catcher-http-ts`, `catcher-web`, `catcher-http` (Rust)
 
@@ -389,6 +393,8 @@ interface HttpResponse<T = any> {
 ---
 
 ## G11: 韧性运行时控制
+
+> **原生层设计**：[native-layer-capability-gaps.md](./native-layer-capability-gaps.md) N-03 — 单请求级 cancel + N-04 — 网络质量推送订阅
 
 **优先级**: 🟡 P1
 **影响范围**: `catcher-http-ts`, `catcher-http` (Rust), FFI

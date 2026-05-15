@@ -406,6 +406,73 @@ pub extern "C" fn catcher_quality_history() -> *mut c_char  // JSON: {"rtt_sampl
 
 ---
 
+## 待实现：P2 原生能力缺口 C ABI
+
+> 详见 [../issues/native-layer-capability-gaps.md](../issues/native-layer-capability-gaps.md)
+
+| # | 符号 | 模块 | 状态 | 说明 |
+|---|------|------|:----:|------|
+| 26 | `catcher_http_execute_stream` | HTTP | 📐 | N-02 流式下载，逐 chunk 回调 |
+| 27 | `catcher_http_cancel_request` | HTTP | 📐 | N-03 单请求取消，`execute` 返回值改为 `u64` |
+| 28 | `catcher_quality_subscribe` | Quality | 📐 | N-04 质量变化推送订阅 |
+| 29 | `catcher_quality_unsubscribe` | Quality | 📐 | N-04 取消质量订阅 |
+| 30 | `catcher_multipart_create` | Multipart | 📐 | N-01 Multipart builder（P3 可选） |
+| 31 | `catcher_multipart_add_text` | Multipart | 📐 | N-01 |
+| 32 | `catcher_multipart_add_file` | Multipart | 📐 | N-01 |
+| 33 | `catcher_multipart_build` | Multipart | 📐 | N-01 |
+| 34 | `catcher_multipart_destroy` | Multipart | 📐 | N-01 |
+
+### `catcher_http_execute` 返回值变更
+
+```rust
+// 当前签名
+pub unsafe extern "C" fn catcher_http_execute(
+    handle: *mut c_void,
+    method: FfiString, url: FfiString,
+    body: *const u8, body_len: usize,
+    content_type: FfiString,
+    headers_json: *const c_char,
+    timeout_ms: u32,
+    callback: EventCallback,
+    user_data: *mut c_void,
+)
+// 返回值: void → 改为 u64 (request_id)
+// 0 表示参数错误/句柄无效
+```
+
+### `catcher_http_execute_stream` 签名
+
+```rust
+#[no_mangle]
+pub unsafe extern "C" fn catcher_http_execute_stream(
+    handle: *mut c_void,
+    method: FfiString,
+    url: FfiString,
+    body: *const u8,
+    body_len: usize,
+    content_type: FfiString,
+    headers_json: *const c_char,
+    timeout_ms: u32,
+    chunk_size_hint: u32,         // 0 = 默认 8192
+    callback: EventCallback,      // event_type: "headers" | "chunk" | "done" | "error"
+    user_data: *mut c_void,
+) -> u64  // request_id
+```
+
+### `catcher_quality_subscribe` 签名
+
+```rust
+#[no_mangle]
+pub unsafe extern "C" fn catcher_quality_subscribe(
+    host: FfiString,
+    interval_ms: u32,
+    callback: EventCallback,      // event_type = "quality_change"
+    user_data: *mut c_void,
+) -> *mut c_void  // subscription handle
+```
+
+---
+
 ## napi-rs 绑定层（Node.js）
 
 ```

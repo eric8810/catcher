@@ -126,3 +126,32 @@ pub unsafe extern "C" fn catcher_quality_history() -> *mut c_char {
 
     CString::new(json).unwrap_or_default().into_raw()
 }
+
+// N-04: Quality push subscription
+static SUBSCRIPTIONS: Mutex<Vec<usize>> = Mutex::new(Vec::new());
+
+#[no_mangle]
+pub unsafe extern "C" fn catcher_quality_subscribe(
+    host: FfiString,
+    interval_ms: u32,
+    callback: EventCallback,
+    user_data: *mut c_void,
+) -> *mut c_void {
+    let host_str = ffi_string_to_string(host, "https://www.example.com");
+    let ud = user_data as usize;
+    let sub = crate::observability::network_quality::QualitySubscription::start(
+        host_str, interval_ms as u64, callback, ud,
+    );
+    let boxed = Box::new(sub);
+    let ptr = Box::into_raw(boxed) as *mut c_void;
+    SUBSCRIPTIONS.lock().unwrap().push(ptr as usize);
+    ptr
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn catcher_quality_unsubscribe(sub_handle: *mut c_void) {
+    if sub_handle.is_null() { return; }
+    let sub: Box<crate::observability::network_quality::QualitySubscription> = Box::from_raw(sub_handle as *mut _);
+    sub.unsubscribe();
+    SUBSCRIPTIONS.lock().unwrap().retain(|&p| p != sub_handle as usize);
+}

@@ -1,6 +1,7 @@
 # 11 — 测试策略
 
 > 测试覆盖复核详见：[../issues/ffi-uniffi-capability-gaps.md](../issues/ffi-uniffi-capability-gaps.md) (测试覆盖复核章节)
+> 原生能力缺口测试设计：[../test/native-gap-test-design.md](../test/native-gap-test-design.md)
 
 ---
 
@@ -110,6 +111,8 @@ Rust 核心逻辑 ──── ✅ 105 个测试
 ### Rust 层测试分布
 
 **有测试的 17 个文件（~105 个测试）**：resilience (retry/CB/backoff/timeout)、transport (http/tls/dns)、sse (router/stream/client)、ws (codec/heartbeat/reconnect)、scheduler (priority_queue/concurrency)、observability (metrics/network_quality)
+
+**待新增（N-01~N-04 原生能力缺口）**：transport/http_client +12、observability/network_quality +8、multipart/builder +10、FFI 层 +27、Dart 层 +15 = **+72 用例**
 
 **零测试的 17 个文件**：所有 FFI 绑定层 (http_ffi/ws_ffi/quality_ffi/napi-http/napi-ws/uniffi) + WsTransport + multi_endpoint + compression + CatcherError
 

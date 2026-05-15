@@ -43,3 +43,5 @@
 | `@eric8810/catcher-web` | — (纯 TS, fetch-based) |
 
 > **SSE 模块**跨 TS 和 Rust 两侧实现。TS 侧基于 `fetch` + `ReadableStream`（`catcher-http` + `catcher-web`），Rust 侧基于 `reqwest` + `tokio_stream`（`catcher-http`），并通过 napi-rs / UniFFI / dart:ffi 桥接到各平台。详见 [`10-sse.md`](./10-sse.md)。
+
+> **原生层能力缺口**：部分 TS 侧已有能力（`responseType: stream`、per-request cancel via AbortController、FormData 上传）在 Rust 原生层尚未对等覆盖。详见 [`../../issues/native-layer-capability-gaps.md`](../../issues/native-layer-capability-gaps.md)。

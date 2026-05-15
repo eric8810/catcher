@@ -36,6 +36,12 @@ Layer 1: 单元测试 (packages/*/src/**)
          各包内部逻辑（拦截器、队列、编解码、SSE）
          SSE: router (24 tests), stream (23), strict (10), client (11)
          网络：无，纯逻辑测试
+
+Layer 0: Rust FFI 集成测试 (packages/catcher-ffi/tests/)
+         直接调用 C ABI 符号，验证 FFI 边界
+         覆盖：HTTP (7+10), SSE (3), codec+quality (4), quality push (6📐), multipart (8📐)
+         工具：wiremock mock HTTP server, tokio::test
+         详见：native-gap-test-design.md
 ```
 
 ---

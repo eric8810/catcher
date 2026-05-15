@@ -7,7 +7,7 @@
 //!   cargo test -p catcher-ffi --test http_test
 
 use std::ffi::{c_char, c_void, CStr, CString};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use catcher_core::ffi_types::FfiString;
 use catcher_http::ffi::http_ffi as http;
@@ -221,6 +221,226 @@ async fn h07_adaptive_timeout_config() {
     unsafe {
         http::catcher_http_adaptive_timeout_config(handle, 0, 0, 0, 0, 0);
     }
+
+    unsafe { http::catcher_http_client_destroy(handle); }
+}
+
+// ── N-03: Per-request cancel tests ──
+
+extern "C" fn capture_to_result(
+    _event_type: *const c_char,
+    event_data: *const u8,
+    event_data_len: usize,
+    user_data: *mut c_void,
+) {
+    let bytes = unsafe { std::slice::from_raw_parts(event_data, event_data_len) };
+    let json = String::from_utf8_lossy(bytes).to_string();
+    catcher_core::ffi_types::catcher_free_event_data(_event_type as *mut c_char, event_data as *mut u8);
+    let result: &Mutex<Option<String>> = unsafe { &*(user_data as *const Mutex<Option<String>>) };
+    *result.lock().unwrap() = Some(json);
+}
+
+
+fn make_result_cell() -> (Arc<Mutex<Option<String>>>, *mut c_void) {
+    let cell = Arc::new(Mutex::new(None::<String>));
+    let ptr = Arc::as_ptr(&cell) as *mut c_void;
+    (cell, ptr)
+}
+
+#[tokio::test]
+async fn h08_execute_with_id_returns_request_id() {
+    use wiremock::{MockServer, Mock, ResponseTemplate};
+    use wiremock::matchers::method;
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok": true})))
+        .mount(&server).await;
+
+    let config = serde_json::json!({"base_url": server.uri(), "connect_timeout_ms": 5000});
+    let c_config = CString::new(config.to_string()).unwrap();
+    let handle = unsafe { http::catcher_http_client_create(c_config.as_ptr()) };
+    assert!(!handle.is_null());
+
+    let (_cell, user_data) = make_result_cell();
+    let request_id = unsafe {
+        http::catcher_http_execute_with_id(
+            handle, ffi_string("GET"), ffi_string("/test"),
+            std::ptr::null(), 0, ffi_string(""),
+            std::ptr::null(), 0,
+            capture_to_result, user_data,
+        )
+    };
+    assert!(request_id > 0);
+
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    let result_ref: &Mutex<Option<String>> = unsafe { &*(user_data as *const Mutex<Option<String>>) };
+    let json = result_ref.lock().unwrap().clone().expect("callback should have been invoked");
+    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap_or_default();
+    assert_eq!(parsed["request_id"], request_id);
+
+    unsafe { http::catcher_http_client_destroy(handle); }
+}
+
+#[tokio::test]
+async fn h09_cancel_request_by_id() {
+    use wiremock::{MockServer, Mock, ResponseTemplate};
+    use wiremock::matchers::method;
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_delay(std::time::Duration::from_secs(30)))
+        .mount(&server).await;
+
+    let config = serde_json::json!({"base_url": server.uri(), "connect_timeout_ms": 2000, "response_timeout_ms": 5000});
+    let c_config = CString::new(config.to_string()).unwrap();
+    let handle = unsafe { http::catcher_http_client_create(c_config.as_ptr()) };
+    assert!(!handle.is_null());
+
+    let (_cell, user_data) = make_result_cell();
+    let request_id = unsafe {
+        http::catcher_http_execute_with_id(
+            handle, ffi_string("GET"), ffi_string("/test"),
+            std::ptr::null(), 0, ffi_string(""),
+            std::ptr::null(), 0,
+            capture_to_result, user_data,
+        )
+    };
+    assert!(request_id > 0);
+
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    assert_eq!(unsafe { http::catcher_http_cancel_request(handle, request_id) }, 0);
+
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    let result_ref: &Mutex<Option<String>> = unsafe { &*(user_data as *const Mutex<Option<String>>) };
+    let json = result_ref.lock().unwrap().clone().expect("callback should have been invoked");
+    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap_or_default();
+    assert!(parsed.get("error").is_some(), "expected error, got: {json}");
+
+    unsafe { http::catcher_http_client_destroy(handle); }
+}
+
+#[tokio::test]
+async fn h10_cancel_request_nonexistent() {
+    let config = r#"{"base_url":"https://httpbin.org","connect_timeout_ms":5000}"#;
+    let c_config = CString::new(config).unwrap();
+    let handle = unsafe { http::catcher_http_client_create(c_config.as_ptr()) };
+    assert!(!handle.is_null());
+    assert_eq!(unsafe { http::catcher_http_cancel_request(handle, 99999) }, -1);
+    unsafe { http::catcher_http_client_destroy(handle); }
+}
+
+#[tokio::test]
+async fn h11_cancel_all_with_per_request() {
+    use wiremock::{MockServer, Mock, ResponseTemplate};
+    use wiremock::matchers::method;
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_delay(std::time::Duration::from_secs(5)))
+        .mount(&server).await;
+
+    let config = serde_json::json!({"base_url": server.uri(), "connect_timeout_ms": 10000, "response_timeout_ms": 10000});
+    let c_config = CString::new(config.to_string()).unwrap();
+    let handle = unsafe { http::catcher_http_client_create(c_config.as_ptr()) };
+    assert!(!handle.is_null());
+
+    let (_c1, ud1) = make_result_cell();
+    let id1 = unsafe {
+        http::catcher_http_execute_with_id(
+            handle, ffi_string("GET"), ffi_string("/test"),
+            std::ptr::null(), 0, ffi_string(""), std::ptr::null(), 0,
+            capture_to_result, ud1,
+        )
+    };
+    assert!(id1 > 0);
+
+    unsafe { http::catcher_http_client_cancel_all(handle); }
+
+    let (_c2, ud2) = make_result_cell();
+    let new_id = unsafe {
+        http::catcher_http_execute_with_id(
+            handle, ffi_string("GET"), ffi_string("/test"),
+            std::ptr::null(), 0, ffi_string(""), std::ptr::null(), 0,
+            capture_to_result, ud2,
+        )
+    };
+    assert!(new_id > 0);
+    assert_ne!(new_id, id1);
+
+    unsafe { http::catcher_http_client_destroy(handle); }
+}
+
+#[tokio::test]
+async fn h12_cancel_request_null_handle() {
+    assert_eq!(unsafe { http::catcher_http_cancel_request(std::ptr::null_mut(), 1) }, -1);
+}
+
+// N-02: Streaming download tests
+
+#[tokio::test]
+async fn h13_execute_stream_headers_and_chunks() {
+    use wiremock::{MockServer, Mock, ResponseTemplate};
+    use wiremock::matchers::method;
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("hello world"))
+        .mount(&server).await;
+
+    let config = serde_json::json!({"base_url": server.uri(), "connect_timeout_ms": 5000});
+    let c_config = CString::new(config.to_string()).unwrap();
+    let handle = unsafe { http::catcher_http_client_create(c_config.as_ptr()) };
+    assert!(!handle.is_null());
+
+    let (_cell, user_data) = make_result_cell();
+    let rid = unsafe {
+        http::catcher_http_execute_stream(
+            handle, ffi_string("GET"), ffi_string("/test"),
+            std::ptr::null(), 0, ffi_string(""),
+            std::ptr::null(), 0,
+            capture_to_result, user_data,
+        )
+    };
+    assert!(rid > 0);
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    let result_ref: &Mutex<Option<String>> = unsafe { &*(user_data as *const Mutex<Option<String>>) };
+    let json = result_ref.lock().unwrap().clone().expect("callback should have been invoked");
+    assert!(json.contains(&format!("{rid}")), "expected request_id in callback, got: {json}");
+
+    unsafe { http::catcher_http_client_destroy(handle); }
+}
+
+#[tokio::test]
+async fn h14_execute_stream_returns_request_id() {
+    use wiremock::{MockServer, Mock, ResponseTemplate};
+    use wiremock::matchers::method;
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
+        .mount(&server).await;
+
+    let config = serde_json::json!({"base_url": server.uri(), "connect_timeout_ms": 5000});
+    let c_config = CString::new(config.to_string()).unwrap();
+    let handle = unsafe { http::catcher_http_client_create(c_config.as_ptr()) };
+    assert!(!handle.is_null());
+
+    let (_cell, user_data) = make_result_cell();
+    let rid = unsafe {
+        http::catcher_http_execute_stream(
+            handle, ffi_string("GET"), ffi_string("/test"),
+            std::ptr::null(), 0, ffi_string(""),
+            std::ptr::null(), 0,
+            capture_to_result, user_data,
+        )
+    };
+    assert!(rid > 0);
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    // request_id should appear in the callback data
+    let result_ref: &Mutex<Option<String>> = unsafe { &*(user_data as *const Mutex<Option<String>>) };
+    let json = result_ref.lock().unwrap().clone().expect("callback should have been invoked");
+    assert!(json.contains(&format!("{rid}")));
 
     unsafe { http::catcher_http_client_destroy(handle); }
 }
