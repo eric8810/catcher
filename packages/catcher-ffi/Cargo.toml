@@ -1,17 +1,25 @@
 [package]
 name = "catcher-ffi"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 description = "Unified C ABI library for catcher — links HTTP + WS + codec into a single .so/.dylib"
 license = "MIT"
 repository = "https://github.com/eric8810/catcher"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "lib"]
 name = "catcher_ffi"
 
 [dependencies]
-catcher-core = { path = "../catcher-core", version = "0.2.1" }
-catcher-http = { path = "../catcher-http", version = "0.2.1" }
-catcher-ws = { path = "../catcher-ws", version = "0.2.1" }
+catcher-core = { path = "../catcher-core", version = "0.2.2" }
+catcher-http = { path = "../catcher-http", version = "0.2.2" }
+catcher-ws = { path = "../catcher-ws", version = "0.2.2" }
 serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+
+[dev-dependencies]
+catcher-core = { path = "../catcher-core", version = "0.2.2" }
+catcher-http = { path = "../catcher-http", version = "0.2.2" }
+catcher-ws = { path = "../catcher-ws", version = "0.2.2" }
+wiremock = "0.6"
+tokio-test = "0.4"

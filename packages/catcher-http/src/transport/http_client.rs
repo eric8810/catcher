@@ -2,23 +2,31 @@ use reqwest::Client;
 use reqwest_middleware::{ClientBuilder as MiddlewareBuilder, ClientWithMiddleware};
 use reqwest_retry::RetryTransientMiddleware;
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use catcher_core::CatcherError;
 use crate::resilience::backoff::build_retry_policy;
 use crate::resilience::circuit_breaker::CircuitBreaker;
+use crate::resilience::timeout::AdaptiveTimeout;
 use crate::transport::dns::build_dns_resolver;
 use crate::transport::tls::build_tls_config;
 use crate::types::http::*;
+use crate::observability::metrics::{MetricsCollector, MetricsSnapshot};
 use catcher_core::types::resilience::CbState;
 
-/// HTTP 传输层 — 真实收发 HTTP 请求，带重试中间件 + 熔断器
+/// HTTP 传输层 — 真实收发 HTTP 请求，带重试中间件 + 熔断器 + 取消 + 自适应超时
 ///
 /// Phase 3: 使用 reqwest-middleware + RetryTransientMiddleware + CircuitBreaker
+/// Phase 4: 增加 tokio CancellationToken 支持请求取消 + MetricsCollector
+/// Phase 5: 增加 AdaptiveTimeout 基于滑动窗口 P90 RTT 自适应超时
 pub struct HttpTransport {
     client: ClientWithMiddleware,
     config: HttpClientConfig,
     circuit_breaker: Option<CircuitBreaker>,
+    cancel_token: Arc<Mutex<tokio_util::sync::CancellationToken>>,
+    metrics: MetricsCollector,
+    adaptive_timeout: Mutex<Option<AdaptiveTimeout>>,
 }
 
 impl HttpTransport {
@@ -109,24 +117,60 @@ impl HttpTransport {
             client: client_builder.build(),
             config,
             circuit_breaker,
+            cancel_token: Arc::new(Mutex::new(tokio_util::sync::CancellationToken::new())),
+            metrics: MetricsCollector::new(),
+            adaptive_timeout: Mutex::new(None),
         })
     }
 
-    /// 发起 HTTP 请求（带熔断器检查）
-    pub async fn execute(&self, request: HttpRequest) -> Result<HttpResponse, CatcherError> {
+    /// 发起 HTTP 请求（带熔断器检查 + cancel 支持 + metrics 记录 + 自适应超时）
+    pub async fn execute(&self, mut request: HttpRequest) -> Result<HttpResponse, CatcherError> {
+        let start = Instant::now();
+
         if let Some(ref cb) = self.circuit_breaker {
             cb.before_request()?;
         }
 
-        let result = self.do_execute(request).await;
+        // Apply adaptive timeout if enabled and no per-request override
+        if request.timeout_ms.is_none() {
+            if let Some(ref at) = *self.adaptive_timeout.lock().unwrap() {
+                request.timeout_ms = Some(at.timeout_ms());
+            }
+        }
+
+        let cancel = {
+            let token = self.cancel_token.lock().unwrap();
+            token.clone()
+        };
+
+        let result = tokio::select! {
+            r = self.do_execute(request) => r,
+            _ = cancel.cancelled() => {
+                let elapsed_us = start.elapsed().as_micros() as u64;
+                self.metrics.record_http_request(false, elapsed_us, false);
+                return Err(CatcherError::Internal("request cancelled".into()));
+            }
+        };
+
+        let elapsed_us = start.elapsed().as_micros() as u64;
+
+        // Record RTT into adaptive timeout
+        if let Ok(ref resp) = &result {
+            let rtt_ms = resp.elapsed_ms;
+            if let Some(ref mut at) = *self.adaptive_timeout.lock().unwrap() {
+                at.record(rtt_ms);
+            }
+        }
 
         match &result {
             Ok(_) => {
+                self.metrics.record_http_request(true, elapsed_us, false);
                 if let Some(ref cb) = self.circuit_breaker {
                     cb.on_success();
                 }
             }
             Err(_) => {
+                self.metrics.record_http_request(false, elapsed_us, false);
                 if let Some(ref cb) = self.circuit_breaker {
                     cb.on_failure();
                 }
@@ -134,6 +178,14 @@ impl HttpTransport {
         }
 
         result
+    }
+
+    /// 取消所有飞行中的请求。新请求不受影响。
+    pub fn cancel_all(&self) {
+        let mut token = self.cancel_token.lock().unwrap();
+        token.cancel();
+        // Replace with a fresh token so new requests can proceed
+        *token = tokio_util::sync::CancellationToken::new();
     }
 
     async fn do_execute(&self, request: HttpRequest) -> Result<HttpResponse, CatcherError> {
@@ -244,6 +296,31 @@ impl HttpTransport {
     /// 返回熔断器状态（用于 metrics）
     pub fn circuit_breaker_state(&self) -> Option<CbState> {
         self.circuit_breaker.as_ref().map(|cb| cb.state())
+    }
+
+    /// 返回运行时指标快照
+    pub fn metrics(&self) -> MetricsSnapshot {
+        self.metrics.snapshot()
+    }
+
+    /// 启用/配置自适应超时。
+    /// `min_timeout_ms` / `max_timeout_ms` 限幅，`multiplier` 作用于 P90 RTT
+    /// （timeout = clamp(P90_RTT * multiplier, min, max)）。
+    /// 传 `None` 禁用自适应超时。
+    pub fn set_adaptive_timeout(
+        &self,
+        min_timeout_ms: u64,
+        max_timeout_ms: u64,
+        multiplier: f64,
+        window_size: usize,
+    ) {
+        let mut at = self.adaptive_timeout.lock().unwrap();
+        *at = Some(AdaptiveTimeout::new(min_timeout_ms, max_timeout_ms, multiplier, window_size));
+    }
+
+    pub fn disable_adaptive_timeout(&self) {
+        let mut at = self.adaptive_timeout.lock().unwrap();
+        *at = None;
     }
 }
 

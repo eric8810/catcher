@@ -66,27 +66,33 @@ typedef CatcherHttpClientDestroyDart = void Function(
 // HTTP request — async callback-based (matches Rust http_ffi.rs)
 // ═══════════════════════════════════════════════════════════════
 
-/// catcher_http_get(handle, url: FfiString, callback, user_data)
+/// catcher_http_get(handle, url: FfiString, headers_json, timeout_ms, callback, user_data)
 typedef CatcherHttpGetNative = Void Function(
   Pointer<Void> handle,
   FfiStringNative url,
+  Pointer<Char> headersJson,
+  Uint32 timeoutMs,
   Pointer<NativeFunction<EventCallbackNative>> callback,
   Pointer<Void> userData,
 );
 typedef CatcherHttpGetDart = void Function(
   Pointer<Void> handle,
   FfiStringNative url,
+  Pointer<Char> headersJson,
+  int timeoutMs,
   Pointer<NativeFunction<EventCallbackNative>> callback,
   Pointer<Void> userData,
 );
 
-/// catcher_http_post(handle, url: FfiString, body, body_len, content_type: FfiString, callback, user_data)
+/// catcher_http_post(handle, url: FfiString, body, body_len, content_type: FfiString, headers_json, timeout_ms, callback, user_data)
 typedef CatcherHttpPostNative = Void Function(
   Pointer<Void> handle,
   FfiStringNative url,
   Pointer<Uint8> body,
   Size bodyLen,
   FfiStringNative contentType,
+  Pointer<Char> headersJson,
+  Uint32 timeoutMs,
   Pointer<NativeFunction<EventCallbackNative>> callback,
   Pointer<Void> userData,
 );
@@ -96,6 +102,8 @@ typedef CatcherHttpPostDart = void Function(
   Pointer<Uint8> body,
   int bodyLen,
   FfiStringNative contentType,
+  Pointer<Char> headersJson,
+  int timeoutMs,
   Pointer<NativeFunction<EventCallbackNative>> callback,
   Pointer<Void> userData,
 );
@@ -104,7 +112,7 @@ typedef CatcherHttpPostDart = void Function(
 // Generic HTTP execute — method as FfiString (supports GET/POST/PUT/DELETE/PATCH)
 // ═══════════════════════════════════════════════════════════════
 
-/// catcher_http_execute(handle, method: FfiString, url: FfiString, body, body_len, content_type: FfiString, callback, user_data)
+/// catcher_http_execute(handle, method: FfiString, url: FfiString, body, body_len, content_type: FfiString, headers_json, timeout_ms, callback, user_data)
 typedef CatcherHttpExecuteNative = Void Function(
   Pointer<Void> handle,
   FfiStringNative method,
@@ -112,6 +120,8 @@ typedef CatcherHttpExecuteNative = Void Function(
   Pointer<Uint8> body,
   Size bodyLen,
   FfiStringNative contentType,
+  Pointer<Char> headersJson,
+  Uint32 timeoutMs,
   Pointer<NativeFunction<EventCallbackNative>> callback,
   Pointer<Void> userData,
 );
@@ -122,6 +132,8 @@ typedef CatcherHttpExecuteDart = void Function(
   Pointer<Uint8> body,
   int bodyLen,
   FfiStringNative contentType,
+  Pointer<Char> headersJson,
+  int timeoutMs,
   Pointer<NativeFunction<EventCallbackNative>> callback,
   Pointer<Void> userData,
 );
@@ -235,3 +247,103 @@ typedef CatcherEvaluateQualityDart = void Function(
   Pointer<NativeFunction<EventCallbackNative>> callback,
   Pointer<Void> userData,
 );
+
+/// catcher_quality_history() → *mut c_char (JSON, caller frees via catcher_free_data)
+typedef CatcherQualityHistoryNative = Pointer<Char> Function();
+typedef CatcherQualityHistoryDart = Pointer<Char> Function();
+
+// ═══════════════════════════════════════════════════════════════════
+// HTTP runtime control — cancel / circuit breaker state / metrics
+// ═══════════════════════════════════════════════════════════════════
+
+/// catcher_http_client_cancel_all(handle)
+typedef CatcherHttpClientCancelAllNative = Void Function(Pointer<Void> handle);
+typedef CatcherHttpClientCancelAllDart = void Function(Pointer<Void> handle);
+
+/// catcher_http_circuit_breaker_state(handle) → *mut c_char (JSON, caller frees via catcher_free_data)
+typedef CatcherHttpCircuitBreakerStateNative = Pointer<Char> Function(
+  Pointer<Void> handle,
+);
+typedef CatcherHttpCircuitBreakerStateDart = Pointer<Char> Function(
+  Pointer<Void> handle,
+);
+
+/// catcher_http_metrics(handle) → *mut c_char (JSON, caller frees via catcher_free_data)
+typedef CatcherHttpMetricsNative = Pointer<Char> Function(
+  Pointer<Void> handle,
+);
+typedef CatcherHttpMetricsDart = Pointer<Char> Function(
+  Pointer<Void> handle,
+);
+
+/// catcher_http_adaptive_timeout_config(handle, enabled, min_ms, max_ms, multiplier*1000, window_size)
+typedef CatcherHttpAdaptiveTimeoutConfigNative = Void Function(
+  Pointer<Void> handle,
+  Int32 enabled,
+  Uint32 minTimeoutMs,
+  Uint32 maxTimeoutMs,
+  Uint32 multiplierScaled,
+  Uint32 windowSize,
+);
+typedef CatcherHttpAdaptiveTimeoutConfigDart = void Function(
+  Pointer<Void> handle,
+  int enabled,
+  int minTimeoutMs,
+  int maxTimeoutMs,
+  int multiplierScaled,
+  int windowSize,
+);
+
+// ═══════════════════════════════════════════════════════════════════
+// SSE — persistent client + one-shot stream
+// ═══════════════════════════════════════════════════════════════════
+
+/// catcher_sse_connect(config_json, event_callback, user_data) → handle
+typedef CatcherSseConnectNative = Pointer<Void> Function(
+  Pointer<Char> configJson,
+  Pointer<NativeFunction<EventCallbackNative>> callback,
+  Pointer<Void> userData,
+);
+typedef CatcherSseConnectDart = Pointer<Void> Function(
+  Pointer<Char> configJson,
+  Pointer<NativeFunction<EventCallbackNative>> callback,
+  Pointer<Void> userData,
+);
+
+/// catcher_sse_stream(handle, method: FfiString, url: FfiString, body, body_len, headers_json, callback, user_data)
+typedef CatcherSseStreamNative = Void Function(
+  Pointer<Void> handle,
+  FfiStringNative method,
+  FfiStringNative url,
+  Pointer<Uint8> body,
+  Size bodyLen,
+  Pointer<Char> headersJson,
+  Pointer<NativeFunction<EventCallbackNative>> callback,
+  Pointer<Void> userData,
+);
+typedef CatcherSseStreamDart = void Function(
+  Pointer<Void> handle,
+  FfiStringNative method,
+  FfiStringNative url,
+  Pointer<Uint8> body,
+  int bodyLen,
+  Pointer<Char> headersJson,
+  Pointer<NativeFunction<EventCallbackNative>> callback,
+  Pointer<Void> userData,
+);
+
+/// catcher_sse_ready_state(sse_handle) → i32 (0=Connecting, 1=Open, 2=Closed, -1=Invalid)
+typedef CatcherSseReadyStateNative = Int32 Function(Pointer<Void> handle);
+typedef CatcherSseReadyStateDart = int Function(Pointer<Void> handle);
+
+/// catcher_sse_last_event_id(sse_handle) → *mut c_char (caller frees via catcher_free_data)
+typedef CatcherSseLastEventIdNative = Pointer<Char> Function(Pointer<Void> handle);
+typedef CatcherSseLastEventIdDart = Pointer<Char> Function(Pointer<Void> handle);
+
+/// catcher_sse_close(sse_handle)
+typedef CatcherSseCloseNative = Void Function(Pointer<Void> handle);
+typedef CatcherSseCloseDart = void Function(Pointer<Void> handle);
+
+/// catcher_sse_destroy(sse_handle)
+typedef CatcherSseDestroyNative = Void Function(Pointer<Void> handle);
+typedef CatcherSseDestroyDart = void Function(Pointer<Void> handle);

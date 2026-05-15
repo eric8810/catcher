@@ -303,7 +303,7 @@ dependencies = [
 
 [[package]]
 name = "catcher-core"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -312,17 +312,20 @@ dependencies = [
 
 [[package]]
 name = "catcher-ffi"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "catcher-core",
  "catcher-http",
  "catcher-ws",
  "serde_json",
+ "tokio",
+ "tokio-test",
+ "wiremock",
 ]
 
 [[package]]
 name = "catcher-http"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "backon",
  "bytes",
@@ -340,12 +343,13 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-test",
+ "tokio-util",
  "wiremock",
 ]
 
 [[package]]
 name = "catcher-napi-http"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "catcher-core",
  "catcher-http",
@@ -358,7 +362,7 @@ dependencies = [
 
 [[package]]
 name = "catcher-napi-ws"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "catcher-ws",
  "napi",
@@ -370,19 +374,21 @@ dependencies = [
 
 [[package]]
 name = "catcher-uniffi"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
+ "catcher-core",
  "catcher-http",
  "catcher-ws",
  "serde_json",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-stream",
  "uniffi",
 ]
 
 [[package]]
 name = "catcher-ws"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "backon",
  "catcher-core",

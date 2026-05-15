@@ -338,6 +338,9 @@ class WsClientConfig {
   final WsReconnectConfig? reconnect;
   final WsHeartbeatConfig? heartbeat;
   final int raceCount;
+  final Map<String, String> headers;
+  final List<String> protocols;
+  final int deflateThresholdBytes;
 
   const WsClientConfig({
     required this.urls,
@@ -347,6 +350,9 @@ class WsClientConfig {
     this.reconnect,
     this.heartbeat,
     this.raceCount = 1,
+    this.headers = const {},
+    this.protocols = const [],
+    this.deflateThresholdBytes = 256,
   });
 
   Map<String, dynamic> toJson() => {
@@ -357,6 +363,9 @@ class WsClientConfig {
         if (reconnect != null) 'reconnect': reconnect!.toJson(),
         if (heartbeat != null) 'heartbeat': heartbeat!.toJson(),
         'race_count': raceCount,
+        'headers': headers,
+        'protocols': protocols,
+        'deflate_threshold_bytes': deflateThresholdBytes,
       };
 }
 

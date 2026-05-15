@@ -8,8 +8,11 @@
 //! does not strip them.
 
 // Force-link all FFI modules from dependencies
+#[allow(unused_imports)]
 use catcher_core::ffi_types as _core_ffi;
+#[allow(unused_imports)]
 use catcher_http::ffi as _http_ffi;
+#[allow(unused_imports)]
 use catcher_ws::ffi as _ws_ffi;
 
 // ═══════════════════════════════════════════════════════════════

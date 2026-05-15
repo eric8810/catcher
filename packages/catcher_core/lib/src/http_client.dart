@@ -7,6 +7,7 @@ import 'package:ffi/ffi.dart';
 
 import 'ffi_bindings.dart';
 import 'native_loader.dart';
+import 'sse_client.dart';
 
 /// Dart wrapper around the Rust catcher HTTP client via C ABI.
 ///
@@ -16,8 +17,11 @@ import 'native_loader.dart';
 ///   baseUrl: 'https://api.example.com',
 ///   retry: RetryConfig(maxAttempts: 3),
 /// ));
-/// final resp = await client.get('/channels');
+/// final resp = await client.get('/channels',
+///   headers: {'Authorization': 'Bearer xxx'},
+/// );
 /// print('Status: ${resp.status}, Body: ${resp.bodyAsString}');
+/// print('CB state: ${client.circuitBreakerState}');
 /// client.dispose();
 /// ```
 class CatcherHttpClient {
@@ -27,6 +31,11 @@ class CatcherHttpClient {
   late final CatcherHttpClientDestroyDart _destroy;
   late final CatcherHttpExecuteDart _executeFn;
   late final CatcherFreeEventDataDart _freeEventDataFn;
+  late final CatcherFreeDataDart _freeDataFn;
+  CatcherHttpClientCancelAllDart? _cancelAllFn;
+  CatcherHttpCircuitBreakerStateDart? _circuitBreakerStateFn;
+  CatcherHttpMetricsDart? _metricsFn;
+  CatcherHttpAdaptiveTimeoutConfigDart? _adaptiveTimeoutFn;
 
   CatcherHttpClient(HttpClientConfig config) {
     _lib = loadCatcherLibrary();
@@ -45,6 +54,42 @@ class CatcherHttpClient {
     _freeEventDataFn = _lib.lookupFunction<CatcherFreeEventDataNative,
         CatcherFreeEventDataDart>('catcher_free_event_data');
 
+    _freeDataFn = _lib.lookupFunction<CatcherFreeDataNative,
+        CatcherFreeDataDart>('catcher_free_data');
+
+    // Optional symbols — may not exist if Rust was compiled without these
+    try {
+      _cancelAllFn = _lib.lookupFunction<CatcherHttpClientCancelAllNative,
+          CatcherHttpClientCancelAllDart>('catcher_http_client_cancel_all');
+    } catch (_) {
+      _cancelAllFn = null;
+    }
+
+    try {
+      _circuitBreakerStateFn =
+          _lib.lookupFunction<CatcherHttpCircuitBreakerStateNative,
+              CatcherHttpCircuitBreakerStateDart>(
+                  'catcher_http_circuit_breaker_state');
+    } catch (_) {
+      _circuitBreakerStateFn = null;
+    }
+
+    try {
+      _metricsFn = _lib.lookupFunction<CatcherHttpMetricsNative,
+          CatcherHttpMetricsDart>('catcher_http_metrics');
+    } catch (_) {
+      _metricsFn = null;
+    }
+
+    try {
+      _adaptiveTimeoutFn = _lib.lookupFunction<
+          CatcherHttpAdaptiveTimeoutConfigNative,
+          CatcherHttpAdaptiveTimeoutConfigDart>(
+              'catcher_http_adaptive_timeout_config');
+    } catch (_) {
+      _adaptiveTimeoutFn = null;
+    }
+
     final configJson = jsonEncode(config.toJson()).toNativeUtf8();
     _handle = _create(configJson.cast<Char>());
     malloc.free(configJson);
@@ -55,34 +100,248 @@ class CatcherHttpClient {
   }
 
   /// GET request
-  Future<HttpResponse> get(String path) async {
-    return _execute('GET', path, null, null);
+  Future<HttpResponse> get(String path,
+      {Map<String, String>? headers, int? timeoutMs}) async {
+    return _execute('GET', path, null, null, headers: headers, timeoutMs: timeoutMs);
   }
 
   /// POST request
   Future<HttpResponse> post(String path,
-      {Map<String, dynamic>? body, String contentType = 'application/json'}) async {
+      {Map<String, dynamic>? body,
+      String contentType = 'application/json',
+      Map<String, String>? headers,
+      int? timeoutMs}) async {
     final bodyBytes = body != null ? utf8.encode(jsonEncode(body)) : null;
-    return _execute('POST', path, bodyBytes, contentType);
+    return _execute('POST', path, bodyBytes, contentType,
+        headers: headers, timeoutMs: timeoutMs);
   }
 
   /// PUT request
   Future<HttpResponse> put(String path,
-      {Map<String, dynamic>? body, String contentType = 'application/json'}) async {
+      {Map<String, dynamic>? body,
+      String contentType = 'application/json',
+      Map<String, String>? headers,
+      int? timeoutMs}) async {
     final bodyBytes = body != null ? utf8.encode(jsonEncode(body)) : null;
-    return _execute('PUT', path, bodyBytes, contentType);
+    return _execute('PUT', path, bodyBytes, contentType,
+        headers: headers, timeoutMs: timeoutMs);
   }
 
   /// DELETE request
-  Future<HttpResponse> delete(String path) async {
-    return _execute('DELETE', path, null, null);
+  Future<HttpResponse> delete(String path,
+      {Map<String, String>? headers, int? timeoutMs}) async {
+    return _execute('DELETE', path, null, null, headers: headers, timeoutMs: timeoutMs);
   }
 
   /// PATCH request
   Future<HttpResponse> patch(String path,
-      {Map<String, dynamic>? body, String contentType = 'application/json'}) async {
+      {Map<String, dynamic>? body,
+      String contentType = 'application/json',
+      Map<String, String>? headers,
+      int? timeoutMs}) async {
     final bodyBytes = body != null ? utf8.encode(jsonEncode(body)) : null;
-    return _execute('PATCH', path, bodyBytes, contentType);
+    return _execute('PATCH', path, bodyBytes, contentType,
+        headers: headers, timeoutMs: timeoutMs);
+  }
+
+  /// Cancel all in-flight requests on this client (page-exit scenario).
+  void cancelAll() {
+    final fn = _cancelAllFn;
+    if (fn != null && _handle != null && _handle != nullptr) {
+      fn(_handle!);
+    }
+  }
+
+  /// Query the circuit breaker state.
+  /// Returns a JSON string like `{"state":"closed","failure_count":0,...}`.
+  /// Returns `{"state":"disabled"}` if no circuit breaker is configured.
+  String? get circuitBreakerState {
+    final fn = _circuitBreakerStateFn;
+    if (fn == null || _handle == null || _handle == nullptr) return null;
+    final ptr = fn(_handle!);
+    if (ptr == nullptr) return null;
+    final result = ptr.cast<Utf8>().toDartString();
+    _freeDataFn(ptr.cast(), result.length + 1);
+    return result;
+  }
+
+  /// Query runtime metrics.
+  /// Returns a JSON string with http_requests, http_success_rate,
+  /// http_avg_latency_us, etc.
+  String? get metrics {
+    final fn = _metricsFn;
+    if (fn == null || _handle == null || _handle == nullptr) return null;
+    final ptr = fn(_handle!);
+    if (ptr == nullptr) return null;
+    final result = ptr.cast<Utf8>().toDartString();
+    _freeDataFn(ptr.cast(), result.length + 1);
+    return result;
+  }
+
+  /// Configure adaptive timeout based on P90 RTT sliding window.
+  /// [enabled] enables/disables; [minTimeoutMs]/[maxTimeoutMs] clamp;
+  /// [multiplier] scales P90 RTT (e.g. 2.5 → timeout = P90_RTT * 2.5).
+  void setAdaptiveTimeout({
+    required bool enabled,
+    int minTimeoutMs = 100,
+    int maxTimeoutMs = 30000,
+    double multiplier = 2.5,
+    int windowSize = 20,
+  }) {
+    final fn = _adaptiveTimeoutFn;
+    if (fn == null || _handle == null || _handle == nullptr) return;
+    fn(
+      _handle!,
+      enabled ? 1 : 0,
+      minTimeoutMs,
+      maxTimeoutMs,
+      (multiplier * 1000).round(),
+      windowSize,
+    );
+  }
+
+  /// One-shot SSE stream request (e.g. POST SSE for AI streaming APIs).
+  ///
+  /// Returns a stream of [SseEvent]s that completes when the server closes
+  /// the connection or an error occurs. Does NOT auto-reconnect.
+  ///
+  /// ```dart
+  /// final events = await client.sseStream(
+  ///   method: 'POST',
+  ///   url: '/v1/chat/completions',
+  ///   body: jsonEncode({'model': 'gpt-4', 'stream': true}),
+  ///   headers: {'Authorization': 'Bearer sk-xxx'},
+  /// );
+  /// for (final event in events) {
+  ///   if (event is SseDataEvent) print(event.data);
+  /// }
+  /// ```
+  Future<List<SseEvent>> sseStream({
+    required String method,
+    required String url,
+    String? body,
+    Map<String, String>? headers,
+  }) async {
+    _ensureHandle();
+
+    final streamFn = _lib.lookupFunction<CatcherSseStreamNative,
+        CatcherSseStreamDart>('catcher_sse_stream');
+
+    final receivePort = ReceivePort();
+    final completer = Completer<List<SseEvent>>();
+    final events = <SseEvent>[];
+    bool cleanedUp = false;
+
+    final nativeCallback =
+        NativeCallable<EventCallbackNative>.listener(
+      (Pointer<Char> eventType, Pointer<Uint8> eventData, int eventDataLen,
+          Pointer<Void> userData) {
+        final jsonBytes = eventData.asTypedList(eventDataLen);
+        final jsonStr = utf8.decode(jsonBytes, allowMalformed: true);
+
+        _freeEventDataFn(eventType, eventData);
+
+        final Map<String, dynamic> parsed;
+        try {
+          parsed = jsonDecode(jsonStr) as Map<String, dynamic>;
+        } catch (_) {
+          events.add(SseErrorEvent(jsonStr));
+          receivePort.sendPort.send(null);
+          return;
+        }
+
+        final type = parsed['type'] as String? ?? '';
+        switch (type) {
+          case 'open':
+            events.add(SseOpenEvent());
+            break;
+          case 'data':
+            events.add(SseDataEvent.fromJson(parsed));
+            break;
+          case 'error':
+            events.add(SseErrorEvent.fromJson(parsed));
+            break;
+          case 'close':
+            events.add(SseCloseEvent());
+            break;
+        }
+        receivePort.sendPort.send(null);
+      },
+    );
+
+    late StreamSubscription sub;
+    sub = receivePort.listen((_) {
+      final hasClose = events.any((e) => e is SseCloseEvent);
+      final hasError = events.any((e) => e is SseErrorEvent);
+
+      if ((hasClose || hasError) && !completer.isCompleted) {
+        cleanedUp = true;
+        sub.cancel();
+        nativeCallback.close();
+        receivePort.close();
+        completer.complete(events);
+      }
+    });
+
+    final methodFfi = _allocFfiString(method);
+    final urlFfi = _allocFfiString(url);
+    final headersJson = (headers != null && headers.isNotEmpty)
+        ? jsonEncode(headers).toNativeUtf8()
+        : nullptr.cast<Char>();
+
+    final bodyPtr = (body != null)
+        ? malloc<Uint8>(body.length)
+        : Pointer<Uint8>.fromAddress(0);
+    if (body != null) {
+      final bodyBytes = utf8.encode(body);
+      for (var i = 0; i < bodyBytes.length; i++) {
+        bodyPtr[i] = bodyBytes[i];
+      }
+    }
+
+    try {
+      final bodyBytes = body != null ? utf8.encode(body) : null;
+      streamFn(
+        _handle!,
+        methodFfi.ref,
+        urlFfi.ref,
+        bodyPtr,
+        bodyBytes?.length ?? 0,
+        headersJson,
+        nativeCallback.nativeFunction,
+        nullptr,
+      );
+    } catch (e) {
+      if (!cleanedUp) {
+        cleanedUp = true;
+        sub.cancel();
+        nativeCallback.close();
+        receivePort.close();
+      }
+      _freeFfiString(methodFfi);
+      _freeFfiString(urlFfi);
+      if (headersJson != nullptr) malloc.free(headersJson);
+      if (body != null) malloc.free(bodyPtr);
+      rethrow;
+    }
+
+    _freeFfiString(methodFfi);
+    _freeFfiString(urlFfi);
+    if (headersJson != nullptr) malloc.free(headersJson);
+    if (body != null) malloc.free(bodyPtr);
+
+    return completer.future.timeout(
+      const Duration(seconds: 60),
+      onTimeout: () {
+        if (!cleanedUp) {
+          cleanedUp = true;
+          sub.cancel();
+          nativeCallback.close();
+          receivePort.close();
+        }
+        return events;
+      },
+    );
   }
 
   /// Release native resources
@@ -101,7 +360,7 @@ class CatcherHttpClient {
     }
   }
 
-  /// Build a FfiStringNative on the heap. Caller must call [freeFfiString] when done.
+  /// Build a FfiStringNative on the heap. Caller must call [_freeFfiString] when done.
   Pointer<FfiStringNative> _allocFfiString(String dartString) {
     final encoded = utf8.encode(dartString);
     final native = malloc<Uint8>(encoded.length);
@@ -122,13 +381,15 @@ class CatcherHttpClient {
   /// Execute an HTTP request via Rust FFI with async callback bridging.
   ///
   /// Uses the generic `catcher_http_execute` Rust function which accepts
-  /// the HTTP method as a parameter, supporting GET/POST/PUT/DELETE/PATCH.
+  /// the HTTP method, per-request headers, and per-request timeout.
   Future<HttpResponse> _execute(
     String method,
     String path,
     List<int>? body,
-    String? contentType,
-  ) async {
+    String? contentType, {
+    Map<String, String>? headers,
+    int? timeoutMs,
+  }) async {
     _ensureHandle();
     final receivePort = ReceivePort();
     final completer = Completer<HttpResponse>();
@@ -137,11 +398,9 @@ class CatcherHttpClient {
     final nativeCallback = NativeCallable<EventCallbackNative>.listener(
       (Pointer<Char> eventType, Pointer<Uint8> eventData, int eventDataLen,
           Pointer<Void> userData) {
-        // Copy data immediately — pointers will be freed below
         final jsonBytes = eventData.asTypedList(eventDataLen);
         final jsonStr = utf8.decode(jsonBytes, allowMalformed: true);
 
-        // Free the CStrings that Rust leaked via CString::into_raw()
         _freeEventDataFn(eventType, eventData);
 
         final Map<String, dynamic> result;
@@ -177,12 +436,15 @@ class CatcherHttpClient {
       }
     });
 
-    // Prepare FFI strings for method, URL, and content type
     final methodFfi = _allocFfiString(method);
     final urlFfi = _allocFfiString(path);
     final ctFfi = contentType != null
         ? _allocFfiString(contentType)
         : _allocFfiString('');
+
+    final headersJson = (headers != null && headers.isNotEmpty)
+        ? jsonEncode(headers).toNativeUtf8()
+        : nullptr.cast<Char>();
 
     final bodyPtr = (body != null && body.isNotEmpty)
         ? malloc<Uint8>(body.length)
@@ -201,6 +463,8 @@ class CatcherHttpClient {
         bodyPtr,
         body?.length ?? 0,
         ctFfi.ref,
+        headersJson,
+        timeoutMs ?? 0,
         nativeCallback.nativeFunction,
         nullptr,
       );
@@ -213,6 +477,7 @@ class CatcherHttpClient {
       _freeFfiString(methodFfi);
       _freeFfiString(urlFfi);
       _freeFfiString(ctFfi);
+      if (headersJson != nullptr) malloc.free(headersJson);
       if (body != null && body.isNotEmpty) malloc.free(bodyPtr);
       rethrow;
     }
@@ -220,14 +485,12 @@ class CatcherHttpClient {
     _freeFfiString(methodFfi);
     _freeFfiString(urlFfi);
     _freeFfiString(ctFfi);
+    if (headersJson != nullptr) malloc.free(headersJson);
     if (body != null && body.isNotEmpty) malloc.free(bodyPtr);
 
     return completer.future.timeout(
       const Duration(seconds: 30),
       onTimeout: () {
-        // Complete with error but do NOT close nativeCallback here —
-        // Rust might still invoke it, and closing causes UB.
-        // Safety-net: schedule a forced cleanup after 60s
         Future.delayed(const Duration(seconds: 60), () {
           if (!cleanedUp) {
             cleanedUp = true;
@@ -317,23 +580,144 @@ class PoolConfig {
       };
 }
 
+/// TLS configuration
+class TlsConfig {
+  final bool rejectUnauthorized;
+  final String? caCertPem;
+  final String? caCertPath;
+  final String? clientCertPem;
+  final String? clientCertPath;
+  final String? clientKeyPem;
+  final String? clientKeyPath;
+  final String? tlsSniOverride;
+  final String? minTlsVersion;
+  final List<String>? pinSha256;
+
+  const TlsConfig({
+    this.rejectUnauthorized = true,
+    this.caCertPem,
+    this.caCertPath,
+    this.clientCertPem,
+    this.clientCertPath,
+    this.clientKeyPem,
+    this.clientKeyPath,
+    this.tlsSniOverride,
+    this.minTlsVersion,
+    this.pinSha256,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'reject_unauthorized': rejectUnauthorized,
+        if (caCertPem != null) 'ca_cert_pem': caCertPem,
+        if (caCertPath != null) 'ca_cert_path': caCertPath,
+        if (clientCertPem != null) 'client_cert_pem': clientCertPem,
+        if (clientCertPath != null) 'client_cert_path': clientCertPath,
+        if (clientKeyPem != null) 'client_key_pem': clientKeyPem,
+        if (clientKeyPath != null) 'client_key_path': clientKeyPath,
+        if (tlsSniOverride != null) 'tls_sni_override': tlsSniOverride,
+        if (minTlsVersion != null) 'min_tls_version': minTlsVersion,
+        if (pinSha256 != null) 'pin_sha256': pinSha256,
+      };
+}
+
+/// DNS configuration
+class DnsConfig {
+  final int cacheTtlSecs;
+  final List<String> nameservers;
+  final Map<String, String> hostMapping;
+
+  const DnsConfig({
+    this.cacheTtlSecs = 300,
+    this.nameservers = const [],
+    this.hostMapping = const {},
+  });
+
+  Map<String, dynamic> toJson() => {
+        'cache_ttl_secs': cacheTtlSecs,
+        'nameservers': nameservers,
+        'host_mapping': hostMapping,
+      };
+}
+
+/// Proxy authentication
+class ProxyAuth {
+  final String username;
+  final String password;
+
+  const ProxyAuth({required this.username, required this.password});
+
+  Map<String, dynamic> toJson() => {
+        'username': username,
+        'password': password,
+      };
+}
+
+/// Proxy configuration
+class ProxyConfig {
+  final String url;
+  final ProxyAuth? auth;
+  final List<String> noProxy;
+
+  const ProxyConfig({
+    required this.url,
+    this.auth,
+    this.noProxy = const [],
+  });
+
+  Map<String, dynamic> toJson() => {
+        'url': url,
+        if (auth != null) 'auth': auth!.toJson(),
+        'no_proxy': noProxy,
+      };
+}
+
+/// Redirect configuration
+class RedirectConfig {
+  final bool follow;
+  final int maxRedirects;
+
+  const RedirectConfig({
+    this.follow = true,
+    this.maxRedirects = 5,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'follow': follow,
+        'max_redirects': maxRedirects,
+      };
+}
+
 class HttpClientConfig {
   final String baseUrl;
   final int connectTimeoutMs;
   final int responseTimeoutMs;
   final PoolConfig pool;
+  final TlsConfig tls;
+  final DnsConfig? dns;
   final RetryConfig? retry;
   final CircuitBreakerConfig? circuitBreaker;
   final int maxConcurrency;
+  final Map<String, String> defaultHeaders;
+  final ProxyConfig? proxy;
+  final RedirectConfig? redirect;
+  final ProxyAuth? auth;
+  final String? bearerToken;
 
   const HttpClientConfig({
     required this.baseUrl,
     this.connectTimeoutMs = 10000,
     this.responseTimeoutMs = 30000,
     this.pool = const PoolConfig(),
+    this.tls = const TlsConfig(),
+    this.dns,
     this.retry,
     this.circuitBreaker,
     this.maxConcurrency = 50,
+    this.defaultHeaders = const {},
+    this.proxy,
+    this.redirect,
+    this.auth,
+    this.bearerToken,
   });
 
   Map<String, dynamic> toJson() => {
@@ -341,10 +725,16 @@ class HttpClientConfig {
         'connect_timeout_ms': connectTimeoutMs,
         'response_timeout_ms': responseTimeoutMs,
         'pool': pool.toJson(),
+        'tls': tls.toJson(),
+        if (dns != null) 'dns': dns!.toJson(),
         if (retry != null) 'retry': retry!.toJson(),
-        if (circuitBreaker != null)
-          'circuit_breaker': circuitBreaker!.toJson(),
+        if (circuitBreaker != null) 'circuit_breaker': circuitBreaker!.toJson(),
         'max_concurrency': maxConcurrency,
+        'default_headers': defaultHeaders,
+        if (proxy != null) 'proxy': proxy!.toJson(),
+        if (redirect != null) 'redirect': redirect!.toJson(),
+        if (auth != null) 'auth': auth!.toJson(),
+        if (bearerToken != null) 'bearer_token': bearerToken,
       };
 }
 
@@ -365,7 +755,6 @@ class HttpResponse {
     final rawBody = json['body'];
     List<int> bodyBytes;
     if (rawBody is List) {
-      // Rust sends Vec<u8> which serde_json may serialize as base64 or array
       if (rawBody.isNotEmpty && rawBody.first is int) {
         bodyBytes = rawBody.cast<int>();
       } else {

@@ -23,6 +23,16 @@ CatcherFreeEventDataDart _freeEventData() =>
     _freeEventDataFn ??= _getLib().lookupFunction<CatcherFreeEventDataNative,
         CatcherFreeEventDataDart>('catcher_free_event_data');
 
+CatcherFreeDataDart? _freeDataFn;
+CatcherFreeDataDart _freeData() =>
+    _freeDataFn ??= _getLib().lookupFunction<CatcherFreeDataNative,
+        CatcherFreeDataDart>('catcher_free_data');
+
+CatcherQualityHistoryDart? _qualityHistoryFn;
+CatcherQualityHistoryDart _qualityHistoryFunc() =>
+    _qualityHistoryFn ??= _getLib().lookupFunction<CatcherQualityHistoryNative,
+        CatcherQualityHistoryDart>('catcher_quality_history');
+
 /// Network quality evaluation result.
 class NetworkQualityResult {
   final String level;
@@ -137,4 +147,15 @@ Future<NetworkQualityResult> evaluateQuality(String host) async {
 
   final parsed = jsonDecode(resultJson) as Map<String, dynamic>;
   return NetworkQualityResult.fromJson(parsed);
+}
+
+/// Query the persistent quality sliding window history.
+/// Returns a JSON string with rtt_samples and current_level.
+String qualityHistory() {
+  final ptr = _qualityHistoryFunc()();
+  if (ptr == nullptr) return '{}';
+  final len = ptr.cast<Utf8>().length;
+  final result = ptr.cast<Utf8>().toDartString();
+  _freeData()(ptr.cast(), len + 1);
+  return result;
 }

@@ -98,3 +98,163 @@ impl CatcherError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn connection_timeout_is_retryable() {
+        let err = CatcherError::ConnectionTimeout(5000);
+        assert_eq!(err.category(), ErrorCategory::Retryable);
+        assert!(err.to_string().contains("5000"));
+    }
+
+    #[test]
+    fn request_timeout_is_retryable() {
+        let err = CatcherError::RequestTimeout(30000);
+        assert_eq!(err.category(), ErrorCategory::Retryable);
+    }
+
+    #[test]
+    fn tls_error_is_retryable() {
+        let err = CatcherError::TlsError("cert expired".into());
+        assert_eq!(err.category(), ErrorCategory::Retryable);
+    }
+
+    #[test]
+    fn dns_error_is_retryable() {
+        let err = CatcherError::DnsError {
+            host: "example.com".into(),
+            reason: "NXDOMAIN".into(),
+        };
+        assert_eq!(err.category(), ErrorCategory::Retryable);
+    }
+
+    #[test]
+    fn http_5xx_is_retryable() {
+        let err = CatcherError::HttpError {
+            status: 503,
+            body: "Service Unavailable".into(),
+        };
+        assert_eq!(err.category(), ErrorCategory::Retryable);
+    }
+
+    #[test]
+    fn http_4xx_is_non_retryable() {
+        let err = CatcherError::HttpError {
+            status: 404,
+            body: "Not Found".into(),
+        };
+        assert_eq!(err.category(), ErrorCategory::NonRetryable);
+    }
+
+    #[test]
+    fn http_401_is_non_retryable() {
+        let err = CatcherError::HttpError {
+            status: 401,
+            body: "Unauthorized".into(),
+        };
+        assert_eq!(err.category(), ErrorCategory::NonRetryable);
+    }
+
+    #[test]
+    fn circuit_breaker_open_is_retryable() {
+        let err = CatcherError::CircuitBreakerOpen;
+        assert_eq!(err.category(), ErrorCategory::Retryable);
+    }
+
+    #[test]
+    fn retry_exhausted_is_non_retryable() {
+        let err = CatcherError::RetryExhausted {
+            attempts: 5,
+            last_error: "timeout".into(),
+        };
+        assert_eq!(err.category(), ErrorCategory::NonRetryable);
+    }
+
+    #[test]
+    fn encode_error_is_non_retryable() {
+        let err = CatcherError::EncodeError("bad data".into());
+        assert_eq!(err.category(), ErrorCategory::NonRetryable);
+    }
+
+    #[test]
+    fn decode_error_is_non_retryable() {
+        let err = CatcherError::DecodeError("corrupt".into());
+        assert_eq!(err.category(), ErrorCategory::NonRetryable);
+    }
+
+    #[test]
+    fn invalid_config_is_non_retryable() {
+        let err = CatcherError::InvalidConfig("bad url".into());
+        assert_eq!(err.category(), ErrorCategory::NonRetryable);
+    }
+
+    #[test]
+    fn internal_error_is_non_retryable() {
+        let err = CatcherError::Internal("unexpected".into());
+        assert_eq!(err.category(), ErrorCategory::NonRetryable);
+    }
+
+    #[test]
+    fn ws_disconnected_is_retryable() {
+        let err = CatcherError::WsDisconnected {
+            code: 1006,
+            reason: "abnormal".into(),
+        };
+        assert_eq!(err.category(), ErrorCategory::Retryable);
+    }
+
+    #[test]
+    fn ws_all_endpoints_failed_is_retryable() {
+        let err = CatcherError::WsAllEndpointsFailed { count: 3 };
+        assert_eq!(err.category(), ErrorCategory::Retryable);
+    }
+
+    #[test]
+    fn queue_timeout_is_non_retryable() {
+        let err = CatcherError::QueueTimeout(5000);
+        assert_eq!(err.category(), ErrorCategory::NonRetryable);
+    }
+
+    #[test]
+    fn sse_timeout_is_non_retryable() {
+        let err = CatcherError::SseTimeout(30000);
+        assert_eq!(err.category(), ErrorCategory::NonRetryable);
+    }
+
+    #[test]
+    fn clone_preserves_category() {
+        let err = CatcherError::ConnectionTimeout(1000);
+        let cloned = err.clone();
+        assert_eq!(cloned.category(), err.category());
+    }
+
+    #[test]
+    fn display_does_not_panic() {
+        // All variants should format without panic
+        let errors = vec![
+            CatcherError::ConnectionTimeout(1000),
+            CatcherError::RequestTimeout(5000),
+            CatcherError::TlsError("test".into()),
+            CatcherError::DnsError { host: "h".into(), reason: "r".into() },
+            CatcherError::HttpError { status: 500, body: "b".into() },
+            CatcherError::WsHandshakeTimeout(3000),
+            CatcherError::WsDisconnected { code: 1000, reason: "normal".into() },
+            CatcherError::WsAllEndpointsFailed { count: 1 },
+            CatcherError::RetryExhausted { attempts: 3, last_error: "e".into() },
+            CatcherError::CircuitBreakerOpen,
+            CatcherError::QueueTimeout(1000),
+            CatcherError::EncodeError("e".into()),
+            CatcherError::DecodeError("d".into()),
+            CatcherError::InvalidConfig("c".into()),
+            CatcherError::SseTimeout(5000),
+            CatcherError::Internal("i".into()),
+        ];
+        for err in &errors {
+            let s = err.to_string();
+            assert!(!s.is_empty(), "Display should produce non-empty string for {:?}", err);
+        }
+    }
+}

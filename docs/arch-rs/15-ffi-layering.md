@@ -311,6 +311,99 @@ await client.post('/upload', formData, {
 
 ---
 
+## 取消机制：边界处的 CancellationToken 桥接
+
+### 设计原则
+
+取消信号需要从 JS/Dart 侧传播到 Rust futures。方案：
+
+```
+JS/Dart                  FFI 边界                    Rust
+  │                         │                         │
+  │── cancelAll() ─────────▶│                         │
+  │                         │── cancel_token.cancel()─▶│
+  │                         │                         │── select! {
+  │                         │                         │     result = reqwest
+  │                         │                         │     _ = token.cancelled()
+  │                         │                         │   }
+```
+
+### Rust 层实现
+
+```rust
+use tokio_util::sync::CancellationToken;
+
+pub struct HttpTransport {
+    client: Client,
+    config: HttpClientConfig,
+    cancel_token: CancellationToken,  // 根 token
+    // ...
+}
+
+impl HttpTransport {
+    pub async fn execute(&self, request: HttpRequest) -> Result<HttpResponse, CatcherError> {
+        let cancel = self.cancel_token.child_token();
+        tokio::select! {
+            result = self.execute_inner(request) => result,
+            _ = cancel.cancelled() => Err(CatcherError::Cancelled),
+        }
+    }
+
+    pub fn cancel_all(&self) {
+        self.cancel_token.cancel();
+        // 重置 token 以允许后续请求
+        // self.cancel_token = CancellationToken::new();
+    }
+}
+```
+
+### C ABI 暴露
+
+```rust
+#[no_mangle]
+pub extern "C" fn catcher_http_client_cancel_all(
+    handle: *mut c_void,
+)
+```
+
+### 为什么不在 JS 侧做取消
+
+JS 的 `AbortController.abort()` 只能取消 JS 侧的 Promise chain，无法传播到已进入 FFI 的 Rust future。一旦请求 body 已跨过 FFI 边界传送，必须由 Rust 侧的 CancellationToken 中断飞行请求。
+
+**正确流程**：JS `AbortController` → napi `ThreadsafeFunction` 监听 abort → Rust `CancellationToken.cancel()` → `select!` 返回 `Cancelled`。
+
+---
+
+## SSE 流式响应的 FFI 分层
+
+### 场景分类
+
+| 场景 | 模式 | 适用方法 | 连接生命周期 |
+|------|------|---------|------------|
+| OpenAI streaming API | POST SSE | `catcher_sse_stream` | 一次性请求-响应 |
+| Anthropic streaming API | POST SSE | `catcher_sse_stream` | 一次性请求-响应 |
+| 持久事件订阅 | GET SSE | `catcher_sse_connect` | 长连接 + 自动重连 |
+| 服务端推送通知 | GET SSE | `catcher_sse_connect` | 长连接 + 自动重连 |
+
+### 为什么 SSE 需要 Rust 侧实现
+
+1. SSE 行解析需要理解 `data:`/`event:`/`id:`/`retry:` 协议
+2. 自动重连 + `Last-Event-ID` 需要持久状态
+3. `SseClient` 的 cancel 通道需要在 Rust 侧维护
+4. 避免每行 SSE 跨 FFI 回调的性能损耗（只在完整行完成时回调）
+
+### SSE FFI 回调频率控制
+
+```rust
+// 限制回调频率 —— SSE 行可能非常密集
+pub struct SseReporter {
+    last_report: Instant,
+    min_interval: Duration,  // 默认 16ms (~60fps)
+}
+```
+
+---
+
 ## 总结
 
 ```
@@ -319,15 +412,19 @@ await client.post('/upload', formData, {
 │                                              │
 │  "这个功能需要知道 HTTP/wire format 吗？"      │
 │    需要   → Rust 层                          │
-│    不需要 → TS 层                            │
+│    不需要 → TS/Dart 层                        │
 │                                              │
 │  "这个功能每次请求都执行吗？"                   │
 │    是 → 尽可能放在 FFI 同侧，减少跨界           │
 │    否 → 无所谓                               │
 │                                              │
-│  "这个功能需要回调到 JS 吗？"                   │
+│  "这个功能需要回调到 JS/Dart 吗？"              │
 │    是 → 限制频率，批量推送                     │
 │    否 → Rust 独立完成                         │
+│                                              │
+│  "Cancel/Abort 需要传播到 Rust 吗？"            │
+│    是 → CancellationToken 桥接               │
+│    否 → JS 侧 Promise.reject 即可             │
 └──────────────────────────────────────────────┘
 ```
 

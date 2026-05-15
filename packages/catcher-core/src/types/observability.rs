@@ -31,7 +31,7 @@ pub enum ConnectionType {
 }
 
 /// RTT 滑动窗口统计快照
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct RttSnapshot {
     pub avg_rtt_ms: u64,
     pub min_rtt_ms: u64,

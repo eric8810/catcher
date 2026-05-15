@@ -501,6 +501,190 @@ void main() async {
 
 ---
 
+## SSE 客户端绑定 (`sse_client.dart`) — 📐 新增
+
+```dart
+class CatcherSseClient {
+  late final ffi.Pointer<ffi.Void> _handle;
+  final StreamController<SseEvent> _eventController =
+      StreamController<SseEvent>.broadcast();
+
+  Stream<SseEvent> get events => _eventController.stream;
+
+  /// 0=Connecting, 1=Open, 2=Closed
+  SseReadyState get readyState {
+    final state = _catcherSseReadyState(_handle);
+    return SseReadyState.values[state];
+  }
+
+  String? get lastEventId {
+    final ptr = _catcherSseLastEventId(_handle);
+    if (ptr == ffi.nullptr) return null;
+    final id = ptr.cast<ffi.Utf8>().toDartString();
+    _catcherFreeData(ptr.cast());
+    return id;
+  }
+
+  CatcherSseClient(SseClientConfig config) {
+    final configJson = jsonEncode(config.toJson()).toNativeUtf8();
+    final callback = ffi.Pointer.fromFunction(_onSseEvent);
+    _handle = _catcherSseConnect(
+      configJson.cast<ffi.Char>(),
+      callback,
+      ffi.nullptr,
+    );
+    malloc.free(configJson);
+  }
+
+  void close() => _catcherSseClose(_handle);
+
+  void _onSseEvent(
+    ffi.Pointer<ffi.Char> eventType,
+    ffi.Pointer<ffi.Uint8> eventData,
+    int eventDataLen,
+    ffi.Pointer<ffi.Void> userData,
+  ) {
+    final json = eventData.cast<ffi.Utf8>().toDartString(length: eventDataLen);
+    final event = SseEvent.fromJson(jsonDecode(json));
+    _eventController.add(event);
+  }
+}
+
+/// POST SSE 一次性流（适用于 Anthropic streaming API 等）
+Future<List<SseEvent>> sseStream(
+  CatcherHttpClient client,
+  String method,
+  String url, {
+  Uint8List? body,
+  Map<String, String>? headers,
+}) async {
+  final receivePort = ReceivePort();
+  final results = <SseEvent>[];
+  // ... C ABI callback → ReceivePort
+  return results;
+}
+
+enum SseReadyState { connecting, open, closed }
+```
+
+## 请求取消机制 — 📐 新增
+
+### C ABI 层
+
+```rust
+// catcher-ffi/src/http.rs
+#[no_mangle]
+pub extern "C" fn catcher_http_client_cancel_all(
+    handle: *mut c_void,
+)
+```
+
+### Dart 层封装
+
+```dart
+class CatcherHttpClient {
+  void cancelAll() {
+    _catcherHttpClientCancelAll(_handle);
+  }
+
+  void dispose() {
+    cancelAll();  // 先取消所有飞行请求
+    _catcherHttpClientDestroy(_handle);
+  }
+}
+```
+
+### 取消时序
+
+```
+Dart                          Rust (tokio)
+ │                               │
+ │── get('/slow') ──────────────▶│── reqwest.get() 开始
+ │                               │   ...
+ │── cancelAll() ───────────────▶│── cancel_token.cancel()
+ │                               │   tokio::select! → Err(Cancelled)
+ │◀── callback("error", ...) ────│
+ │                               │
+ │── get('/fast') ──────────────▶│── 新请求正常执行（token 已重置）
+```
+
+## WS 配置增强 — 📐
+
+### Dart 类型补全
+
+```dart
+class WsClientConfig {
+  final List<String> urls;
+  final Map<String, String>? headers;          // 📐 新增
+  final List<String>? protocols;               // 📐 新增
+  final int deflateThresholdBytes;             // 📐 新增，默认 256
+  final int raceCount;                         // 📐 新增，默认 1
+  // ...existing fields...
+
+  WsClientConfig({
+    required this.urls,
+    this.headers,
+    this.protocols,
+    this.deflateThresholdBytes = 256,
+    this.raceCount = 1,
+    // ...
+  });
+
+  Map<String, dynamic> toJson() => {
+    'urls': urls,
+    if (headers != null) 'headers': headers,
+    if (protocols != null) 'protocols': protocols,
+    'deflate_threshold_bytes': deflateThresholdBytes,
+    'race_count': raceCount,
+    // ...existing fields...
+  };
+}
+```
+
+## 取消 / 指标 / 熔断器状态查询 — 📐 新增
+
+```dart
+class CatcherHttpClient {
+  // ...existing...
+
+  /// 取消该客户端所有飞行请求
+  void cancelAll() { ... }
+
+  /// 查询熔断器状态
+  CircuitBreakerState get circuitBreakerState {
+    final json = _catcherHttpCircuitBreakerState(_handle).toDartString();
+    return CircuitBreakerState.fromJson(jsonDecode(json));
+  }
+
+  /// 查询运行时指标
+  MetricsSnapshot get metrics {
+    final json = _catcherHttpMetrics(_handle).toDartString();
+    return MetricsSnapshot.fromJson(jsonDecode(json));
+  }
+}
+
+class CircuitBreakerState {
+  final String state;        // "closed" | "half_open" | "open"
+  final int failureCount;
+  final int successCount;
+}
+
+class MetricsSnapshot {
+  final int totalRequests;
+  final int totalSuccess;
+  final int totalErrors;
+  final int totalRetries;
+  final double avgLatencyMs;
+  final double p50LatencyMs;
+  final double p90LatencyMs;
+  final double p99LatencyMs;
+  final int activeConnections;
+  final int circuitBreakerTrips;
+}
+```
+
+---
+
 ## 与 napi-rs 绑定包的对应关系
 
 | 概念 | napi-rs (Node.js) | dart:ffi (Dart) |
@@ -511,3 +695,8 @@ void main() async {
 | Buffer | `napi::bindgen_prelude::Buffer` | `Uint8List` |
 | 销毁 | GC 自动 | `dispose()` + Finalizer |
 | 构建 | `cargo build --release` | `cargo build --release` + `native_assets` |
+| SSE 客户端 | ❌ 未实现 | 📐 SseClient + SseStream |
+| 请求取消 | ❌ 未实现 | 📐 cancelAll() |
+| 熔断器状态 | ✅ circuitBreakerState() | 📐 circuitBreakerState |
+| 运行时指标 | ❌ 未实现 | 📐 metrics |
+| WS headers/protocols | ❌ 未实现 | 📐 headers + protocols |

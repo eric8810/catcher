@@ -43,11 +43,11 @@ mod tests {
         let result = build_dns_resolver(&config);
         assert!(result.is_ok());
         // Config with host_mapping should be accepted
-        let inner = result.unwrap();
+        let _inner = result.unwrap();
         // Without hickory-dns feature: returns None (uses system DNS)
         // With hickory-dns feature: returns Some(())
         #[cfg(not(feature = "hickory-dns"))]
-        assert!(inner.is_none(), "without hickory-dns, should return None");
+        assert!(_inner.is_none(), "without hickory-dns, should return None");
     }
 
     #[test]

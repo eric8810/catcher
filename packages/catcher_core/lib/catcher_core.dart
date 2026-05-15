@@ -47,6 +47,11 @@ export 'src/http_client.dart'
         RetryConfig,
         CircuitBreakerConfig,
         PoolConfig,
+        TlsConfig,
+        DnsConfig,
+        ProxyConfig,
+        ProxyAuth,
+        RedirectConfig,
         HttpResponse,
         CatcherHttpError;
 
@@ -66,8 +71,21 @@ export 'src/ws_client.dart'
         WsHeartbeatRttEvent,
         CatcherWsError;
 
+// SSE client
+export 'src/sse_client.dart'
+    show
+        CatcherSseClient,
+        SseClientConfig,
+        SseReconnectConfig,
+        SseEvent,
+        SseOpenEvent,
+        SseDataEvent,
+        SseErrorEvent,
+        SseCloseEvent,
+        SseReadyState;
+
 // Network quality
-export 'src/quality.dart' show NetworkQualityResult, evaluateQuality;
+export 'src/quality.dart' show NetworkQualityResult, evaluateQuality, qualityHistory;
 
 // Binary codec
 export 'src/codec.dart' show pack, unpack;

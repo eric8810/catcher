@@ -1,4 +1,5 @@
 use catcher_core::types::observability::Priority;
+use serde::Serialize;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 /// 轻量级指标收集器（无外部依赖，纯 atomic 计数）
@@ -120,7 +121,7 @@ impl MetricsCollector {
 }
 
 /// 指标快照
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct MetricsSnapshot {
     pub http_requests: u64,
     pub http_success_rate: f64,

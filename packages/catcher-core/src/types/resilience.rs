@@ -106,7 +106,7 @@ impl Default for CircuitBreakerConfig {
 }
 
 /// 熔断器状态
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CbState {
     /// 正常状态，请求通过
     Closed,
