@@ -26,7 +26,7 @@
 | B-02 | Multipart 编码器（Rust 侧） | G5 Rust❌，Dart 无法原生上传 multipart |
 | N-04 | 网络质量实时事件推送 | 仅 polling，无 subscribe/push 机制 |
 | NEW-2 | catcher-web 进度回调 | `onUploadProgress`/`onDownloadProgress` 类型存在但 catcher-web 零实现 — fetch() 不支持进度事件 |
-| NEW-3 | TS TLS 配置死代码 | `types.ts` 的 caCertPem/clientKeyPem/pinSha256/minTlsVersion — catcher-http-ts/client.ts 从未读取 |
+| ~~NEW-3~~ | ~~TS TLS 配置死代码~~ | ✅ 已接入 Node.js https.Agent（ca/cert/key/minVersion/SNI/PFX），pinSha256 仍 deferred |
 
 ### 文档与代码状态不同步（需更新）
 
@@ -99,7 +99,7 @@
 - ✅ TS 拦截器: 已实现 `createInterceptorManager`，支持动态 add/remove
 - ✅ catcher-http-ts 进度回调: 已实现（`client.ts:429-433`）
 - ❌ catcher-web 进度回调: 确认缺失（fetch() 不支持进度事件）
-- ❌ TS TLS 配置: 确认为死代码（client.ts 不读取）
+- ✅ TS TLS 配置: ✅ 已接入 Node.js https.Agent（NEW-3 已修复）
 - ❌ WS deflate: 确认忽略（`compression.rs:18`，tungstenite 全版本不支持 RFC 7692，评估文档已完成）
 
 ## 本次续篇修复（2026-06-19 续）
