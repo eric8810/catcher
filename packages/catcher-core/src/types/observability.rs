@@ -1,10 +1,11 @@
 use serde::{Deserialize, Serialize};
 
 /// 请求优先级：数字越小优先级越高
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Default)]
 pub enum Priority {
     Critical = 1,
     High = 2,
+    #[default]
     Normal = 5,
     Low = 8,
     Background = 10,

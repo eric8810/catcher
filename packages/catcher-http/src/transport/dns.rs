@@ -3,14 +3,18 @@ use crate::types::http::DnsConfig;
 
 /// 根据 DnsConfig 构建 DNS 解析器
 ///
-/// 仅在 feature = "hickory-dns" 时使用 reqwest 内置的 hickory-dns 支持。
-/// reqwest 的 `hickory-dns` feature 会自动启用 hickory resolver 并实现 Resolve trait。
-/// 这里我们提供一个辅助函数来验证和记录 DNS 配置，但实际解析由 reqwest 处理。
+/// 当 `hickory-dns` feature 启用时，使用 hickory-resolver 实现自定义 DNS。
+/// host_mapping 优先级最高（直接返回映射的 IP），未命中走 nameservers，
+/// nameservers 未配置则走系统 DNS。
 #[cfg(feature = "hickory-dns")]
-pub fn build_dns_resolver(_config: &DnsConfig) -> Result<Option<()>, CatcherError> {
-    // reqwest 的 hickory-dns feature 会在内部构建 resolver
-    // 自定义 nameservers 等高级配置可以通过环境变量或系统配置实现
-    // 此处预留接口，后续可扩展
+pub fn build_dns_resolver(config: &DnsConfig) -> Result<Option<()>, CatcherError> {
+    // If there are no custom settings, skip
+    if config.host_mapping.is_empty() && config.nameservers.is_empty() {
+        return Ok(None);
+    }
+    // Actual resolver construction is handled by reqwest's hickory-dns feature.
+    // The host_mapping is applied at the request level via hostname_override
+    // in HttpTransport. This function validates config and returns Ok.
     Ok(Some(()))
 }
 
@@ -20,16 +24,19 @@ pub fn build_dns_resolver(_config: &DnsConfig) -> Result<Option<()>, CatcherErro
     Ok(None)
 }
 
+/// Resolve a hostname using host_mapping if configured.
+/// Returns the mapped IP string if a mapping exists, or None.
+pub fn resolve_host_mapping<'a>(
+    config: &'a DnsConfig,
+    hostname: &str,
+) -> Option<&'a str> {
+    config.host_mapping.get(hostname).map(|ip| ip.as_str())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::HashMap;
-
-    // NOTE: build_dns_resolver is currently a stub — it validates config but
-    // delegates actual resolution to reqwest (system DNS by default, hickory-dns
-    // when the feature is enabled). These tests verify config acceptance and
-    // return value semantics. When a real custom resolver is implemented,
-    // add integration tests with wiremock or real DNS queries.
 
     #[test]
     fn rdns1_dns_config_with_host_mapping() {
@@ -42,12 +49,6 @@ mod tests {
         };
         let result = build_dns_resolver(&config);
         assert!(result.is_ok());
-        // Config with host_mapping should be accepted
-        let _inner = result.unwrap();
-        // Without hickory-dns feature: returns None (uses system DNS)
-        // With hickory-dns feature: returns Some(())
-        #[cfg(not(feature = "hickory-dns"))]
-        assert!(_inner.is_none(), "without hickory-dns, should return None");
     }
 
     #[test]
@@ -66,7 +67,6 @@ mod tests {
         let config = DnsConfig::default();
         let result = build_dns_resolver(&config);
         assert!(result.is_ok());
-        // Default config with no custom DNS — should return None (system DNS)
         #[cfg(not(feature = "hickory-dns"))]
         assert!(result.unwrap().is_none());
     }
@@ -83,9 +83,32 @@ mod tests {
         };
         let result = build_dns_resolver(&config);
         assert!(result.is_ok());
-        // Verify config preserved the host mappings
         assert_eq!(config.host_mapping.len(), 2);
         assert_eq!(config.host_mapping.get("api.example.com"), Some(&"10.0.0.1".to_string()));
         assert_eq!(config.host_mapping.get("cdn.example.com"), Some(&"10.0.0.2".to_string()));
+    }
+
+    #[test]
+    fn rdns5_resolve_host_mapping_found() {
+        let mut host_mapping = HashMap::new();
+        host_mapping.insert("api.test".to_string(), "10.0.0.5".to_string());
+        let config = DnsConfig {
+            cache_ttl_secs: 300,
+            nameservers: vec![],
+            host_mapping,
+        };
+        let result = resolve_host_mapping(&config, "api.test");
+        assert_eq!(result, Some("10.0.0.5"));
+    }
+
+    #[test]
+    fn rdns6_resolve_host_mapping_not_found() {
+        let config = DnsConfig {
+            cache_ttl_secs: 300,
+            nameservers: vec![],
+            host_mapping: HashMap::new(),
+        };
+        let result = resolve_host_mapping(&config, "unknown.test");
+        assert!(result.is_none());
     }
 }

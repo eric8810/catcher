@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
+use tokio::sync::Semaphore;
 
 use catcher_core::CatcherError;
 use crate::resilience::backoff::build_retry_policy;
@@ -22,6 +23,7 @@ use catcher_core::types::resilience::CbState;
 /// Phase 4: 增加 tokio CancellationToken 支持请求取消 + MetricsCollector
 /// Phase 5: 增加 AdaptiveTimeout 基于滑动窗口 P90 RTT 自适应超时
 /// Phase 6: 增加 per-request cancel (N-03)
+/// Phase 7: 增加 Semaphore 并发控制 + 优先级队列 (A-01)
 pub struct HttpTransport {
     client: ClientWithMiddleware,
     config: HttpClientConfig,
@@ -32,6 +34,10 @@ pub struct HttpTransport {
     /// Per-request cancel tokens, keyed by request_id (N-03)
     pending_requests: Mutex<HashMap<u64, tokio_util::sync::CancellationToken>>,
     next_request_id: AtomicU64,
+    /// Semaphore for concurrency control (A-01, fallback when priority not needed)
+    concurrency_semaphore: Option<Arc<Semaphore>>,
+    /// Priority-based request queue (A-01, used when request has explicit priority)
+    priority_queue: Option<crate::scheduler::PriorityRequestQueue<HttpResponse>>,
 }
 
 impl HttpTransport {
@@ -51,9 +57,7 @@ impl HttpTransport {
         // G8: TLS configuration
         reqwest_builder = build_tls_config(reqwest_builder, &config.tls)?;
 
-        // G7: DNS resolution: build_dns_resolver validates config but custom
-        // nameservers are not yet wired into reqwest (requires hickory-dns
-        // feature integration). System DNS is used as fallback.
+        // G7: DNS resolution: validates config and applies host_mapping
         if let Some(ref dns) = config.dns {
             build_dns_resolver(dns)?;
         }
@@ -118,6 +122,26 @@ impl HttpTransport {
             .as_ref()
             .map(|cb| CircuitBreaker::new(cb.clone()));
 
+        // A-01: Priority-based request queue with concurrency control
+        // When max_concurrency > 0, use PriorityRequestQueue (includes semaphore).
+        // Otherwise no concurrency control.
+        let (concurrency_semaphore, priority_queue) = if config.max_concurrency > 0 {
+            let queue_config = catcher_core::types::scheduler::QueueConfig {
+                max_concurrency: config.max_concurrency as usize,
+                queue_capacity: 1024,
+                default_timeout_ms: config.response_timeout_ms,
+                concurrency_mode: catcher_core::types::scheduler::ConcurrencyMode::Fixed(
+                    config.max_concurrency as usize,
+                ),
+            };
+            (
+                None, // priority_queue handles concurrency internally
+                Some(crate::scheduler::PriorityRequestQueue::new(queue_config)),
+            )
+        } else {
+            (None, None)
+        };
+
         Ok(Self {
             client: client_builder.build(),
             config,
@@ -127,10 +151,12 @@ impl HttpTransport {
             adaptive_timeout: Mutex::new(None),
             pending_requests: Mutex::new(HashMap::new()),
             next_request_id: AtomicU64::new(1),
+            concurrency_semaphore,
+            priority_queue,
         })
     }
 
-    /// 发起 HTTP 请求（带熔断器检查 + cancel 支持 + metrics 记录 + 自适应超时）
+    /// 发起 HTTP 请求（带熔断器检查 + cancel 支持 + metrics 记录 + 自适应超时 + 并发控制）
     pub async fn execute(&self, request: HttpRequest) -> Result<HttpResponse, CatcherError> {
         let (_, result) = self.execute_with_token(
             0,  // dummy request_id, not registered for cancel
@@ -171,17 +197,76 @@ impl HttpTransport {
             token.clone()
         };
 
-        let result = tokio::select! {
-            r = self.do_execute(request) => r,
-            _ = per_request_token.cancelled() => {
-                let elapsed_us = start.elapsed().as_micros() as u64;
-                self.metrics.record_http_request(false, elapsed_us, false);
-                return (request_id, Err(CatcherError::Internal("request cancelled".into())));
+        // A-01: Acquire concurrency slot — priority queue or semaphore
+        let result = if let Some(ref queue) = self.priority_queue {
+            // Priority queue path: handles both concurrency and priority ordering
+            let client = self.client.clone();
+            let config = self.config.clone();
+            let priority = request.priority;
+            let timeout_ms = request.timeout_ms;
+
+            let queue_result = tokio::select! {
+                r = queue.submit(priority, timeout_ms, move || {
+                    let c = client.clone();
+                    let cfg = config.clone();
+                    let req = request;
+                    async move { execute_http_request(c, cfg, req).await }
+                }) => r,
+                _ = per_request_token.cancelled() => {
+                    let elapsed_us = start.elapsed().as_micros() as u64;
+                    self.metrics.record_http_request(false, elapsed_us, false);
+                    Err(CatcherError::Internal("request cancelled while waiting in queue".into()))
+                }
+                _ = global_token.cancelled() => {
+                    let elapsed_us = start.elapsed().as_micros() as u64;
+                    self.metrics.record_http_request(false, elapsed_us, false);
+                    Err(CatcherError::Internal("request cancelled while waiting in queue".into()))
+                }
+            };
+            queue_result
+        } else if let Some(ref sem) = self.concurrency_semaphore {
+            // Fallback semaphore path (no priority ordering)
+            let _permit = tokio::select! {
+                permit = sem.acquire() => permit,
+                _ = per_request_token.cancelled() => {
+                    let elapsed_us = start.elapsed().as_micros() as u64;
+                    self.metrics.record_http_request(false, elapsed_us, false);
+                    return (request_id, Err(CatcherError::Internal("request cancelled while waiting in queue".into())));
+                }
+                _ = global_token.cancelled() => {
+                    let elapsed_us = start.elapsed().as_micros() as u64;
+                    self.metrics.record_http_request(false, elapsed_us, false);
+                    return (request_id, Err(CatcherError::Internal("request cancelled while waiting in queue".into())));
+                }
+            };
+
+            tokio::select! {
+                r = self.do_execute(request) => r,
+                _ = per_request_token.cancelled() => {
+                    let elapsed_us = start.elapsed().as_micros() as u64;
+                    self.metrics.record_http_request(false, elapsed_us, false);
+                    return (request_id, Err(CatcherError::Internal("request cancelled".into())));
+                }
+                _ = global_token.cancelled() => {
+                    let elapsed_us = start.elapsed().as_micros() as u64;
+                    self.metrics.record_http_request(false, elapsed_us, false);
+                    return (request_id, Err(CatcherError::Internal("request cancelled".into())));
+                }
             }
-            _ = global_token.cancelled() => {
-                let elapsed_us = start.elapsed().as_micros() as u64;
-                self.metrics.record_http_request(false, elapsed_us, false);
-                return (request_id, Err(CatcherError::Internal("request cancelled".into())));
+        } else {
+            // No concurrency control
+            tokio::select! {
+                r = self.do_execute(request) => r,
+                _ = per_request_token.cancelled() => {
+                    let elapsed_us = start.elapsed().as_micros() as u64;
+                    self.metrics.record_http_request(false, elapsed_us, false);
+                    return (request_id, Err(CatcherError::Internal("request cancelled".into())));
+                }
+                _ = global_token.cancelled() => {
+                    let elapsed_us = start.elapsed().as_micros() as u64;
+                    self.metrics.record_http_request(false, elapsed_us, false);
+                    return (request_id, Err(CatcherError::Internal("request cancelled".into())));
+                }
             }
         };
 
@@ -268,77 +353,7 @@ impl HttpTransport {
     /// 使用预分配的 token 执行请求（N-03，供 FFI 层使用）。
 
     async fn do_execute(&self, request: HttpRequest) -> Result<HttpResponse, CatcherError> {
-        let start = Instant::now();
-
-        let method = match request.method {
-            HttpMethod::GET => reqwest::Method::GET,
-            HttpMethod::POST => reqwest::Method::POST,
-            HttpMethod::PUT => reqwest::Method::PUT,
-            HttpMethod::DELETE => reqwest::Method::DELETE,
-            HttpMethod::PATCH => reqwest::Method::PATCH,
-        };
-
-        let url = if request.url.starts_with("http") {
-            request.url
-        } else {
-            format!(
-                "{}{}",
-                self.config.base_url.trim_end_matches('/'),
-                request.url
-            )
-        };
-
-        let mut req = self.client.request(method, &url);
-        // Apply default headers from config (per-request headers override)
-        for (k, v) in &self.config.default_headers {
-            req = req.header(k, v);
-        }
-        for (k, v) in &request.headers {
-            req = req.header(k, v);
-        }
-        if let Some(body) = &request.body {
-            req = req.body(body.clone());
-        }
-        if let Some(content_type) = &request.content_type {
-            req = req.header("Content-Type", content_type);
-        }
-
-        let timeout_ms = request
-            .timeout_ms
-            .unwrap_or(self.config.response_timeout_ms);
-        req = req.timeout(Duration::from_millis(timeout_ms));
-
-        let response = req
-            .send()
-            .await
-            .map_err(|e| map_middleware_error(e, &self.config))?;
-
-        let status = response.status().as_u16();
-        let headers: HashMap<String, String> = response
-            .headers()
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
-            .collect();
-        let body = response
-            .bytes()
-            .await
-            .map_err(|e| CatcherError::Internal(format!("read body: {e}")))?;
-
-        let elapsed_ms = start.elapsed().as_millis() as u64;
-
-        if status >= 400 {
-            return Err(CatcherError::HttpError {
-                status,
-                body: String::from_utf8_lossy(&body).to_string(),
-            });
-        }
-
-        Ok(HttpResponse {
-            status,
-            headers,
-            body: body.to_vec(),
-            elapsed_ms,
-        })
+        execute_http_request(self.client.clone(), self.config.clone(), request).await
     }
 
     /// 流式执行 HTTP 请求（N-02），逐 chunk 通过回调推送。
@@ -379,7 +394,7 @@ impl HttpTransport {
         };
 
         let response = tokio::select! {
-            r = req.send() => r.map_err(|e| map_middleware_error(e, &self.config))?,
+            r = req.send() => r.map_err(|e| map_middleware_error_standalone(e, &self.config))?,
             _ = global_token.cancelled() => {
                 chunk_callback(StreamEvent::Error("request cancelled".into()));
                 return Err(CatcherError::Internal("request cancelled".into()));
@@ -428,6 +443,7 @@ impl HttpTransport {
             body: None,
             content_type: None,
             timeout_ms: None,
+            priority: catcher_core::types::observability::Priority::Normal,
         };
         let result = self.execute(request).await;
         result
@@ -447,6 +463,7 @@ impl HttpTransport {
             body: Some(body.to_vec()),
             content_type: Some(content_type.to_string()),
             timeout_ms: None,
+            priority: catcher_core::types::observability::Priority::Normal,
         };
         let result = self.execute(request).await;
         result
@@ -460,6 +477,22 @@ impl HttpTransport {
     /// 返回运行时指标快照
     pub fn metrics(&self) -> MetricsSnapshot {
         self.metrics.snapshot()
+    }
+
+    /// 当前并发队列中的等待请求数（A-01）。
+    /// 返回已发出但未完成的 permit 数量（近似值）。
+    pub fn queue_depth(&self) -> usize {
+        if let Some(ref queue) = self.priority_queue {
+            let max = self.config.max_concurrency as usize;
+            let available = queue.available_permits();
+            if available >= max { 0 } else { max - available }
+        } else if let Some(ref sem) = self.concurrency_semaphore {
+            let max = self.config.max_concurrency as usize;
+            let available = sem.available_permits();
+            if available >= max { 0 } else { max - available }
+        } else {
+            0
+        }
     }
 
     /// 启用/配置自适应超时。
@@ -483,7 +516,109 @@ impl HttpTransport {
     }
 }
 
-fn map_middleware_error(e: reqwest_middleware::Error, config: &HttpClientConfig) -> CatcherError {
+/// Standalone HTTP execution (used by priority queue).
+/// Takes owned client + config to satisfy `'static` bounds.
+async fn execute_http_request(
+    client: ClientWithMiddleware,
+    config: HttpClientConfig,
+    request: HttpRequest,
+) -> Result<HttpResponse, CatcherError> {
+    let start = Instant::now();
+
+    let method = match request.method {
+        HttpMethod::GET => reqwest::Method::GET,
+        HttpMethod::POST => reqwest::Method::POST,
+        HttpMethod::PUT => reqwest::Method::PUT,
+        HttpMethod::DELETE => reqwest::Method::DELETE,
+        HttpMethod::PATCH => reqwest::Method::PATCH,
+    };
+
+    let mut url = if request.url.starts_with("http") {
+        request.url
+    } else {
+        format!(
+            "{}{}",
+            config.base_url.trim_end_matches('/'),
+            request.url,
+        )
+    };
+
+    // G7: Apply host_mapping
+    let mut host_header_override: Option<String> = None;
+    if let Some(ref dns) = config.dns {
+        if let Some(after_scheme) = url.strip_prefix("http://").or_else(|| url.strip_prefix("https://")) {
+            let host_end = after_scheme.find(|c: char| c == '/' || c == '?' || c == '#').unwrap_or(after_scheme.len());
+            let host_port = &after_scheme[..host_end];
+            let hostname = host_port.split(':').next().unwrap_or(host_port);
+            if let Some(mapped_ip) = crate::transport::dns::resolve_host_mapping(dns, hostname) {
+                host_header_override = Some(hostname.to_string());
+                let scheme_end = url.find("://").map(|p| p + 3).unwrap_or(0);
+                let after_host = &url[scheme_end + host_port.len()..];
+                let scheme = &url[..scheme_end];
+                url = format!("{}{}{}", scheme, mapped_ip, after_host);
+            }
+        }
+    }
+
+    let mut req = client.request(method, &url);
+    for (k, v) in &config.default_headers {
+        req = req.header(k, v);
+    }
+    for (k, v) in &request.headers {
+        req = req.header(k, v);
+    }
+    if let Some(body) = &request.body {
+        req = req.body(body.clone());
+    }
+    if let Some(content_type) = &request.content_type {
+        req = req.header("Content-Type", content_type);
+    }
+    if let Some(ref original_host) = host_header_override {
+        req = req.header("Host", original_host.as_str());
+    }
+    if let Some(ref override_host) = config.hostname_override {
+        req = req.header("Host", override_host.as_str());
+    }
+
+    let timeout_ms = request
+        .timeout_ms
+        .unwrap_or(config.response_timeout_ms);
+    req = req.timeout(Duration::from_millis(timeout_ms));
+
+    let response = req
+        .send()
+        .await
+        .map_err(|e| map_middleware_error_standalone(e, &config))?;
+
+    let status = response.status().as_u16();
+    let headers: HashMap<String, String> = response
+        .headers()
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
+        .collect();
+    let body = response
+        .bytes()
+        .await
+        .map_err(|e| CatcherError::Internal(format!("read body: {e}")))?;
+
+    let elapsed_ms = start.elapsed().as_millis() as u64;
+
+    if status >= 400 {
+        return Err(CatcherError::HttpError {
+            status,
+            body: String::from_utf8_lossy(&body).to_string(),
+        });
+    }
+
+    Ok(HttpResponse {
+        status,
+        headers,
+        body: body.to_vec(),
+        elapsed_ms,
+    })
+}
+
+fn map_middleware_error_standalone(e: reqwest_middleware::Error, config: &HttpClientConfig) -> CatcherError {
     let msg = format!("{e}");
     if msg.contains("timeout") || msg.contains("timed out") {
         return CatcherError::RequestTimeout(config.response_timeout_ms);
@@ -680,6 +815,7 @@ mod tests {
         let request = HttpRequest {
             method: HttpMethod::GET, url: "/test".to_string(),
             headers: HashMap::new(), body: None, content_type: None, timeout_ms: None,
+            ..Default::default()
         };
         transport.execute_stream(request, move |e| { ec.lock().unwrap().push(e); }).await.unwrap();
         let evts = events.lock().unwrap();
@@ -707,6 +843,7 @@ mod tests {
         let request = HttpRequest {
             method: HttpMethod::GET, url: "/test".to_string(),
             headers: HashMap::new(), body: None, content_type: None, timeout_ms: None,
+            ..Default::default()
         };
         transport.execute_stream(request, move |e| { ec.lock().unwrap().push(e); }).await.unwrap();
         let evts = events.lock().unwrap();
@@ -741,6 +878,7 @@ mod tests {
         let request = HttpRequest {
             method: HttpMethod::GET, url: "/test".to_string(),
             headers: HashMap::new(), body: None, content_type: None, timeout_ms: None,
+            ..Default::default()
         };
         let result = transport.execute_stream(request, move |e| { ec.lock().unwrap().push(e); }).await;
         assert!(result.is_err());
@@ -757,6 +895,7 @@ mod tests {
         let request = HttpRequest {
             method: HttpMethod::GET, url: "/test".to_string(),
             headers: HashMap::new(), body: None, content_type: None, timeout_ms: None,
+            ..Default::default()
         };
         assert!(transport.execute_stream(request, |_| {}).await.is_err());
     }
@@ -781,6 +920,7 @@ mod tests {
             let request = HttpRequest {
                 method: HttpMethod::GET, url: "/test".to_string(),
                 headers: HashMap::new(), body: None, content_type: None, timeout_ms: None,
+                ..Default::default()
             };
             let (returned_id, result) = t.execute_with_token(rid, token, request).await;
             assert!(result.is_ok());
@@ -817,6 +957,7 @@ mod tests {
             let request = HttpRequest {
                 method: HttpMethod::GET, url: "/test".to_string(),
                 headers: HashMap::new(), body: None, content_type: None, timeout_ms: None,
+                ..Default::default()
             };
             handles.push(tokio::spawn(async move { t.execute_with_token(rid, token, request).await }));
         }
@@ -843,6 +984,7 @@ mod tests {
         let request = HttpRequest {
             method: HttpMethod::GET, url: "/test".to_string(),
             headers: HashMap::new(), body: None, content_type: None, timeout_ms: None,
+            ..Default::default()
         };
         assert!(transport.execute(request).await.is_ok());
     }
@@ -862,6 +1004,7 @@ mod tests {
         let request = HttpRequest {
             method: HttpMethod::GET, url: "/test".to_string(),
             headers: HashMap::new(), body: None, content_type: None, timeout_ms: None,
+            ..Default::default()
         };
         let (_, result) = transport.execute_with_token(rid, token, request).await;
         assert!(result.is_ok());

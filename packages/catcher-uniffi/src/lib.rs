@@ -159,6 +159,7 @@ impl HttpClient {
                 body: None,
                 content_type: None,
                 timeout_ms: timeout,
+                ..Default::default()
             }).await
         });
         let resp = handle.join()
@@ -188,6 +189,7 @@ impl HttpClient {
                 body: Some(body),
                 content_type,
                 timeout_ms: timeout,
+                ..Default::default()
             }).await
         });
         let resp = handle.join()
@@ -217,6 +219,7 @@ impl HttpClient {
                 body: Some(body),
                 content_type,
                 timeout_ms: timeout,
+                ..Default::default()
             }).await
         });
         let resp = handle.join()
@@ -244,6 +247,7 @@ impl HttpClient {
                 body: None,
                 content_type: None,
                 timeout_ms: timeout,
+                ..Default::default()
             }).await
         });
         let resp = handle.join()
@@ -273,6 +277,7 @@ impl HttpClient {
                 body: Some(body),
                 content_type,
                 timeout_ms: timeout,
+                ..Default::default()
             }).await
         });
         let resp = handle.join()

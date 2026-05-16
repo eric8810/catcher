@@ -108,6 +108,7 @@ pub unsafe extern "C" fn catcher_http_get(
                 method: HttpMethod::GET, url: url_str,
                 headers: per_request_headers, body: None,
                 content_type: None, timeout_ms: per_request_timeout,
+                ..Default::default()
             };
             let result = t.execute(request).await;
             let json = match result {
@@ -142,6 +143,7 @@ pub unsafe extern "C" fn catcher_http_post(
                 method: HttpMethod::POST, url: url_str,
                 headers: per_request_headers, body: Some(body_data),
                 content_type: Some(ct_str), timeout_ms: per_request_timeout,
+                ..Default::default()
             };
             let result = t.execute(request).await;
             let json = match result {
@@ -193,6 +195,7 @@ pub unsafe extern "C" fn catcher_http_execute(
                 method: http_method, url: url_str,
                 headers: per_request_headers, body: body_data,
                 content_type: ct_str, timeout_ms: per_request_timeout,
+                ..Default::default()
             };
             let result = t.execute(request).await;
             let json = match result {
@@ -251,6 +254,7 @@ pub unsafe extern "C" fn catcher_http_execute_with_id(
                 method: http_method, url: url_str,
                 headers: per_request_headers, body: body_data,
                 content_type: ct_str, timeout_ms: per_request_timeout,
+                ..Default::default()
             };
             let (_rid, result) = t.execute_with_token(request_id, per_request_token, request).await;
             let json = match result {
@@ -387,6 +391,7 @@ pub unsafe extern "C" fn catcher_http_execute_stream(
                 method: http_method, url: url_str,
                 headers: per_request_headers, body: body_data,
                 content_type: ct_str, timeout_ms: per_request_timeout,
+                ..Default::default()
             };
             let _ = t.execute_stream(req, move |event| {
                 let (et, ed) = match &event {

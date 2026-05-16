@@ -259,6 +259,7 @@ impl JsHttpClient {
             body: body.map(|b| b.to_vec()),
             content_type,
             timeout_ms,
+            priority: catcher_core::types::observability::Priority::Normal,
         };
 
         let inner = self.inner.clone();
@@ -303,6 +304,7 @@ impl JsHttpClient {
             body: body.map(|b| b.to_vec()),
             content_type,
             timeout_ms,
+            priority: catcher_core::types::observability::Priority::Normal,
         };
 
         let resp = self

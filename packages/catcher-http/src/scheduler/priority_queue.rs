@@ -8,7 +8,7 @@ use catcher_core::types::scheduler::QueueConfig;
 
 type BoxedFuture<T> = Pin<Box<dyn std::future::Future<Output = Result<T, CatcherError>> + Send>>;
 
-struct PrioritizedTask<T> {
+struct PrioritizedTask<T: Send + 'static> {
     #[allow(dead_code)]
     priority: Priority,
     timeout_ms: u64,
@@ -21,18 +21,18 @@ struct PrioritizedTask<T> {
 /// 高优先级（Priority::Critical / High）走 high 通道，
 /// 低优先级（Normal / Low / Background）走 low 通道。
 /// Worker 使用 biased select 优先处理高优任务。
-pub struct PriorityRequestQueue {
-    high_tx: mpsc::Sender<PrioritizedTask<Vec<u8>>>,
-    low_tx: mpsc::Sender<PrioritizedTask<Vec<u8>>>,
+pub struct PriorityRequestQueue<T: Send + 'static> {
+    high_tx: mpsc::Sender<PrioritizedTask<T>>,
+    low_tx: mpsc::Sender<PrioritizedTask<T>>,
     semaphore: Arc<Semaphore>,
     config: QueueConfig,
 }
 
-impl PriorityRequestQueue {
+impl<T: Send + 'static> PriorityRequestQueue<T> {
     pub fn new(config: QueueConfig) -> Self {
         let (high_tx, mut high_rx) =
-            mpsc::channel::<PrioritizedTask<Vec<u8>>>(config.queue_capacity);
-        let (low_tx, mut low_rx) = mpsc::channel::<PrioritizedTask<Vec<u8>>>(config.queue_capacity);
+            mpsc::channel::<PrioritizedTask<T>>(config.queue_capacity);
+        let (low_tx, mut low_rx) = mpsc::channel::<PrioritizedTask<T>>(config.queue_capacity);
         let sem = Arc::new(Semaphore::new(config.max_concurrency));
 
         let sem_clone = sem.clone();
@@ -83,10 +83,10 @@ impl PriorityRequestQueue {
         priority: Priority,
         timeout_ms: Option<u64>,
         operation: F,
-    ) -> Result<Vec<u8>, CatcherError>
+    ) -> Result<T, CatcherError>
     where
         F: FnOnce() -> Fut + Send + 'static,
-        Fut: std::future::Future<Output = Result<Vec<u8>, CatcherError>> + Send + 'static,
+        Fut: std::future::Future<Output = Result<T, CatcherError>> + Send + 'static,
     {
         let (tx, rx) = oneshot::channel();
         let task = PrioritizedTask {
@@ -129,7 +129,7 @@ mod tests {
             default_timeout_ms: 5000,
             concurrency_mode: catcher_core::types::scheduler::ConcurrencyMode::Fixed(5),
         };
-        let queue = PriorityRequestQueue::new(config);
+        let queue: PriorityRequestQueue<Vec<u8>> = PriorityRequestQueue::new(config);
         let result = queue
             .submit(Priority::Normal, None, || async { Ok(b"hello".to_vec()) })
             .await;
@@ -145,7 +145,7 @@ mod tests {
             default_timeout_ms: 10,
             concurrency_mode: catcher_core::types::scheduler::ConcurrencyMode::Fixed(1),
         };
-        let queue = PriorityRequestQueue::new(config);
+        let queue: PriorityRequestQueue<Vec<u8>> = PriorityRequestQueue::new(config);
         let result = queue
             .submit(Priority::Normal, None, || async {
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -169,7 +169,7 @@ mod tests {
             default_timeout_ms: 5000,
             concurrency_mode: catcher_core::types::scheduler::ConcurrencyMode::Fixed(1),
         };
-        let queue = Arc::new(PriorityRequestQueue::new(config));
+        let queue = Arc::new(PriorityRequestQueue::<Vec<u8>>::new(config));
 
         // Submit both tasks, then verify they complete successfully
         let q1 = queue.clone();

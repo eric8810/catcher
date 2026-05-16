@@ -3,8 +3,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// HTTP 方法
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum HttpMethod {
+    #[default]
     GET,
     POST,
     PUT,
@@ -13,9 +14,11 @@ pub enum HttpMethod {
 }
 
 /// HTTP 请求（内部使用）
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct HttpRequest {
+    #[serde(default)]
     pub method: HttpMethod,
+    #[serde(default)]
     pub url: String,
     #[serde(default)]
     pub headers: HashMap<String, String>,
@@ -25,6 +28,13 @@ pub struct HttpRequest {
     pub content_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timeout_ms: Option<u64>,
+    /// 请求优先级 (A-01)，用于优先级队列调度
+    #[serde(default = "default_priority")]
+    pub priority: catcher_core::types::observability::Priority,
+}
+
+fn default_priority() -> catcher_core::types::observability::Priority {
+    catcher_core::types::observability::Priority::Normal
 }
 
 /// HTTP 响应（内部使用）
@@ -52,13 +62,14 @@ pub struct PoolConfig {
     /// 每个 host 最大空闲连接数
     #[serde(default = "default_max_idle_per_host")]
     pub max_idle_per_host: usize,
-    /// 空闲连接超时（秒）
+    /// 空闲连接超时（秒）— 连接空闲超过此时间将被淘汰
+    /// 降低此值可减少 retry 时复用已死连接的风险 (G-01/G-02)
     #[serde(default = "default_idle_timeout_secs")]
     pub idle_timeout_secs: u64,
     /// 是否启用 TCP keepalive
     #[serde(default = "default_true")]
     pub keep_alive: bool,
-    /// keepalive 间隔（秒）
+    /// keepalive 间隔（秒）— 更短的间隔能更快检测死连接 (G-02)
     #[serde(default = "default_keep_alive_interval")]
     pub keep_alive_interval_secs: u64,
 }
@@ -67,13 +78,13 @@ fn default_max_idle_per_host() -> usize {
     10
 }
 fn default_idle_timeout_secs() -> u64 {
-    90
+    30
 }
 fn default_true() -> bool {
     true
 }
 fn default_keep_alive_interval() -> u64 {
-    60
+    20
 }
 
 impl Default for PoolConfig {

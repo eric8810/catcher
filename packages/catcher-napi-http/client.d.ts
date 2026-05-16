@@ -50,6 +50,14 @@ declare module '@eric8810/catcher-napi-http' {
     elapsed_ms: number
   }
 
+  interface Metrics {
+    total_requests: number
+    successful_requests: number
+    failed_requests: number
+    average_latency_us: number
+    retry_count: number
+  }
+
   export class HttpClient {
     constructor(config: string | HttpClientConfig)
     get(url: string, options?: RequestOptions): Promise<HttpResponse>
@@ -58,5 +66,18 @@ declare module '@eric8810/catcher-napi-http' {
     delete(url: string, options?: RequestOptions): Promise<HttpResponse>
     patch(url: string, body?: Buffer, options?: RequestOptions): Promise<HttpResponse>
     circuitBreakerState(): 'closed' | 'open' | 'half-open'
+    metrics(): Metrics
+    setAdaptiveTimeout(minTimeoutMs: number, maxTimeoutMs: number, multiplier: number, windowSize: number): void
+    disableAdaptiveTimeout(): void
+    cancelAll(): void
+    cancelRequest(requestId: number): boolean
+    nextRequestId(): number
+    executeStream(
+      method: string,
+      url: string,
+      body?: Buffer,
+      options?: RequestOptions,
+      onChunk?: (eventJson: string) => void,
+    ): void
   }
 }
