@@ -283,8 +283,8 @@ export function createNetworkProxy(targetPort: number): NetworkProxy {
         await delay(lat)
       }
 
-      // ── Bandwidth limit ──
-      const bw = currentBw
+      // ── Bandwidth limit (read live from conditions, not cached) ──
+      const bw = dirConds.bandwidth || currentBw
       if (bw > 0) {
         const maxPerWindow = Math.max(1, bw / (1000 / windowMs))
         if (bytesInWindow + chunk.length > maxPerWindow) {
