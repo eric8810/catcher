@@ -25,7 +25,7 @@
 | B-01 | Transport trait 抽象 | 架构级变更，TS 层已标 `@deprecated`，无直接需求 |
 | B-02 | Multipart 编码器（Rust 侧） | G5 Rust❌，Dart 无法原生上传 multipart |
 | N-04 | 网络质量实时事件推送 | 仅 polling，无 subscribe/push 机制 |
-| NEW-2 | catcher-web 进度回调 | `onUploadProgress`/`onDownloadProgress` 类型存在但 catcher-web 零实现 — fetch() 不支持进度事件 |
+| ~~NEW-2~~ | ~~catcher-web 进度回调~~ | ✅ 下载进度通过 ReadableStream 流式跟踪，上传进度在响应头到达时报告 100%（fetch 限制） |
 | ~~NEW-3~~ | ~~TS TLS 配置死代码~~ | ✅ 已接入 Node.js https.Agent（ca/cert/key/minVersion/SNI/PFX），pinSha256 仍 deferred |
 
 ### 文档与代码状态不同步（需更新）
@@ -45,15 +45,15 @@
 | G-08 | S5 大体积消息缺 retry |
 | G-09 | S7 metric 滥用（msgFinishOrder 当延迟） |
 | ~~G-10~~ | ~~chaos parseInt 下划线~~ | ✅ 已修复（`'600000'` 无下划线，chaos.test.ts:28） |
-| G-11 | reporter 统计缺陷（全失败假改善等） |
-| G-12 | 延迟对比跨重试次数混算 |
+| ~~G-11~~ | ~~reporter 统计缺陷~~ | ✅ 全失败 P50 返回 0/N/A + P50 增加绝对差值列 |
+| ~~G-12~~ | ~~延迟对比跨重试次数混算~~ | ✅ 已按重试次数分桶（harness.ts retries 字段 + 0-retry/retried 分桶展示） |
 
 ### 其他低优先级
 
 | # | 问题 |
 |---|------|
 | G6-beforeRedirect | TS beforeRedirect 类型存在但不生效（Axios 限制） |
-| ~~DNS nameservers~~ | ~~types.ts 定义了 nameservers 但 TS/Rust 均未接入~~ | ✅ TS 已接入 `CacheableLookup({ servers })`（shared-agent.ts:14-18 + client.ts:179-181） |
+| ~~DNS nameservers~~ | ~~types.ts 定义了 nameservers 但 TS/Rust 均未接入~~ | ✅ TS CacheableLookup + Rust hickory-resolver 自定义 nameservers |
 
 ## 🟢 测试缺口
 

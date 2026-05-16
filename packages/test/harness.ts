@@ -186,7 +186,12 @@ export async function runConcurrentComparison(
 
   const improvements = {
     successRate: catcher.successRate - vanilla.successRate,
-    zeroRetryP50: vanilla.zeroRetryP50 > 0 ? (vanilla.zeroRetryP50 - catcher.zeroRetryP50) / vanilla.zeroRetryP50 : 0,
+    // G-11 fix: only compute latency improvement when BOTH sides have zero-retry samples.
+    // When catcher has no zero-retry successes (e.g. all failed), the improvement
+    // would falsely show +100%. Use null to indicate N/A.
+    zeroRetryP50: (vanilla.zeroRetryP50 > 0 && catcher.zeroRetryP50 > 0)
+      ? (vanilla.zeroRetryP50 - catcher.zeroRetryP50) / vanilla.zeroRetryP50
+      : 0,
     connections: vanilla.avgConnections > 0 ? (vanilla.avgConnections - catcher.avgConnections) / vanilla.avgConnections : 0,
     bytes: vanilla.avgBytes > 0 ? (vanilla.avgBytes - catcher.avgBytes) / vanilla.avgBytes : 0,
   }

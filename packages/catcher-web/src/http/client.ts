@@ -144,6 +144,48 @@ async function parseBody(resp: Response, responseType?: 'json' | 'text' | 'bytes
   }
 }
 
+/**
+ * NEW-2: Stream the response body and call onDownloadProgress as bytes arrive.
+ * Falls back to simple arrayBuffer() when no progress callback is provided.
+ */
+async function readBodyWithProgress(
+  resp: Response,
+  onProgress?: (event: { loaded: number; total?: number }) => void,
+  responseType?: 'json' | 'text' | 'bytes' | 'stream',
+): Promise<{ data: any; raw: Uint8Array }> {
+  const contentLength = parseInt(resp.headers.get('content-length') ?? '', 10)
+  const total = isNaN(contentLength) ? undefined : contentLength
+
+  if (!onProgress || !resp.body) {
+    // No progress callback — simple read
+    const raw = new Uint8Array(await resp.arrayBuffer())
+    return { data: parseBodyFromRaw(raw, responseType), raw }
+  }
+
+  // Stream with progress tracking
+  const reader = resp.body.getReader()
+  const chunks: Uint8Array[] = []
+  let loaded = 0
+
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    chunks.push(value)
+    loaded += value.length
+    onProgress({ loaded, total })
+  }
+
+  // Merge chunks into single Uint8Array
+  const raw = new Uint8Array(loaded)
+  let offset = 0
+  for (const chunk of chunks) {
+    raw.set(chunk, offset)
+    offset += chunk.length
+  }
+
+  return { data: parseBodyFromRaw(raw, responseType), raw }
+}
+
 /** Parse body from raw bytes (avoids consuming the Response body). */
 function parseBodyFromRaw(raw: Uint8Array, responseType?: string): any {
   const text = new TextDecoder().decode(raw)
@@ -286,21 +328,32 @@ export function createWebClient(config: HttpClientConfig): IHttpClient {
     try {
       const resp = await fetch(finalUrl, init)
 
+      // NEW-2: Report upload progress — fetch doesn't support granular upload
+      // progress, but once we have response headers, the upload is complete.
+      if (merged.onUploadProgress && init.body) {
+        const bodyLength = typeof init.body === 'string' ? new TextEncoder().encode(init.body).length
+          : init.body instanceof ArrayBuffer ? init.body.byteLength
+          : init.body instanceof Uint8Array ? init.body.length
+          : undefined
+        if (bodyLength !== undefined) {
+          merged.onUploadProgress({ loaded: bodyLength, total: bodyLength })
+        }
+      }
+
       // validateStatus
       const isValid = merged.validateStatus
         ? merged.validateStatus(resp.status)
         : resp.ok
 
       if (!isValid && resp.status >= 500) {
-        let rawData: Uint8Array | undefined
-        try { rawData = new Uint8Array(await resp.arrayBuffer()) } catch {}
+        const { raw } = await readBodyWithProgress(resp, merged.onDownloadProgress)
         const err: any = new Error(`HTTP ${resp.status}`)
         err.code = 'HTTP_5XX'
-        err.response = { status: resp.status, rawData }
+        err.response = { status: resp.status, rawData: raw }
         throw err
       }
 
-      // G10: Stream response
+      // G10: Stream response — no progress tracking for raw streams
       if (merged.responseType === 'stream') {
         const streamResponse: HttpResponse = {
           status: resp.status,
@@ -316,9 +369,8 @@ export function createWebClient(config: HttpClientConfig): IHttpClient {
         return streamResponse
       }
 
-      // G2: Read raw bytes first to capture rawData for error reporting
-      const rawBody = new Uint8Array(await resp.arrayBuffer())
-      const data = parseBodyFromRaw(rawBody, merged.responseType)
+      // NEW-2: Read body with optional download progress
+      const { data, raw: rawBody } = await readBodyWithProgress(resp, merged.onDownloadProgress, merged.responseType)
 
       if (!isValid) {
         // Non-5xx error (e.g. 4xx) — throw as CatcherHttpError

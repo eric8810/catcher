@@ -10,7 +10,7 @@ repository = "https://github.com/eric8810/catcher"
 default = ["rustls-tls", "hickory-dns"]
 rustls-tls = ["reqwest/rustls-tls"]
 native-tls = ["reqwest/native-tls"]
-hickory-dns = ["reqwest/hickory-dns", "dep:hickory-resolver"]
+hickory-dns = ["reqwest/hickory-dns", "dep:hickory-resolver", "dep:hickory-proto"]
 napi = ["dep:napi", "dep:napi-derive"]
 
 [dependencies]
@@ -34,6 +34,7 @@ retry-policies = "0.4"
 
 # ── DNS 缓存 ──
 hickory-resolver = { version = "0.25", optional = true, features = ["tokio"] }
+hickory-proto = { version = "0.25", optional = true }
 
 # ── 重试与退避 ──
 backon = "1"

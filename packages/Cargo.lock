@@ -330,6 +330,7 @@ dependencies = [
  "backon",
  "bytes",
  "catcher-core",
+ "hickory-proto",
  "hickory-resolver",
  "napi",
  "napi-derive",

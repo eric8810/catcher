@@ -57,7 +57,17 @@ impl HttpTransport {
         // G8: TLS configuration
         reqwest_builder = build_tls_config(reqwest_builder, &config.tls)?;
 
-        // G7: DNS resolution: validates config and applies host_mapping
+        // G7: DNS resolution: validates config, builds custom resolver if nameservers configured
+        #[cfg(feature = "hickory-dns")]
+        if let Some(ref dns) = config.dns {
+            build_dns_resolver(dns)?;
+            if !dns.nameservers.is_empty() {
+                let resolver = crate::transport::dns::build_custom_resolver(&dns.nameservers)
+                    .map_err(|e| CatcherError::InvalidConfig(e))?;
+                reqwest_builder = reqwest_builder.dns_resolver(resolver);
+            }
+        }
+        #[cfg(not(feature = "hickory-dns"))]
         if let Some(ref dns) = config.dns {
             build_dns_resolver(dns)?;
         }

@@ -33,6 +33,75 @@ pub fn resolve_host_mapping<'a>(
     config.host_mapping.get(hostname).map(|ip| ip.as_str())
 }
 
+// ── Custom DNS resolver with nameservers support ──────────────
+
+#[cfg(feature = "hickory-dns")]
+mod custom_resolver {
+    use std::net::SocketAddr;
+    use std::sync::Arc;
+    use hickory_resolver::config::{NameServerConfig, ResolverConfig, ResolverOpts};
+    use hickory_proto::xfer::Protocol;
+    use hickory_resolver::TokioResolver;
+    use hickory_resolver::name_server::TokioConnectionProvider;
+
+    /// A reqwest-compatible DNS resolver backed by hickory-resolver
+    /// with custom nameservers.
+    #[derive(Clone)]
+    pub struct HickoryDnsResolver {
+        inner: TokioResolver,
+    }
+
+    impl HickoryDnsResolver {
+        pub fn new(nameservers: &[String]) -> Result<Self, String> {
+            let mut config = ResolverConfig::new();
+            for ns in nameservers {
+                let addr: SocketAddr = ns.parse().map_err(|e| format!("invalid nameserver '{ns}': {e}"))?;
+                config.add_name_server(NameServerConfig {
+                    socket_addr: addr,
+                    protocol: Protocol::Udp,
+                    tls_dns_name: None,
+                    trust_negative_responses: false,
+                    bind_addr: None,
+                    http_endpoint: None,
+                });
+            }
+            let resolver = TokioResolver::builder_with_config(config, TokioConnectionProvider::default())
+                .with_options(ResolverOpts::default())
+                .build();
+            Ok(Self { inner: resolver })
+        }
+    }
+
+    impl reqwest::dns::Resolve for HickoryDnsResolver {
+        fn resolve(
+            &self,
+            name: reqwest::dns::Name,
+        ) -> reqwest::dns::Resolving {
+            let resolver = self.inner.clone();
+            Box::pin(async move {
+                let lookup = resolver.lookup_ip(name.as_str()).await
+                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+                let addrs: Vec<SocketAddr> = lookup.into_iter()
+                    .map(|ip| SocketAddr::new(ip, 0))
+                    .collect();
+                Ok(Box::new(addrs.into_iter()) as Box<dyn Iterator<Item = SocketAddr> + Send>)
+            })
+        }
+    }
+
+    /// Build a custom DNS resolver with the given nameservers.
+    /// Returns Arc<HickoryDnsResolver> to satisfy reqwest's dns_resolver(R) where R: Resolve + Sized.
+    pub fn build_custom_resolver(
+        nameservers: &[String],
+    ) -> Result<Arc<HickoryDnsResolver>, String> {
+        let resolver = HickoryDnsResolver::new(nameservers)?;
+        Ok(Arc::new(resolver))
+    }
+}
+
+#[cfg(feature = "hickory-dns")]
+pub use custom_resolver::build_custom_resolver;
+
 #[cfg(test)]
 mod tests {
     use super::*;

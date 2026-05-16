@@ -52,6 +52,11 @@ export class ComparisonReporter {
         .filter(r => r.vanilla.zeroRetryP50 > 0 && r.catcher.zeroRetryP50 > 0)
         .reduce((s, r) => s + r.improvements.zeroRetryP50, 0)
         / Math.max(1, this.results.filter(r => r.vanilla.zeroRetryP50 > 0 && r.catcher.zeroRetryP50 > 0).length),
+      // G-11 fix: show absolute P50 diff alongside relative percentage for small-baseline scenarios
+      zeroRetryP50AbsDiff: this.results
+        .filter(r => r.vanilla.zeroRetryP50 > 0 && r.catcher.zeroRetryP50 > 0)
+        .reduce((s, r) => s + (r.vanilla.zeroRetryP50 - r.catcher.zeroRetryP50), 0)
+        / Math.max(1, this.results.filter(r => r.vanilla.zeroRetryP50 > 0 && r.catcher.zeroRetryP50 > 0).length),
     }
 
     // Count scenarios with retry success
@@ -71,6 +76,7 @@ export class ComparisonReporter {
       averageImprovement: {
         successRate: pct(avgImprovement.successRate),
         zeroRetryP50: pct(avgImprovement.zeroRetryP50),
+        zeroRetryP50AbsDiff: ms(avgImprovement.zeroRetryP50AbsDiff),
       },
       retry: {
         scenariosWithRetry: scenariosWithRetry.length,
@@ -96,12 +102,13 @@ export class ComparisonReporter {
       // ═══ Summary table ═══
       lines.push('## 汇总 — 成功率 + 0-retry 延迟（公平基线）')
       lines.push('')
-      lines.push('| 场景 | 网络 | Vanilla | Catcher | 成功率改善 | 0-retry P50 Vanilla | 0-retry P50 Catcher | P50改善 | Catcher重试率 | 重试代价 |')
-      lines.push('|------|------|---------|---------|---------|--------------------|--------------------|--------|-------------|---------|')
+      lines.push('| 场景 | 网络 | Vanilla | Catcher | 成功率改善 | 0-retry P50 Vanilla | 0-retry P50 Catcher | P50改善 | P50绝对差 | Catcher重试率 | 重试代价 |')
+      lines.push('|------|------|---------|---------|---------|--------------------|--------------------|--------|----------|-------------|---------|')
 
       for (const r of this.results) {
         const hasBothZero = r.vanilla.zeroRetryP50 > 0 && r.catcher.zeroRetryP50 > 0
         const p50Imp = hasBothZero ? pct(r.improvements.zeroRetryP50) : 'N/A'
+        const p50Abs = hasBothZero ? ms(r.vanilla.zeroRetryP50 - r.catcher.zeroRetryP50) : 'N/A'
         const retryRate = r.catcher.successes > 0
           ? `${((r.catcher.retriedSuccesses / r.catcher.successes) * 100).toFixed(0)}% (${r.catcher.retriedSuccesses}/${r.catcher.successes})`
           : '-'
@@ -110,7 +117,7 @@ export class ComparisonReporter {
           : '-'
 
         lines.push(
-          `| ${r.name} | ${r.networkProfile} | ${rateStr(r.vanilla.successes, r.vanilla.iterations)} | ${rateStr(r.catcher.successes, r.catcher.iterations)} | ${pct(r.improvements.successRate)} | ${r.vanilla.zeroRetryP50 > 0 ? ms(r.vanilla.zeroRetryP50) : '-'} | ${r.catcher.zeroRetryP50 > 0 ? ms(r.catcher.zeroRetryP50) : '-'} | ${p50Imp} | ${retryRate} | ${retryPenalty} |`,
+          `| ${r.name} | ${r.networkProfile} | ${rateStr(r.vanilla.successes, r.vanilla.iterations)} | ${rateStr(r.catcher.successes, r.catcher.iterations)} | ${pct(r.improvements.successRate)} | ${r.vanilla.zeroRetryP50 > 0 ? ms(r.vanilla.zeroRetryP50) : '-'} | ${r.catcher.zeroRetryP50 > 0 ? ms(r.catcher.zeroRetryP50) : '-'} | ${p50Imp} | ${p50Abs} | ${retryRate} | ${retryPenalty} |`,
         )
       }
 
@@ -189,7 +196,7 @@ export class ComparisonReporter {
       lines.push('> **0-retry P50 改善**仅在双方都有无重试成功的场景中平均，公平对比基础设施开销。')
       lines.push('')
       lines.push(`- 平均成功率改善: **${summary.averageImprovement?.successRate}**`)
-      lines.push(`- 平均 0-retry P50 改善: **${summary.averageImprovement?.zeroRetryP50}** (${summary.totalScenarios} 场景)`)
+      lines.push(`- 平均 0-retry P50 改善: **${summary.averageImprovement?.zeroRetryP50}** (绝对差值: ${summary.averageImprovement?.zeroRetryP50AbsDiff}) (${summary.totalScenarios} 场景)`)
       if (summary.retry?.scenariosWithRetry > 0) {
         lines.push('')
         lines.push('### 重试统计')
