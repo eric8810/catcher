@@ -277,6 +277,7 @@ export function createHttpClient(config: HttpClientConfig): IHttpClient {
 
   // 7. Optionally wrap with circuit breaker (tracks failures across requests)
   let breaker: CircuitBreakerPolicy | null = null
+  let lastBreakerState: 'closed' | 'open' | 'half-open' = 'closed'
   if (circuitBreaker) {
     breaker = new CircuitBreakerPolicy(
       {
@@ -287,9 +288,64 @@ export function createHttpClient(config: HttpClientConfig): IHttpClient {
     )
   }
 
+  const getBreakerState = (b: CircuitBreakerPolicy): 'closed' | 'open' | 'half-open' => {
+    const s: number = (b as any).state
+    if (s === 1) return 'open'
+    if (s === 2) return 'half-open'
+    return 'closed'
+  }
+
+  // 7b. Network quality tracking — classifies latency into levels and emits
+  //     networkQualityChange when the level transitions.
+  //     Thresholds match Rust: Excellent(<80ms), Good(<200ms), Fair(<500ms), Poor(<1000ms), Bad(>=1000ms).
+  type QualityLevel = 'excellent' | 'good' | 'fair' | 'poor' | 'bad'
+  const rttWindow: number[] = []
+  const RTT_WINDOW_SIZE = 20
+  let lastQualityLevel: QualityLevel = 'good'
+
+  const classifyQuality = (avgRtt: number): QualityLevel => {
+    if (avgRtt < 80) return 'excellent'
+    if (avgRtt < 200) return 'good'
+    if (avgRtt < 500) return 'fair'
+    if (avgRtt < 1000) return 'poor'
+    return 'bad'
+  }
+
+  const trackQuality = (durationMs: number) => {
+    rttWindow.push(durationMs)
+    if (rttWindow.length > RTT_WINDOW_SIZE) rttWindow.shift()
+    const avg = rttWindow.reduce((a, b) => a + b, 0) / rttWindow.length
+    const newLevel = classifyQuality(avg)
+    if (newLevel !== lastQualityLevel) {
+      const from = lastQualityLevel
+      lastQualityLevel = newLevel
+      emit({ type: 'networkQualityChange', from, to: newLevel })
+    }
+  }
+
   const doRequest = breaker
-    ? (method: string, ...args: any[]) =>
-        breaker!.execute(() => rawDoRequest(method, ...args))
+    ? (method: string, ...args: any[]) => {
+        const beforeState = lastBreakerState
+        return breaker!.execute(() => rawDoRequest(method, ...args))
+          .catch((e: any) => {
+            // After failure, check if breaker state changed
+            const afterState = getBreakerState(breaker!)
+            if (afterState !== lastBreakerState) {
+              lastBreakerState = afterState
+              emit({ type: 'circuitBreakerChange', from: beforeState, to: afterState })
+            }
+            throw e
+          })
+          .then((result: any) => {
+            // After success, check if breaker state changed (e.g. half-open → closed)
+            const afterState = getBreakerState(breaker!)
+            if (afterState !== lastBreakerState) {
+              lastBreakerState = afterState
+              emit({ type: 'circuitBreakerChange', from: beforeState, to: afterState })
+            }
+            return result
+          })
+      }
     : rawDoRequest
 
   // 8. Optionally wrap with concurrency queue (outermost layer)
@@ -420,6 +476,7 @@ export function createHttpClient(config: HttpClientConfig): IHttpClient {
           status: rawResp.status,
           durationMs: Date.now() - startTime,
         })
+        trackQuality(Date.now() - startTime)
         return streamResponse
       }
 
@@ -443,6 +500,7 @@ export function createHttpClient(config: HttpClientConfig): IHttpClient {
         status: response.status,
         durationMs: Date.now() - startTime,
       })
+      trackQuality(Date.now() - startTime)
 
       return finalResponse?.data !== undefined ? finalResponse.data : finalResponse
     } catch (error: any) {

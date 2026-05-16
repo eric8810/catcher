@@ -62,6 +62,7 @@ function createCatcherError(
       status: error.response.status,
       headers: error.response.headers ?? {},
       data: error.response.data,
+      rawData: error.response.rawData,
     }
   }
   ;(err as any).attempt = attempt
@@ -140,6 +141,18 @@ async function parseBody(resp: Response, responseType?: 'json' | 'text' | 'bytes
     case 'json':
     default:
       return tryParseJSON(await resp.text())
+  }
+}
+
+/** Parse body from raw bytes (avoids consuming the Response body). */
+function parseBodyFromRaw(raw: Uint8Array, responseType?: string): any {
+  const text = new TextDecoder().decode(raw)
+  switch (responseType) {
+    case 'text': return text
+    case 'bytes': return raw
+    case 'json':
+    default:
+      return tryParseJSON(text)
   }
 }
 
@@ -279,9 +292,11 @@ export function createWebClient(config: HttpClientConfig): IHttpClient {
         : resp.ok
 
       if (!isValid && resp.status >= 500) {
+        let rawData: Uint8Array | undefined
+        try { rawData = new Uint8Array(await resp.arrayBuffer()) } catch {}
         const err: any = new Error(`HTTP ${resp.status}`)
         err.code = 'HTTP_5XX'
-        err.response = { status: resp.status }
+        err.response = { status: resp.status, rawData }
         throw err
       }
 
@@ -297,15 +312,18 @@ export function createWebClient(config: HttpClientConfig): IHttpClient {
         eventListeners.get('requestComplete')?.forEach(fn =>
           fn({ type: 'requestComplete', method, url: finalUrl, status: resp.status, durationMs: Date.now() - startTime }),
         )
+        trackQuality(Date.now() - startTime)
         return streamResponse
       }
 
-      const data = await parseBody(resp, merged.responseType)
+      // G2: Read raw bytes first to capture rawData for error reporting
+      const rawBody = new Uint8Array(await resp.arrayBuffer())
+      const data = parseBodyFromRaw(rawBody, merged.responseType)
 
       if (!isValid) {
         // Non-5xx error (e.g. 4xx) — throw as CatcherHttpError
         const err: any = new Error(`HTTP ${resp.status}`)
-        err.response = { status: resp.status, data }
+        err.response = { status: resp.status, data, rawData: rawBody }
         throw err
       }
 
@@ -323,6 +341,7 @@ export function createWebClient(config: HttpClientConfig): IHttpClient {
       eventListeners.get('requestComplete')?.forEach(fn =>
         fn({ type: 'requestComplete', method, url: finalUrl, status: resp.status, durationMs: Date.now() - startTime }),
       )
+      trackQuality(Date.now() - startTime)
 
       return final?.data !== undefined ? final.data : final
     } catch (error: any) {
@@ -383,6 +402,7 @@ export function createWebClient(config: HttpClientConfig): IHttpClient {
 
   // ── circuit breaker ──
   let breaker: CircuitBreakerPolicy | null = null
+  let lastBreakerState: 'closed' | 'open' | 'half-open' = 'closed'
   if (circuitBreaker) {
     breaker = new CircuitBreakerPolicy(
       {
@@ -393,9 +413,66 @@ export function createWebClient(config: HttpClientConfig): IHttpClient {
     )
   }
 
+  const getBreakerState = (b: CircuitBreakerPolicy): 'closed' | 'open' | 'half-open' => {
+    const s: number = (b as any).state
+    if (s === 1) return 'open'
+    if (s === 2) return 'half-open'
+    return 'closed'
+  }
+
+  // ── network quality tracking ──
+  type QualityLevel = 'excellent' | 'good' | 'fair' | 'poor' | 'bad'
+  const rttWindow: number[] = []
+  const RTT_WINDOW_SIZE = 20
+  let lastQualityLevel: QualityLevel = 'good'
+
+  const classifyQuality = (avgRtt: number): QualityLevel => {
+    if (avgRtt < 80) return 'excellent'
+    if (avgRtt < 200) return 'good'
+    if (avgRtt < 500) return 'fair'
+    if (avgRtt < 1000) return 'poor'
+    return 'bad'
+  }
+
+  const trackQuality = (durationMs: number) => {
+    rttWindow.push(durationMs)
+    if (rttWindow.length > RTT_WINDOW_SIZE) rttWindow.shift()
+    const avg = rttWindow.reduce((a, b) => a + b, 0) / rttWindow.length
+    const newLevel = classifyQuality(avg)
+    if (newLevel !== lastQualityLevel) {
+      const from = lastQualityLevel
+      lastQualityLevel = newLevel
+      eventListeners.get('networkQualityChange')?.forEach(fn =>
+        fn({ type: 'networkQualityChange', from, to: newLevel }),
+      )
+    }
+  }
+
   const doRequest = breaker
-    ? (method: string, url: string, body: any, reqConfig?: RequestConfig) =>
-        breaker!.execute(() => rawDoRequest(method, url, body, reqConfig))
+    ? (method: string, url: string, body: any, reqConfig?: RequestConfig) => {
+        const beforeState = lastBreakerState
+        return breaker!.execute(() => rawDoRequest(method, url, body, reqConfig))
+          .catch((e: any) => {
+            const afterState = getBreakerState(breaker!)
+            if (afterState !== lastBreakerState) {
+              lastBreakerState = afterState
+              eventListeners.get('circuitBreakerChange')?.forEach(fn =>
+                fn({ type: 'circuitBreakerChange', from: beforeState, to: afterState }),
+              )
+            }
+            throw e
+          })
+          .then((result: any) => {
+            const afterState = getBreakerState(breaker!)
+            if (afterState !== lastBreakerState) {
+              lastBreakerState = afterState
+              eventListeners.get('circuitBreakerChange')?.forEach(fn =>
+                fn({ type: 'circuitBreakerChange', from: beforeState, to: afterState }),
+              )
+            }
+            return result
+          })
+      }
     : rawDoRequest
 
   // ── concurrency queue ──

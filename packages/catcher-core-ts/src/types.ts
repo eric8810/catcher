@@ -424,16 +424,15 @@ export interface TransportAdapter {
 
 // === Events (G11) ===
 //
-// NOTE: `circuitBreakerChange` and `networkQualityChange` are typed here
-// for forward-compatibility but are NOT yet emitted by the current
-// implementation. Only `retry` and `requestComplete` are emitted.
-// Consumers can subscribe via client.on() without error — the events
-// will simply not fire until a future release adds the emission logic.
+// NOTE: `circuitBreakerChange` and `networkQualityChange` are both emitted
+// by the implementation. `circuitBreakerChange` fires when the circuit breaker
+// state transitions. `networkQualityChange` fires when the sliding-window
+// average RTT crosses a quality threshold (excellent/good/fair/poor/bad).
+
+export type QualityLevel = 'excellent' | 'good' | 'fair' | 'poor' | 'bad'
 
 export type ClientEvent =
   | { type: 'retry'; attempt: number; error: Error; url: string }
   | { type: 'requestComplete'; method: string; url: string; status: number; durationMs: number }
-  /** @deprecated Not yet emitted. Reserved for future use. */
   | { type: 'circuitBreakerChange'; from: 'closed' | 'open' | 'half-open'; to: 'closed' | 'open' | 'half-open' }
-  /** @deprecated Not yet emitted. Reserved for future use. */
-  | { type: 'networkQualityChange'; from: string; to: string }
+  | { type: 'networkQualityChange'; from: QualityLevel; to: QualityLevel }

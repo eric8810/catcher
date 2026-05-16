@@ -43,6 +43,17 @@ function redactHeaders(headers: Record<string, string>): Record<string, string> 
 }
 
 /**
+ * Convert response data to a Uint8Array for rawData field.
+ */
+function toRawData(data: unknown): Uint8Array | undefined {
+  if (data == null) return undefined
+  if (data instanceof ArrayBuffer) return new Uint8Array(data)
+  if (ArrayBuffer.isView(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+  if (typeof data === 'string') return new TextEncoder().encode(data)
+  try { return new TextEncoder().encode(JSON.stringify(data)) } catch { return undefined }
+}
+
+/**
  * Create a CatcherHttpError from an underlying error.
  */
 export function createCatcherError(
@@ -71,6 +82,7 @@ export function createCatcherError(
       status: error.response.status,
       headers: error.response.headers ?? {},
       data: error.response.data,
+      rawData: error.response.rawData ?? toRawData(error.response.data),
     }
   }
 
