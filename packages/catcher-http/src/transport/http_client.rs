@@ -52,7 +52,14 @@ impl HttpTransport {
                     .pool
                     .keep_alive
                     .then(|| Duration::from_secs(config.pool.keep_alive_interval_secs)),
-            );
+            )
+            .tcp_keepalive_interval(
+                config
+                    .pool
+                    .keep_alive
+                    .then(|| Duration::from_secs(config.pool.keep_alive_interval_secs)),
+            )
+            .tcp_keepalive_retries(config.pool.keep_alive.then_some(3));
 
         // G8: TLS configuration
         reqwest_builder = build_tls_config(reqwest_builder, &config.tls)?;

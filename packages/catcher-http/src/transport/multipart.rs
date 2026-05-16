@@ -247,7 +247,8 @@ mod tests {
         let form = MultipartForm::new()
             .bytes("binary_data", "application/octet-stream", vec![0x00, 0x01, 0x02]);
 
-        let (_body, ct) = form.encode();
+        let (body, _ct) = form.encode();
+        assert!(!body.is_empty());
         assert!(!form.is_empty());
     }
 

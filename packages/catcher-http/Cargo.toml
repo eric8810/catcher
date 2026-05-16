@@ -8,7 +8,7 @@ repository = "https://github.com/eric8810/catcher"
 
 [features]
 default = ["rustls-tls", "hickory-dns"]
-rustls-tls = ["reqwest/rustls-tls", "dep:rustls", "dep:rustls-pki-types", "dep:sha2", "dep:base64", "dep:webpki-roots"]
+rustls-tls = ["reqwest/rustls", "dep:rustls", "dep:rustls-pki-types", "dep:sha2", "dep:base64", "dep:webpki-roots"]
 native-tls = ["reqwest/native-tls"]
 hickory-dns = ["reqwest/hickory-dns", "dep:hickory-resolver", "dep:hickory-proto"]
 napi = ["dep:napi", "dep:napi-derive"]
@@ -25,19 +25,19 @@ tokio-stream = "0.1"
 bytes = "1"
 
 # ── HTTP 传输 ──
-reqwest = { version = "0.12", default-features = false, features = [
-    "http2", "gzip", "brotli", "deflate", "stream", "charset"
+reqwest = { version = "0.13", default-features = false, features = [
+    "http2", "gzip", "brotli", "deflate", "stream", "charset", "query", "form"
 ] }
-reqwest-middleware = "0.4"
-reqwest-retry = "0.7"
-retry-policies = "0.4"
+reqwest-middleware = "0.5"
+reqwest-retry = "0.9"
+retry-policies = "0.5"
 
 # ── DNS 缓存 ──
 hickory-resolver = { version = "0.25", optional = true, features = ["tokio"] }
 hickory-proto = { version = "0.25", optional = true }
 
 # ── TLS pinning (pulled in by rustls-tls) ──
-rustls = { version = "0.23", optional = true, default-features = false, features = ["ring", "logging", "std", "tls12"] }
+rustls = { version = "0.23", optional = true, default-features = false, features = ["aws_lc_rs", "logging", "std", "tls12"] }
 rustls-pki-types = { version = "1", optional = true, features = ["std"] }
 sha2 = { version = "0.10", optional = true }
 base64 = { version = "0.22", optional = true }

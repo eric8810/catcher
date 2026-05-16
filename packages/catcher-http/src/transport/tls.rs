@@ -149,7 +149,7 @@ fn build_tls_with_pinning(
     let pinning_verifier = Arc::new(PinningVerifier::new(base_verifier, &pins));
 
     // Build ClientConfig with custom verifier
-    let crypto_provider = rustls::crypto::ring::default_provider();
+    let crypto_provider = rustls::crypto::aws_lc_rs::default_provider();
     let tls_config = rustls::ClientConfig::builder_with_provider(Arc::new(crypto_provider))
         .with_protocol_versions(&[&rustls::version::TLS12, &rustls::version::TLS13])
         .map_err(|e| CatcherError::TlsError(format!("set TLS versions: {e}")))?

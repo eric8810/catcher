@@ -21,7 +21,7 @@
 
 | # | 问题 | 说明 |
 |---|------|------|
-| A-02 | WS per-message deflate | `compression.rs:18` 显式忽略 per_message_deflate。根因：tungstenite 全版本不支持 RFC 7692。**评估完成** → 见 `tungstenite-permessage-deflate.md` + `tungstenite-deflate-fork-analysis.md`。短期：升级 0.26+；中期：评估 yawc/ratchet |
+| A-02 | WS per-message deflate | `compression.rs` 仍忽略 per_message_deflate。根因：tungstenite 0.29 仍不支持 RFC 7692。**短期升级已完成**（0.24→0.29，仅解决版本/API 落后）；中期：评估 Signal fork / upstream PR #426 experimental 路线，yawc 因社区验证不足暂不推荐默认替换 |
 | B-01 | Transport trait 抽象 | 架构级变更，TS 层已标 `@deprecated`，无直接需求 |
 | ~~B-02~~ | ~~Multipart 编码器（Rust 侧）~~ | ✅ Rust FFI `catcher_http_multipart` + `MultipartForm` 编码器已实现；TS 侧通过 `FormData` + `post()` 自动 multipart/form-data |
 | ~~N-04~~ | ~~网络质量实时事件推送~~ | ✅ Rust QualitySubscription callback + TS `networkQualityChange` event 均已实现 |
@@ -110,7 +110,7 @@
 
 **已实施的缓解措施**（Rust 侧 `catcher-http/src/types/http.rs`）：
 - `idle_timeout_secs`: 90 → **30s** — 缩短坏连接在池中存活时间
-- `keep_alive_interval_secs`: 60 → **20s** — 更频繁探测连接活性
+- `keep_alive_interval_secs`: 60 → **20s** — 更频繁探测连接活性（reqwest 0.13 升级后同时接入 `tcp_keepalive_interval` + `tcp_keepalive_retries(3)`）
 - 效果：降低 retry 复用已死连接的概率
 
 **TS 侧已有措施**（`catcher-http-ts/src/agent/shared-agent.ts`）：

@@ -295,7 +295,7 @@ async fn connection_manager(
                 cmd = cmd_rx.recv() => {
                     match cmd {
                         Some(WsCommand::Text(t)) => {
-                            let msg = tokio_tungstenite::tungstenite::Message::Text(t);
+                            let msg = tokio_tungstenite::tungstenite::Message::Text(t.into());
                             if writer.send(msg).await.is_err() {
                                 break LoopOutcome::Disconnected {
                                     code: 1006,
@@ -304,7 +304,7 @@ async fn connection_manager(
                             }
                         }
                         Some(WsCommand::Binary(d)) => {
-                            let msg = tokio_tungstenite::tungstenite::Message::Binary(d);
+                            let msg = tokio_tungstenite::tungstenite::Message::Binary(d.into());
                             if writer.send(msg).await.is_err() {
                                 break LoopOutcome::Disconnected {
                                     code: 1006,
@@ -316,7 +316,7 @@ async fn connection_manager(
                             let msg = tokio_tungstenite::tungstenite::Message::Close(Some(
                                 tokio_tungstenite::tungstenite::protocol::CloseFrame {
                                     code: code.into(),
-                                    reason: std::borrow::Cow::Owned(reason),
+                                    reason: reason.into(),
                                 },
                             ));
                             let _ = writer.send(msg).await;
@@ -338,7 +338,7 @@ async fn connection_manager(
                         }
                         state.waiting_for_pong = true;
                         let _ = writer.send(
-                            tokio_tungstenite::tungstenite::Message::Ping(Vec::new()),
+                            tokio_tungstenite::tungstenite::Message::Ping(Vec::new().into()),
                         ).await;
                     }
                 }
@@ -354,7 +354,7 @@ async fn connection_manager(
                         }
                         Some(Ok(tokio_tungstenite::tungstenite::Message::Binary(d))) => {
                             let _ = event_tx.send(WsEvent::Message {
-                                data: d,
+                                data: d.to_vec(),
                                 is_binary: true,
                             });
                         }
@@ -370,7 +370,7 @@ async fn connection_manager(
                             let (code, reason) = frame
                                 .map(|f| {
                                     let c: u16 = f.code.into();
-                                    (c, f.reason.into_owned())
+                                    (c, f.reason.to_string())
                                 })
                                 .unwrap_or((1006, "abnormal".into()));
                             break LoopOutcome::Disconnected { code, reason };
