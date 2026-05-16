@@ -13,13 +13,13 @@
 | 类别 | 数量 | 严重度 |
 |------|:----:|:------:|
 | A. 代码已实现但未接入管线 | 3 | 🟡 (A-01, A-03 已修复；A-02 待评估) |
-| B. 设计文档有方案但代码未开始 | 2 | 🟡 (B-03 已修复) |
+| B. 设计文档有方案但代码未开始 | 1 | 🟡 (B-02 已修复；B-01 待评估) |
 | C. 文档标记 🔲 但代码实际已完成 | 8 | 🟢 (文档已同步) |
 | D. 已发现但未修复的 Bug | 0 | ✅ 全部修复 |
 | D✅. 已修复的 Bug（原记录需关闭） | 5 | — |
 | E. 类型定义存在但从未使用 | 4 | 🟢 |
 | F. 缺失的测试 | 8 | 🟡 |
-| **G. E2E 弱网性能问题** | **10** | **🔴** |
+| **G. E2E 弱网性能问题** | **10** | **🟡** (G-03~G-12 + G-06 已修复/缓解；G-01/G-02 待上游) |
 | **H. 平台绑定层缺口** | **2** | **🟡** (H-03/H-04/H-05 已修复) |
 | **I. 规划中但未启动的功能** | **1** | **🟢** (I-02 已完成) |
 
@@ -139,19 +139,17 @@ pub trait Transport: Send + Sync {
 
 ---
 
-### B-02. Multipart/FormData 编码器（Rust 侧）
+### ~~B-02~~. Multipart/FormData 编码器（Rust 侧） — ✅ 已修复
 
-**严重度**: 🟡 P1 — Dart/Swift/Kotlin 上传文件需要
+**严重度**: ~~🟡 P1~~ → ✅ 已修复
 
-**现状**:
-- TS 层 FormData 自动处理已完成（axios + fetch 均支持）
-- Rust `HttpRequest.body: Option<Vec<u8>>` + `content_type: Option<String>` 仅接受裸字节
-- **无 Rust 侧 multipart 编码器** — Dart 走 dart:ffi 不走 dart:io，无法使用 `MultipartRequest`
-- native-layer-capability-gaps.md N-01 标记 P2
-
-**设计目标** (native-layer-capability-gaps.md 方案 B):
-- `MultipartBuilder` + 5 个 C ABI 符号
-- 或 Dart 侧自行编码（方案 A，~200-300 行）
+**修复方案**（2026-06-19 实施）:
+- `multipart.rs` 完整实现 `MultipartForm` 编码器（text/file/bytes 三种 part 类型）
+- `HttpRequest` 新增 `multipart: Option<MultipartForm>` 字段
+- `HttpTransport::execute()` 和 `execute_http_request()` 中 multipart 优先于 body/content_type
+- FFI 层新增 `catcher_http_multipart()` + `FfiMultipartPart` 结构体
+- 5 个单元测试 (mp1~mp5) 全部通过
+- TS 侧通过 `FormData` + `post()` 自动 multipart/form-data
 
 ---
 
@@ -327,7 +325,7 @@ pub trait Transport: Send + Sync {
 ```
 keepAlive 池中坏连接
   → retry 对坏连接反复重试（G-01，🟡 已缓解：Rust pool timeout 90→30s + keepalive 60→20s）
-  → 重试触发过多（G-03）
+  → 重试触发过多（~~G-03~~，✅ 已缓解：minTimeout 500ms + retry 时销毁坏连接）
   → keepAlive 健康检查缺失（G-02，🟡 已缓解：Rust 调优 + TS socket error 驱逐）
   → 请求放大效应：catcher 比 vanilla 慢 4x / 成功率更低
 ```
@@ -338,16 +336,16 @@ keepAlive 池中坏连接
 |---|------|:------:|:----:|----------------|
 | G-01 | **Retry 复用坏连接** | 🔴 | 🟡 已缓解 | [retry-reuses-bad-connection.md](./retry-reuses-bad-connection.md) |
 | G-02 | **keepAlive 无健康检查** | 🔴 | 🟡 已缓解 | [keepalive-broken-connection.md](./keepalive-broken-connection.md) |
-| G-03 | Retry 触发过多 | 🟡 | 🔲 | [retry-over-triggers.md](./retry-over-triggers.md) |
-| G-06 | 代理延迟在连接时固化（测试基础设施 bug）| 🔴 | 🔲 | [proxy-latency-captured-at-connect.md](./proxy-latency-captured-at-connect.md) |
-| G-07 | retry minTimeout 偏高（退避从 1s 起步） | 🟡 | 🔲 | [retry-min-timeout-too-high.md](./retry-min-timeout-too-high.md) |
-| G-08 | S5 大体积消息缺 retry | 🟡 | 🔲 | [s5-missing-retry.md](./s5-missing-retry.md) |
-| G-09 | S7 metric 滥用（msgFinishOrder 当延迟） | 🟡 | 🔲 | [s7-metric-abuse.md](./s7-metric-abuse.md) |
-| G-10 | chaos parseInt 下划线（`600_000` → 600ms） | 🟡 | 🔲 | [chaos-parseint-underscore.md](./chaos-parseint-underscore.md) |
-| G-11 | reporter 统计缺陷（全失败假改善等） | 🟡 | 🔲 | [reporter-stat-flaws.md](./reporter-stat-flaws.md) |
-| G-12 | 延迟对比跨重试次数混算 | 🟡 | 🔲 | [retry-bucketed-comparison.md](./retry-bucketed-comparison.md) |
+| ~~G-03~~ | ~~Retry 触发过多~~ | 🟡 | ✅ 已缓解 | [retry-over-triggers.md](./retry-over-triggers.md) |
+| ~~G-06~~ | ~~代理延迟在连接时固化~~ | 🔴 | ✅ 已修复 | [proxy-latency-captured-at-connect.md](./proxy-latency-captured-at-connect.md) |
+| ~~G-07~~ | ~~retry minTimeout 偏高~~ | 🟡 | ✅ 已修复 | [retry-min-timeout-too-high.md](./retry-min-timeout-too-high.md) |
+| ~~G-08~~ | ~~S5 大体积消息缺 retry~~ | 🟡 | ✅ 已修复 | [s5-missing-retry.md](./s5-missing-retry.md) |
+| ~~G-09~~ | ~~S7 metric 滥用~~ | 🟡 | ✅ 已修复 | [s7-metric-abuse.md](./s7-metric-abuse.md) |
+| ~~G-10~~ | ~~chaos parseInt 下划线~~ | 🟡 | ✅ 已修复 | [chaos-parseint-underscore.md](./chaos-parseint-underscore.md) |
+| ~~G-11~~ | ~~reporter 统计缺陷~~ | 🟡 | ✅ 已修复 | [reporter-stat-flaws.md](./reporter-stat-flaws.md) |
+| ~~G-12~~ | ~~延迟对比跨重试次数混算~~ | 🟡 | ✅ 已修复 | [retry-bucketed-comparison.md](./retry-bucketed-comparison.md) |
 
-> **注意**：G-06 为测试基础设施 bug，可能导致 G-01~G-05 的 E2E 证据需要重新评估。
+> **注意**：G-06 已修复（代理层动态 conditions + disruptAll + 带宽变量名 bug），G-03~G-12 均已修复或缓解。仅 G-01/G-02 因 reqwest 上游限制仍为 🟡 缓解状态。
 
 ### 关键证据
 
@@ -462,13 +460,21 @@ keepAlive 池中坏连接
 D-01 (per-request retry) 和 D-02 (onRetry 双触发) 已在 2026-06-18 前修复。
 D-03, D-04, D-05 于 2026-06-19 修复。
 
-### ~~Phase 2 — E2E 弱网性能修复（短期，高优先级）~~ — 待实施
+### ~~Phase 2 — E2E 弱网性能修复（短期，高优先级）~~ — 大部分已完成
 
-```
-G-02 keepAlive 健康检查 → G-01 retry 复用坏连接 → G-07 retry minTimeout 偏高 → G-03 retry 触发过多
-```
+已完成：
+- ✅ G-06: 代理延迟固化 — 动态 conditions + disruptAll + 带宽变量名 bug 修复
+- ✅ G-03: Retry 触发过多 — minTimeout 500ms + retry 时销毁坏连接
+- ✅ G-07: retry minTimeout 偏高 — TS 500ms, Rust 100ms
+- ✅ G-08: S5 大体积消息 retry — `attempts: 2`
+- ✅ G-09: S7 metric 滥用 — 清理未用变量
+- ✅ G-10: chaos parseInt 下划线 — `'600000'`
+- ✅ G-11: reporter 统计缺陷 — zeroRetryP50 + 绝对差值列
+- ✅ G-12: 延迟对比分桶 — 按重试次数分桶展示
 
-> 注意：G-06（代理延迟固化）为测试基础设施 bug，需先修复后再重跑 E2E 确认 G-01~G-03 的证据是否仍然成立。
+仍为缓解状态（依赖 reqwest 上游）：
+- 🟡 G-01: Retry 复用坏连接 — pool timeout 缩短 + keepalive 频率提高
+- 🟡 G-02: keepAlive 无健康检查 — 同上
 
 ### ~~Phase 3 — 平台验证与管线接入~~ — ✅ 主要条目已完成
 
@@ -493,16 +499,16 @@ G-02 keepAlive 健康检查 → G-01 retry 复用坏连接 → G-07 retry minTim
 - ✅ uniffi.md 补写（Swift/Kotlin 使用指南）
 - ✅ C 类别文档状态已同步
 
-### ~~Phase 5 — 新功能（中期）~~ — 部分完成
+### ~~Phase 5 — 新功能（中期）~~ — 大部分完成
 
 已完成：
 - ✅ H-04/H-05: Dart 流式下载 + per-request cancel
 - ✅ H-03: Napi WS binary
+- ✅ B-02: Multipart 编码器（Rust `MultipartForm` + FFI `catcher_http_multipart`）
 
 待实施：
 - 🔲 A-02: WS deflate (等 tungstenite 升级)
-- 🔲 B-01: Transport trait
-- 🔲 B-02: Multipart 编码器
+- 🔲 B-01: Transport trait (无直接需求)
 
 ### Phase 6 — 测试补全（中期）
 
@@ -526,7 +532,7 @@ I-01 catcher-tus 断点续传 → I-02 proxy.ts 损伤模型补全
 | A-02 | — | 审计新发现 |
 | A-03 | api-gap-features.md G7 | Rust 层面的 G7（TS 层已完成） |
 | B-01 | api-gap-features.md G9 | 同一问题 |
-| B-02 | native-layer-capability-gaps.md N-01 | 同一问题 |
+| ~~B-02~~ | native-layer-capability-gaps.md N-01 | ✅ Rust MultipartForm + FFI 已实现 |
 | B-03 | api-gap-features.md G11 | ✅ circuitBreakerChange + networkQualityChange 均已实现 |
 | ~~D-01~~ | review-2026.md #1 | ✅ 已修复 |
 | ~~D-02~~ | review-2026.md #2 | ✅ 已修复 |
@@ -534,7 +540,14 @@ I-01 catcher-tus 断点续传 → I-02 proxy.ts 损伤模型补全
 | ~~D-04~~ | review-2026.md #4 | ✅ 已修复 2026-06-19 |
 | ~~D-05~~ | review-2026.md #6, #10 | ✅ 已修复 2026-06-19 |
 | C 全部 | api-gap-features.md G2~G12 | 文档状态需更新 |
-| G-01~G-12 | issues/README.md #1~#12 | E2E 性能问题（原编号映射为 G-01~G-12 避免与 API Gap G2 混淆） |
+| ~~G-03~~ | issues/README.md #3 | ✅ 已缓解 |
+| ~~G-06~~ | issues/README.md #6 | ✅ 已修复 |
+| ~~G-07~~ | issues/README.md #7 | ✅ 已修复 |
+| ~~G-08~~ | issues/README.md #8 | ✅ 已修复 |
+| ~~G-09~~ | issues/README.md #9 | ✅ 已修复 |
+| ~~G-10~~ | issues/README.md #10 | ✅ 已修复 |
+| ~~G-11~~ | issues/README.md #11 | ✅ 已修复 |
+| ~~G-12~~ | issues/README.md #12 | ✅ 已修复 |
 | ~~H-01~~ | remaining-work.md P1 #5 | ✅ roundtrip 已验证，CI 已接入 |
 | ~~H-02~~ | ffi-uniffi-capability-gaps.md FFI-11 | ✅ lib.rs 已有完整导出 |
 | H-03 | ffi-uniffi-capability-gaps.md | Napi WS 能力差异 |
