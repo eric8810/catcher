@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
+use tokio::runtime::Handle;
 use tokio::sync::Semaphore;
 
 use catcher_core::CatcherError;
@@ -139,22 +140,28 @@ impl HttpTransport {
             .as_ref()
             .map(|cb| CircuitBreaker::new(cb.clone()));
 
-        // A-01: Priority-based request queue with concurrency control
-        // When max_concurrency > 0, use PriorityRequestQueue (includes semaphore).
-        // Otherwise no concurrency control.
+        // A-01: Priority-based request queue with concurrency control.
+        // PriorityRequestQueue starts Tokio worker tasks during construction, so only
+        // enable it when HttpTransport::new() is called inside an active runtime.
+        // Synchronous constructors (notably napi) fall back to semaphore-only
+        // concurrency control and still execute requests on their async methods.
         let (concurrency_semaphore, priority_queue) = if config.max_concurrency > 0 {
-            let queue_config = catcher_core::types::scheduler::QueueConfig {
-                max_concurrency: config.max_concurrency as usize,
-                queue_capacity: 1024,
-                default_timeout_ms: config.response_timeout_ms,
-                concurrency_mode: catcher_core::types::scheduler::ConcurrencyMode::Fixed(
-                    config.max_concurrency as usize,
-                ),
-            };
-            (
-                None, // priority_queue handles concurrency internally
-                Some(crate::scheduler::PriorityRequestQueue::new(queue_config)),
-            )
+            if Handle::try_current().is_ok() {
+                let queue_config = catcher_core::types::scheduler::QueueConfig {
+                    max_concurrency: config.max_concurrency as usize,
+                    queue_capacity: 1024,
+                    default_timeout_ms: config.response_timeout_ms,
+                    concurrency_mode: catcher_core::types::scheduler::ConcurrencyMode::Fixed(
+                        config.max_concurrency as usize,
+                    ),
+                };
+                (
+                    None, // priority_queue handles concurrency internally
+                    Some(crate::scheduler::PriorityRequestQueue::new(queue_config)),
+                )
+            } else {
+                (Some(Arc::new(Semaphore::new(config.max_concurrency as usize))), None)
+            }
         } else {
             (None, None)
         };

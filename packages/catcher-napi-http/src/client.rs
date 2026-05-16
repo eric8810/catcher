@@ -260,6 +260,7 @@ impl JsHttpClient {
             content_type,
             timeout_ms,
             priority: catcher_core::types::observability::Priority::Normal,
+            multipart: None,
         };
 
         let inner = self.inner.clone();
@@ -305,6 +306,7 @@ impl JsHttpClient {
             content_type,
             timeout_ms,
             priority: catcher_core::types::observability::Priority::Normal,
+            multipart: None,
         };
 
         let resp = self
