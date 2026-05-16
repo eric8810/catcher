@@ -55,18 +55,39 @@ describe('@eric8810/catcher-napi-ws', () => {
 
   it('receives events via callback', async () => {
     const events: string[] = []
+    let resolveConnected!: () => void
+    let rejectConnected!: (error: Error) => void
+    const connected = new Promise<void>((resolve, reject) => {
+      resolveConnected = resolve
+      rejectConnected = reject
+    })
+    const timeout = setTimeout(() => {
+      rejectConnected(new Error(`Timed out waiting for Connected event. Events: ${events.join('\n')}`))
+    }, 5_000)
+
     const ws = new WsClient(JSON.stringify({
-      urls: [`ws://localhost:${wsServer.port}`],
+      urls: [wsServer.url],
       per_message_deflate: false,
       handshake_timeout_ms: 10000,
       reconnect: null,
       race_count: 1,
-    }), (e: string) => events.push(e))
-    // Wait for async connect
-    await new Promise(r => setTimeout(r, 500))
+    }), (e: string) => {
+      events.push(e)
+      const event = JSON.parse(e)
+      if (event.type === 'Connected') {
+        clearTimeout(timeout)
+        resolveConnected()
+      } else if (event.type === 'Error') {
+        clearTimeout(timeout)
+        rejectConnected(new Error(event.message))
+      }
+    })
+
+    await connected
     ws.send('hello')
     await new Promise(r => setTimeout(r, 200))
     expect(ws).toBeDefined()
+    expect(events.some(e => JSON.parse(e).type === 'Connected')).toBe(true)
   })
 
   it('closes cleanly', () => {

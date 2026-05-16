@@ -76,6 +76,38 @@ class HttpClient {
     if (this._raw.circuitBreakerState) return this._raw.circuitBreakerState()
     return 'closed'
   }
+
+  metrics() {
+    if (this._raw.metrics) return this._raw.metrics()
+    return null
+  }
+
+  setAdaptiveTimeout(minTimeoutMs, maxTimeoutMs, multiplier, windowSize) {
+    if (this._raw.setAdaptiveTimeout) return this._raw.setAdaptiveTimeout(minTimeoutMs, maxTimeoutMs, multiplier, windowSize)
+  }
+
+  disableAdaptiveTimeout() {
+    if (this._raw.disableAdaptiveTimeout) return this._raw.disableAdaptiveTimeout()
+  }
+
+  cancelAll() {
+    if (this._raw.cancelAll) return this._raw.cancelAll()
+  }
+
+  cancelRequest(requestId) {
+    if (this._raw.cancelRequest) return this._raw.cancelRequest(requestId)
+    return false
+  }
+
+  nextRequestId() {
+    if (this._raw.nextRequestId) return this._raw.nextRequestId()
+    return 0
+  }
+
+  executeStream(method, url, body, options, onChunk) {
+    if (this._raw.executeStream) return this._raw.executeStream(method, url, body ?? undefined, options ?? undefined, onChunk)
+    throw new Error('executeStream() requires rebuilt native addon (cargo build)')
+  }
 }
 
 module.exports = { HttpClient }

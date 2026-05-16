@@ -46,7 +46,18 @@ if (napiJs) {
 class WsClient {
   constructor(config, onEvent) {
     const configJson = typeof config === 'string' ? config : JSON.stringify(config)
-    this._raw = new RawClient(configJson, onEvent)
+    const wrappedOnEvent = typeof onEvent === 'function'
+      ? (err, value) => {
+          if (err) {
+            onEvent(JSON.stringify({ type: 'Error', message: err.message ?? String(err) }))
+            return
+          }
+          if (typeof value === 'string') {
+            onEvent(value)
+          }
+        }
+      : undefined
+    this._raw = new RawClient(configJson, wrappedOnEvent)
   }
 
   send(data) {

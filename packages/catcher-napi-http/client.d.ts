@@ -51,11 +51,16 @@ declare module '@eric8810/catcher-napi-http' {
   }
 
   interface Metrics {
-    total_requests: number
-    successful_requests: number
-    failed_requests: number
-    average_latency_us: number
-    retry_count: number
+    http_requests: number
+    http_success_rate: number
+    http_avg_latency_us: number
+    http_retries: number
+    ws_connect_success_rate: number
+    ws_disconnects: number
+    ws_messages_sent: number
+    ws_messages_received: number
+    cb_open_count: number
+    queue_timeouts: number
   }
 
   export class HttpClient {

@@ -23,7 +23,6 @@ export interface RustHttpConfig {
 }
 
 export function createRustHttpClient(config: RustHttpConfig) {
-  let retryCount = 0
   const inner = new HttpClient(JSON.stringify({
     base_url: config.baseURL,
     connect_timeout_ms: 5000,
@@ -47,25 +46,46 @@ export function createRustHttpClient(config: RustHttpConfig) {
     max_concurrency: config.concurrency ?? 50,
   }))
 
+  const retryDelta = (before: any, after: any) => {
+    const b = before?.http_retries ?? 0
+    const a = after?.http_retries ?? 0
+    return Math.max(0, a - b)
+  }
+
+  const debugError = (method: string, path: string, error: unknown) => {
+    if (process.env.DEBUG_RUST_E2E === '1') {
+      const message = error instanceof Error ? error.message : String(error)
+      console.error(`[rust-adapter] ${method} ${path} failed: ${message}`)
+    }
+  }
+
   return {
     async get(path: string): Promise<any> {
+      const before = inner.metrics?.()
       try {
         const resp = await inner.get(path)
         if (resp.status >= 400) throw new Error(`HTTP ${resp.status}`)
+        const after = inner.metrics?.()
+        const retries = retryDelta(before, after)
+        for (let i = 0; i < retries; i++) config.retry?.onRetry?.()
         return JSON.parse(Buffer.from(resp.body).toString('utf-8'))
       } catch (e) {
-        if (config.retry?.onRetry) config.retry.onRetry()
+        debugError('GET', path, e)
         throw e
       }
     },
     async post(path: string, body: unknown): Promise<any> {
+      const before = inner.metrics?.()
       try {
         const json = JSON.stringify(body)
-        const resp = await inner.post(path, Buffer.from(json), 'application/json')
+        const resp = await inner.post(path, Buffer.from(json), { content_type: 'application/json' })
         if (resp.status >= 400) throw new Error(`HTTP ${resp.status}`)
+        const after = inner.metrics?.()
+        const retries = retryDelta(before, after)
+        for (let i = 0; i < retries; i++) config.retry?.onRetry?.()
         return JSON.parse(Buffer.from(resp.body).toString('utf-8'))
       } catch (e) {
-        if (config.retry?.onRetry) config.retry.onRetry()
+        debugError('POST', path, e)
         throw e
       }
     },
