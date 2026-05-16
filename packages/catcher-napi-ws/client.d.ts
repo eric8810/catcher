@@ -27,7 +27,10 @@ declare module '@eric8810/catcher-napi-ws' {
 
   export class WsClient {
     constructor(config: string | WsClientConfig, onEvent?: (eventJson: string) => void)
+    /** Send a text message */
     send(data: string): void
-    close(): void
+    /** Send a binary message (ArrayBuffer or Buffer) */
+    sendBinary(data: Buffer | ArrayBuffer | Uint8Array): void
+    close(code?: number, reason?: string): void
   }
 }

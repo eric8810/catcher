@@ -53,8 +53,19 @@ class WsClient {
     return this._raw.send(data)
   }
 
-  close() {
-    return this._raw.close()
+  /** Send a binary message (Buffer, ArrayBuffer, or Uint8Array) */
+  sendBinary(data) {
+    // napi expects Buffer — coerce ArrayBuffer/Uint8Array
+    if (data instanceof ArrayBuffer) {
+      data = Buffer.from(data)
+    } else if (data instanceof Uint8Array) {
+      data = Buffer.from(data.buffer, data.byteOffset, data.byteLength)
+    }
+    return this._raw.send_binary(data)
+  }
+
+  close(code, reason) {
+    return this._raw.close(code ?? null, reason ?? null)
   }
 }
 

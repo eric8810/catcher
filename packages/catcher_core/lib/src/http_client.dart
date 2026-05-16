@@ -36,6 +36,9 @@ class CatcherHttpClient {
   CatcherHttpCircuitBreakerStateDart? _circuitBreakerStateFn;
   CatcherHttpMetricsDart? _metricsFn;
   CatcherHttpAdaptiveTimeoutConfigDart? _adaptiveTimeoutFn;
+  CatcherHttpExecuteStreamDart? _executeStreamFn;
+  CatcherHttpExecuteWithIdDart? _executeWithIdFn;
+  CatcherHttpCancelRequestDart? _cancelRequestFn;
 
   CatcherHttpClient(HttpClientConfig config) {
     _lib = loadCatcherLibrary();
@@ -88,6 +91,27 @@ class CatcherHttpClient {
               'catcher_http_adaptive_timeout_config');
     } catch (_) {
       _adaptiveTimeoutFn = null;
+    }
+
+    try {
+      _executeStreamFn = _lib.lookupFunction<CatcherHttpExecuteStreamNative,
+          CatcherHttpExecuteStreamDart>('catcher_http_execute_stream');
+    } catch (_) {
+      _executeStreamFn = null;
+    }
+
+    try {
+      _executeWithIdFn = _lib.lookupFunction<CatcherHttpExecuteWithIdNative,
+          CatcherHttpExecuteWithIdDart>('catcher_http_execute_with_id');
+    } catch (_) {
+      _executeWithIdFn = null;
+    }
+
+    try {
+      _cancelRequestFn = _lib.lookupFunction<CatcherHttpCancelRequestNative,
+          CatcherHttpCancelRequestDart>('catcher_http_cancel_request');
+    } catch (_) {
+      _cancelRequestFn = null;
     }
 
     final configJson = jsonEncode(config.toJson()).toNativeUtf8();
@@ -189,7 +213,7 @@ class CatcherHttpClient {
     int windowSize = 20,
   }) {
     final fn = _adaptiveTimeoutFn;
-    if (fn == null || _handle == null || _handle == nullptr) return;
+    if (fn == null || _handle != null && _handle == nullptr) return;
     fn(
       _handle!,
       enabled ? 1 : 0,
@@ -198,6 +222,61 @@ class CatcherHttpClient {
       (multiplier * 1000).round(),
       windowSize,
     );
+  }
+
+  /// Cancel a single in-flight request by [requestId].
+  /// Returns `true` if the request was found and cancelled, `false` otherwise.
+  bool cancelRequest(int requestId) {
+    final fn = _cancelRequestFn;
+    if (fn == null || _handle == null || _handle == nullptr) return false;
+    return fn(_handle!, requestId) == 0;
+  }
+
+  /// Execute an HTTP request with per-request cancellation support.
+  ///
+  /// Returns a record `(requestId, response)`. Use [cancelRequest(requestId)]
+  /// to cancel the in-flight request.
+  Future<({int requestId, HttpResponse response})> executeWithCancel(
+    String method,
+    String path, {
+    Map<String, dynamic>? body,
+    String contentType = 'application/json',
+    Map<String, String>? headers,
+    int? timeoutMs,
+  }) async {
+    final fn = _executeWithIdFn;
+    if (fn == null) {
+      throw StateError('execute_with_id not available — upgrade catcher_ffi');
+    }
+    _ensureHandle();
+    final bodyBytes = body != null ? utf8.encode(jsonEncode(body)) : null;
+    return _executeWithCancel(
+        fn, method, path, bodyBytes, contentType, headers, timeoutMs);
+  }
+
+  /// Stream download — receives headers, chunks, and completion events.
+  ///
+  /// Returns a [Stream] of [StreamEvent] objects:
+  /// - [StreamHeadersEvent] with status and headers
+  /// - [StreamChunkEvent] with binary data
+  /// - [StreamDoneEvent] on completion
+  /// - [StreamErrorEvent] on error
+  Stream<StreamEvent> executeStream(
+    String method,
+    String path, {
+    Map<String, dynamic>? body,
+    String contentType = 'application/json',
+    Map<String, String>? headers,
+    int? timeoutMs,
+  }) {
+    final fn = _executeStreamFn;
+    if (fn == null) {
+      throw StateError('execute_stream not available — upgrade catcher_ffi');
+    }
+    _ensureHandle();
+    final bodyBytes = body != null ? utf8.encode(jsonEncode(body)) : null;
+    return _doExecuteStream(
+        fn, method, path, bodyBytes, contentType, headers, timeoutMs);
   }
 
   /// One-shot SSE stream request (e.g. POST SSE for AI streaming APIs).
@@ -358,6 +437,274 @@ class CatcherHttpClient {
     if (_handle == null || _handle == nullptr) {
       throw StateError('HTTP client has been disposed');
     }
+  }
+
+  /// Execute with per-request cancellation support.
+  Future<({int requestId, HttpResponse response})> _executeWithCancel(
+    CatcherHttpExecuteWithIdDart fn,
+    String method,
+    String path,
+    List<int>? body,
+    String? contentType,
+    Map<String, String>? headers,
+    int? timeoutMs,
+  ) async {
+    _ensureHandle();
+    final receivePort = ReceivePort();
+    final completer = Completer<({int requestId, HttpResponse response})>();
+    bool cleanedUp = false;
+
+    final nativeCallback = NativeCallable<EventCallbackNative>.listener(
+      (Pointer<Char> eventType, Pointer<Uint8> eventData, int eventDataLen,
+          Pointer<Void> userData) {
+        final jsonBytes = eventData.asTypedList(eventDataLen);
+        final jsonStr = utf8.decode(jsonBytes, allowMalformed: true);
+
+        _freeEventDataFn(eventType, eventData);
+
+        final Map<String, dynamic> result;
+        try {
+          result = jsonDecode(jsonStr) as Map<String, dynamic>;
+        } catch (_) {
+          receivePort.sendPort.send({'error': jsonStr});
+          return;
+        }
+        receivePort.sendPort.send(result);
+      },
+    );
+
+    late StreamSubscription sub;
+    sub = receivePort.listen((message) {
+      sub.cancel();
+      if (!cleanedUp) {
+        cleanedUp = true;
+        nativeCallback.close();
+        receivePort.close();
+      }
+      if (!completer.isCompleted) {
+        if (message is Map && message.containsKey('request_id')) {
+          if (message.containsKey('error')) {
+            completer.completeError(CatcherHttpError(
+              message['error']?.toString() ?? 'Unknown error',
+            ));
+          } else if (message['type'] == 'cancelled') {
+            completer.completeError(CatcherHttpError('Request cancelled'));
+          } else {
+            final requestId = message['request_id'] as int;
+            final response = HttpResponse.fromJson(
+                Map<String, dynamic>.from(message));
+            completer.complete((requestId: requestId, response: response));
+          }
+        } else if (message is Map && message.containsKey('error')) {
+          completer.completeError(CatcherHttpError(
+            message['error']?.toString() ?? 'Unknown error',
+          ));
+        } else {
+          completer.completeError(CatcherHttpError(message.toString()));
+        }
+      }
+    });
+
+    final methodFfi = _allocFfiString(method);
+    final urlFfi = _allocFfiString(path);
+    final ctFfi = contentType != null
+        ? _allocFfiString(contentType)
+        : _allocFfiString('');
+    final headersJson = (headers != null && headers.isNotEmpty)
+        ? jsonEncode(headers).toNativeUtf8()
+        : nullptr.cast<Char>();
+    final bodyPtr = (body != null && body.isNotEmpty)
+        ? malloc<Uint8>(body.length)
+        : Pointer<Uint8>.fromAddress(0);
+    if (body != null && body.isNotEmpty) {
+      for (var i = 0; i < body.length; i++) {
+        bodyPtr[i] = body[i];
+      }
+    }
+
+    int requestId;
+    try {
+      requestId = fn(
+        _handle!,
+        methodFfi.ref,
+        urlFfi.ref,
+        bodyPtr,
+        body?.length ?? 0,
+        ctFfi.ref,
+        headersJson,
+        timeoutMs ?? 0,
+        nativeCallback.nativeFunction,
+        nullptr,
+      );
+    } catch (e) {
+      if (!cleanedUp) {
+        cleanedUp = true;
+        nativeCallback.close();
+        receivePort.close();
+      }
+      _freeFfiString(methodFfi);
+      _freeFfiString(urlFfi);
+      _freeFfiString(ctFfi);
+      if (headersJson != nullptr) malloc.free(headersJson);
+      if (body != null && body.isNotEmpty) malloc.free(bodyPtr);
+      rethrow;
+    }
+
+    _freeFfiString(methodFfi);
+    _freeFfiString(urlFfi);
+    _freeFfiString(ctFfi);
+    if (headersJson != nullptr) malloc.free(headersJson);
+    if (body != null && body.isNotEmpty) malloc.free(bodyPtr);
+
+    return completer.future.timeout(
+      const Duration(seconds: 30),
+      onTimeout: () {
+        if (!cleanedUp) {
+          cleanedUp = true;
+          nativeCallback.close();
+          receivePort.close();
+        }
+        if (!completer.isCompleted) {
+          completer.completeError(
+            TimeoutException('HTTP request timed out after 30s'),
+          );
+        }
+        throw TimeoutException('HTTP request timed out after 30s');
+      },
+    );
+  }
+
+  /// Streaming download implementation.
+  Stream<StreamEvent> _doExecuteStream(
+    CatcherHttpExecuteStreamDart fn,
+    String method,
+    String path,
+    List<int>? body,
+    String? contentType,
+    Map<String, String>? headers,
+    int? timeoutMs,
+  ) {
+    _ensureHandle();
+    final controller = StreamController<StreamEvent>();
+    bool cleanedUp = false;
+
+    final nativeCallback = NativeCallable<EventCallbackNative>.listener(
+      (Pointer<Char> eventType, Pointer<Uint8> eventData, int eventDataLen,
+          Pointer<Void> userData) {
+        final jsonBytes = eventData.asTypedList(eventDataLen);
+        final jsonStr = utf8.decode(jsonBytes, allowMalformed: true);
+
+        _freeEventDataFn(eventType, eventData);
+
+        final typeStr = eventType.cast<Utf8>().toDartString();
+
+        switch (typeStr) {
+          case 'stream_headers':
+            try {
+              final parsed = jsonDecode(jsonStr) as Map<String, dynamic>;
+              controller.add(StreamHeadersEvent(
+                status: parsed['status'] as int,
+                headers: Map<String, String>.from(parsed['headers'] ?? {}),
+                requestId: parsed['request_id'] as int? ?? 0,
+              ));
+            } catch (_) {}
+            break;
+          case 'stream_chunk':
+            // Chunk data is the raw bytes in eventData
+            controller.add(StreamChunkEvent(
+                data: List<int>.from(jsonBytes)));
+            break;
+          case 'stream_done':
+            try {
+              final parsed = jsonDecode(jsonStr) as Map<String, dynamic>;
+              controller.add(StreamDoneEvent(
+                  requestId: parsed['request_id'] as int? ?? 0));
+            } catch (_) {
+              controller.add(const StreamDoneEvent(requestId: 0));
+            }
+            if (!cleanedUp) {
+              cleanedUp = true;
+              nativeCallback.close();
+              controller.close();
+            }
+            break;
+          case 'stream_error':
+            try {
+              final parsed = jsonDecode(jsonStr) as Map<String, dynamic>;
+              controller.addError(CatcherHttpError(
+                  parsed['error']?.toString() ?? 'Stream error'));
+            } catch (_) {
+              controller.addError(CatcherHttpError(jsonStr));
+            }
+            if (!cleanedUp) {
+              cleanedUp = true;
+              nativeCallback.close();
+              controller.close();
+            }
+            break;
+        }
+      },
+    );
+
+    final methodFfi = _allocFfiString(method);
+    final urlFfi = _allocFfiString(path);
+    final ctFfi = contentType != null
+        ? _allocFfiString(contentType)
+        : _allocFfiString('');
+    final headersJson = (headers != null && headers.isNotEmpty)
+        ? jsonEncode(headers).toNativeUtf8()
+        : nullptr.cast<Char>();
+    final bodyPtr = (body != null && body.isNotEmpty)
+        ? malloc<Uint8>(body.length)
+        : Pointer<Uint8>.fromAddress(0);
+    if (body != null && body.isNotEmpty) {
+      for (var i = 0; i < body.length; i++) {
+        bodyPtr[i] = body[i];
+      }
+    }
+
+    try {
+      fn(
+        _handle!,
+        methodFfi.ref,
+        urlFfi.ref,
+        bodyPtr,
+        body?.length ?? 0,
+        ctFfi.ref,
+        headersJson,
+        timeoutMs ?? 0,
+        nativeCallback.nativeFunction,
+        nullptr,
+      );
+    } catch (e) {
+      if (!cleanedUp) {
+        cleanedUp = true;
+        nativeCallback.close();
+      }
+      _freeFfiString(methodFfi);
+      _freeFfiString(urlFfi);
+      _freeFfiString(ctFfi);
+      if (headersJson != nullptr) malloc.free(headersJson);
+      if (body != null && body.isNotEmpty) malloc.free(bodyPtr);
+      rethrow;
+    }
+
+    _freeFfiString(methodFfi);
+    _freeFfiString(urlFfi);
+    _freeFfiString(ctFfi);
+    if (headersJson != nullptr) malloc.free(headersJson);
+    if (body != null && body.isNotEmpty) malloc.free(bodyPtr);
+
+    // Timeout cleanup
+    Future.delayed(const Duration(minutes: 5), () {
+      if (!cleanedUp) {
+        cleanedUp = true;
+        nativeCallback.close();
+        if (!controller.isClosed) controller.close();
+      }
+    });
+
+    return controller.stream;
   }
 
   /// Build a FfiStringNative on the heap. Caller must call [_freeFfiString] when done.
@@ -785,4 +1132,41 @@ class CatcherHttpError implements Exception {
 
   @override
   String toString() => 'CatcherHttpError: $message';
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Stream download events (H-04)
+// ═══════════════════════════════════════════════════════════════
+
+/// Base class for streaming download events.
+sealed class StreamEvent {}
+
+/// Received response headers.
+class StreamHeadersEvent extends StreamEvent {
+  final int status;
+  final Map<String, String> headers;
+  final int requestId;
+  const StreamHeadersEvent({
+    required this.status,
+    this.headers = const {},
+    this.requestId = 0,
+  });
+}
+
+/// Received a data chunk (binary).
+class StreamChunkEvent extends StreamEvent {
+  final List<int> data;
+  const StreamChunkEvent({this.data = const []});
+}
+
+/// Stream completed successfully.
+class StreamDoneEvent extends StreamEvent {
+  final int requestId;
+  const StreamDoneEvent({this.requestId = 0});
+}
+
+/// Stream encountered an error.
+class StreamErrorEvent extends StreamEvent {
+  final String message;
+  const StreamErrorEvent(this.message);
 }

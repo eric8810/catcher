@@ -347,3 +347,73 @@ typedef CatcherSseCloseDart = void Function(Pointer<Void> handle);
 /// catcher_sse_destroy(sse_handle)
 typedef CatcherSseDestroyNative = Void Function(Pointer<Void> handle);
 typedef CatcherSseDestroyDart = void Function(Pointer<Void> handle);
+
+// ═══════════════════════════════════════════════════════════════════
+// Streaming download (N-02) — catcher_http_execute_stream
+// ═══════════════════════════════════════════════════════════════════
+
+/// catcher_http_execute_stream(handle, method, url, body, body_len, content_type, headers_json, timeout_ms, callback, user_data) → request_id (u64)
+typedef CatcherHttpExecuteStreamNative = Uint64 Function(
+  Pointer<Void> handle,
+  FfiStringNative method,
+  FfiStringNative url,
+  Pointer<Uint8> body,
+  Size bodyLen,
+  FfiStringNative contentType,
+  Pointer<Char> headersJson,
+  Uint32 timeoutMs,
+  Pointer<NativeFunction<EventCallbackNative>> callback,
+  Pointer<Void> userData,
+);
+typedef CatcherHttpExecuteStreamDart = int Function(
+  Pointer<Void> handle,
+  FfiStringNative method,
+  FfiStringNative url,
+  Pointer<Uint8> body,
+  int bodyLen,
+  FfiStringNative contentType,
+  Pointer<Char> headersJson,
+  int timeoutMs,
+  Pointer<NativeFunction<EventCallbackNative>> callback,
+  Pointer<Void> userData,
+);
+
+// ═══════════════════════════════════════════════════════════════════
+// Per-request cancel (N-03) — execute_with_id + cancel_request
+// ═══════════════════════════════════════════════════════════════════
+
+/// catcher_http_execute_with_id(handle, method, url, body, body_len, content_type, headers_json, timeout_ms, callback, user_data) → request_id (u64)
+typedef CatcherHttpExecuteWithIdNative = Uint64 Function(
+  Pointer<Void> handle,
+  FfiStringNative method,
+  FfiStringNative url,
+  Pointer<Uint8> body,
+  Size bodyLen,
+  FfiStringNative contentType,
+  Pointer<Char> headersJson,
+  Uint32 timeoutMs,
+  Pointer<NativeFunction<EventCallbackNative>> callback,
+  Pointer<Void> userData,
+);
+typedef CatcherHttpExecuteWithIdDart = int Function(
+  Pointer<Void> handle,
+  FfiStringNative method,
+  FfiStringNative url,
+  Pointer<Uint8> body,
+  int bodyLen,
+  FfiStringNative contentType,
+  Pointer<Char> headersJson,
+  int timeoutMs,
+  Pointer<NativeFunction<EventCallbackNative>> callback,
+  Pointer<Void> userData,
+);
+
+/// catcher_http_cancel_request(handle, request_id) → i32 (0=success, -1=not found)
+typedef CatcherHttpCancelRequestNative = Int32 Function(
+  Pointer<Void> handle,
+  Uint64 requestId,
+);
+typedef CatcherHttpCancelRequestDart = int Function(
+  Pointer<Void> handle,
+  int requestId,
+);

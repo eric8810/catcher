@@ -53,7 +53,12 @@ export 'src/http_client.dart'
         ProxyAuth,
         RedirectConfig,
         HttpResponse,
-        CatcherHttpError;
+        CatcherHttpError,
+        StreamEvent,
+        StreamHeadersEvent,
+        StreamChunkEvent,
+        StreamDoneEvent,
+        StreamErrorEvent;
 
 // WebSocket client
 export 'src/ws_client.dart'
