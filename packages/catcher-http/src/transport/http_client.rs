@@ -1,6 +1,5 @@
 use reqwest::Client;
 use reqwest_middleware::{ClientBuilder as MiddlewareBuilder, ClientWithMiddleware};
-use reqwest_retry::RetryTransientMiddleware;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -13,6 +12,7 @@ use crate::resilience::backoff::build_retry_policy;
 use crate::resilience::circuit_breaker::CircuitBreaker;
 use crate::resilience::timeout::AdaptiveTimeout;
 use crate::transport::dns::build_dns_resolver;
+use crate::transport::retry_middleware::MetricsRetryMiddleware;
 use crate::transport::tls::build_tls_config;
 use crate::types::http::*;
 use crate::observability::metrics::{MetricsCollector, MetricsSnapshot};
@@ -20,7 +20,7 @@ use catcher_core::types::resilience::CbState;
 
 /// HTTP 传输层 — 真实收发 HTTP 请求，带重试中间件 + 熔断器 + 取消 + 自适应超时
 ///
-/// Phase 3: 使用 reqwest-middleware + RetryTransientMiddleware + CircuitBreaker
+/// Phase 3: 使用 reqwest-middleware + MetricsRetryMiddleware + CircuitBreaker
 /// Phase 4: 增加 tokio CancellationToken 支持请求取消 + MetricsCollector
 /// Phase 5: 增加 AdaptiveTimeout 基于滑动窗口 P90 RTT 自适应超时
 /// Phase 6: 增加 per-request cancel (N-03)
@@ -129,10 +129,14 @@ impl HttpTransport {
             .map_err(|e| CatcherError::Internal(format!("reqwest build error: {e}")))?;
 
         // Phase 3: Wrap with middleware (retry)
+        let metrics = MetricsCollector::new();
         let mut client_builder = MiddlewareBuilder::new(reqwest_client);
         if let Some(ref retry) = config.retry {
             let policy = build_retry_policy(retry);
-            client_builder = client_builder.with(RetryTransientMiddleware::new_with_policy(policy));
+            client_builder = client_builder.with(MetricsRetryMiddleware::new(
+                policy,
+                metrics.http_retries_weak(),
+            ));
         }
 
         let circuit_breaker = config
@@ -171,7 +175,7 @@ impl HttpTransport {
             config,
             circuit_breaker,
             cancel_token: Arc::new(Mutex::new(tokio_util::sync::CancellationToken::new())),
-            metrics: MetricsCollector::new(),
+            metrics,
             adaptive_timeout: Mutex::new(None),
             pending_requests: Mutex::new(HashMap::new()),
             next_request_id: AtomicU64::new(1),
@@ -204,7 +208,7 @@ impl HttpTransport {
         if let Some(ref cb) = self.circuit_breaker {
             if let Err(e) = cb.before_request() {
                 self.pending_requests.lock().unwrap().remove(&request_id);
-                self.metrics.record_http_request(false, start.elapsed().as_micros() as u64, false);
+                self.metrics.record_http_request(false, start.elapsed().as_micros() as u64);
                 return (request_id, Err(e));
             }
         }
@@ -238,12 +242,12 @@ impl HttpTransport {
                 }) => r,
                 _ = per_request_token.cancelled() => {
                     let elapsed_us = start.elapsed().as_micros() as u64;
-                    self.metrics.record_http_request(false, elapsed_us, false);
+                    self.metrics.record_http_request(false, elapsed_us);
                     Err(CatcherError::Internal("request cancelled while waiting in queue".into()))
                 }
                 _ = global_token.cancelled() => {
                     let elapsed_us = start.elapsed().as_micros() as u64;
-                    self.metrics.record_http_request(false, elapsed_us, false);
+                    self.metrics.record_http_request(false, elapsed_us);
                     Err(CatcherError::Internal("request cancelled while waiting in queue".into()))
                 }
             };
@@ -254,12 +258,12 @@ impl HttpTransport {
                 permit = sem.acquire() => permit,
                 _ = per_request_token.cancelled() => {
                     let elapsed_us = start.elapsed().as_micros() as u64;
-                    self.metrics.record_http_request(false, elapsed_us, false);
+                    self.metrics.record_http_request(false, elapsed_us);
                     return (request_id, Err(CatcherError::Internal("request cancelled while waiting in queue".into())));
                 }
                 _ = global_token.cancelled() => {
                     let elapsed_us = start.elapsed().as_micros() as u64;
-                    self.metrics.record_http_request(false, elapsed_us, false);
+                    self.metrics.record_http_request(false, elapsed_us);
                     return (request_id, Err(CatcherError::Internal("request cancelled while waiting in queue".into())));
                 }
             };
@@ -268,12 +272,12 @@ impl HttpTransport {
                 r = self.do_execute(request) => r,
                 _ = per_request_token.cancelled() => {
                     let elapsed_us = start.elapsed().as_micros() as u64;
-                    self.metrics.record_http_request(false, elapsed_us, false);
+                    self.metrics.record_http_request(false, elapsed_us);
                     return (request_id, Err(CatcherError::Internal("request cancelled".into())));
                 }
                 _ = global_token.cancelled() => {
                     let elapsed_us = start.elapsed().as_micros() as u64;
-                    self.metrics.record_http_request(false, elapsed_us, false);
+                    self.metrics.record_http_request(false, elapsed_us);
                     return (request_id, Err(CatcherError::Internal("request cancelled".into())));
                 }
             }
@@ -283,12 +287,12 @@ impl HttpTransport {
                 r = self.do_execute(request) => r,
                 _ = per_request_token.cancelled() => {
                     let elapsed_us = start.elapsed().as_micros() as u64;
-                    self.metrics.record_http_request(false, elapsed_us, false);
+                    self.metrics.record_http_request(false, elapsed_us);
                     return (request_id, Err(CatcherError::Internal("request cancelled".into())));
                 }
                 _ = global_token.cancelled() => {
                     let elapsed_us = start.elapsed().as_micros() as u64;
-                    self.metrics.record_http_request(false, elapsed_us, false);
+                    self.metrics.record_http_request(false, elapsed_us);
                     return (request_id, Err(CatcherError::Internal("request cancelled".into())));
                 }
             }
@@ -308,13 +312,13 @@ impl HttpTransport {
 
         match &result {
             Ok(_) => {
-                self.metrics.record_http_request(true, elapsed_us, false);
+                self.metrics.record_http_request(true, elapsed_us);
                 if let Some(ref cb) = self.circuit_breaker {
                     cb.on_success();
                 }
             }
             Err(_) => {
-                self.metrics.record_http_request(false, elapsed_us, false);
+                self.metrics.record_http_request(false, elapsed_us);
                 if let Some(ref cb) = self.circuit_breaker {
                     cb.on_failure();
                 }

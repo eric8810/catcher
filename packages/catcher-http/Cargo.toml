@@ -19,6 +19,7 @@ catcher-core = { path = "../catcher-core", version = "0.2.2" }
 # ── 异步运行时 ──
 tokio = { version = "1", features = ["sync", "time", "net", "io-util", "macros"] }
 tokio-util = "0.7"
+async-trait = "0.1"
 
 # ── SSE streaming ──
 tokio-stream = "0.1"
@@ -31,6 +32,7 @@ reqwest = { version = "0.13", default-features = false, features = [
 reqwest-middleware = "0.5"
 reqwest-retry = "0.9"
 retry-policies = "0.5"
+http = "1"
 
 # ── DNS 缓存 ──
 hickory-resolver = { version = "0.25", optional = true, features = ["tokio"] }

@@ -337,12 +337,14 @@ dependencies = [
 name = "catcher-http"
 version = "0.2.2"
 dependencies = [
+ "async-trait",
  "backon",
  "base64",
  "bytes",
  "catcher-core",
  "hickory-proto",
  "hickory-resolver",
+ "http",
  "napi",
  "napi-derive",
  "parking_lot",

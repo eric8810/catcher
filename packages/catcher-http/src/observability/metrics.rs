@@ -1,5 +1,6 @@
 use catcher_core::types::observability::Priority;
 use serde::Serialize;
+use std::sync::{Arc, Weak};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 /// 轻量级指标收集器（无外部依赖，纯 atomic 计数）
@@ -9,7 +10,9 @@ pub struct MetricsCollector {
     http_requests_total: AtomicU64,
     http_successes: AtomicU64,
     http_failures: AtomicU64,
-    http_retries: AtomicU64,
+    /// Shared with `MetricsRetryMiddleware` via `Weak` so retries are counted
+    /// inside the middleware loop without requiring a callback.
+    http_retries: Arc<AtomicU64>,
     http_total_latency_us: AtomicU64,
 
     // WS metrics
@@ -34,7 +37,7 @@ impl MetricsCollector {
         Self::default()
     }
 
-    pub fn record_http_request(&self, success: bool, latency_us: u64, retried: bool) {
+    pub fn record_http_request(&self, success: bool, latency_us: u64) {
         self.http_requests_total.fetch_add(1, Ordering::Relaxed);
         if success {
             self.http_successes.fetch_add(1, Ordering::Relaxed);
@@ -43,9 +46,17 @@ impl MetricsCollector {
         }
         self.http_total_latency_us
             .fetch_add(latency_us, Ordering::Relaxed);
-        if retried {
-            self.http_retries.fetch_add(1, Ordering::Relaxed);
-        }
+    }
+
+    /// Increment the HTTP retry counter. Called by MetricsRetryMiddleware on each retry attempt.
+    pub fn increment_http_retries(&self) {
+        self.http_retries.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Returns a `Weak` reference to the `http_retries` counter.
+    /// `MetricsRetryMiddleware` uses this to increment retries from inside the middleware loop.
+    pub fn http_retries_weak(&self) -> Weak<AtomicU64> {
+        Arc::downgrade(&self.http_retries)
     }
 
     pub fn record_ws_connect(&self, success: bool) {
@@ -150,8 +161,9 @@ mod tests {
     #[test]
     fn record_http_request_updates_counts() {
         let m = MetricsCollector::new();
-        m.record_http_request(true, 1000, false);
-        m.record_http_request(false, 500, true);
+        m.record_http_request(true, 1000);
+        m.record_http_request(false, 500);
+        m.increment_http_retries();
         let snap = m.snapshot();
         assert_eq!(snap.http_requests, 2);
         assert_eq!(snap.http_success_rate, 0.5);
