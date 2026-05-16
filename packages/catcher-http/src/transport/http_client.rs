@@ -393,8 +393,15 @@ impl HttpTransport {
         let mut req = self.client.request(method, &url);
         for (k, v) in &self.config.default_headers { req = req.header(k, v); }
         for (k, v) in &request.headers { req = req.header(k, v); }
-        if let Some(body) = &request.body { req = req.body(body.clone()); }
-        if let Some(ct) = &request.content_type { req = req.header("Content-Type", ct); }
+        // B-02: multipart support
+        if let Some(ref form) = request.multipart {
+            let (encoded_body, ct) = form.encode();
+            req = req.body(encoded_body);
+            req = req.header("Content-Type", ct);
+        } else {
+            if let Some(body) = &request.body { req = req.body(body.clone()); }
+            if let Some(ct) = &request.content_type { req = req.header("Content-Type", ct); }
+        }
         let timeout_ms = request.timeout_ms.unwrap_or(self.config.response_timeout_ms);
         req = req.timeout(Duration::from_millis(timeout_ms));
 
@@ -449,14 +456,9 @@ impl HttpTransport {
         let request = HttpRequest {
             method: HttpMethod::GET,
             url: url.to_string(),
-            headers: HashMap::new(),
-            body: None,
-            content_type: None,
-            timeout_ms: None,
-            priority: catcher_core::types::observability::Priority::Normal,
+            ..Default::default()
         };
-        let result = self.execute(request).await;
-        result
+        self.execute(request).await
     }
 
     /// POST 快捷方法
@@ -469,14 +471,11 @@ impl HttpTransport {
         let request = HttpRequest {
             method: HttpMethod::POST,
             url: url.to_string(),
-            headers: HashMap::new(),
             body: Some(body.to_vec()),
             content_type: Some(content_type.to_string()),
-            timeout_ms: None,
-            priority: catcher_core::types::observability::Priority::Normal,
+            ..Default::default()
         };
-        let result = self.execute(request).await;
-        result
+        self.execute(request).await
     }
 
     /// 返回熔断器状态（用于 metrics）
@@ -577,11 +576,18 @@ async fn execute_http_request(
     for (k, v) in &request.headers {
         req = req.header(k, v);
     }
-    if let Some(body) = &request.body {
-        req = req.body(body.clone());
-    }
-    if let Some(content_type) = &request.content_type {
-        req = req.header("Content-Type", content_type);
+    // B-02: multipart encoding — overrides body/content_type if set
+    if let Some(ref form) = request.multipart {
+        let (encoded_body, ct) = form.encode();
+        req = req.body(encoded_body);
+        req = req.header("Content-Type", ct);
+    } else {
+        if let Some(body) = &request.body {
+            req = req.body(body.clone());
+        }
+        if let Some(content_type) = &request.content_type {
+            req = req.header("Content-Type", content_type);
+        }
     }
     if let Some(ref original_host) = host_header_override {
         req = req.header("Host", original_host.as_str());

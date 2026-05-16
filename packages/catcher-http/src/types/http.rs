@@ -31,6 +31,9 @@ pub struct HttpRequest {
     /// 请求优先级 (A-01)，用于优先级队列调度
     #[serde(default = "default_priority")]
     pub priority: catcher_core::types::observability::Priority,
+    /// Multipart form data (B-02). When set, overrides `body` and `content_type`.
+    #[serde(skip)]
+    pub multipart: Option<crate::transport::multipart::MultipartForm>,
 }
 
 fn default_priority() -> catcher_core::types::observability::Priority {

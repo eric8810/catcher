@@ -23,7 +23,7 @@
 |---|------|------|
 | A-02 | WS per-message deflate | `compression.rs:18` 显式忽略 per_message_deflate。根因：tungstenite 全版本不支持 RFC 7692。**评估完成** → 见 `tungstenite-permessage-deflate.md` + `tungstenite-deflate-fork-analysis.md`。短期：升级 0.26+；中期：评估 yawc/ratchet |
 | B-01 | Transport trait 抽象 | 架构级变更，TS 层已标 `@deprecated`，无直接需求 |
-| B-02 | Multipart 编码器（Rust 侧） | G5 Rust❌，Dart 无法原生上传 multipart |
+| ~~B-02~~ | ~~Multipart 编码器（Rust 侧）~~ | ✅ Rust FFI `catcher_http_multipart` + `MultipartForm` 编码器已实现；TS 侧通过 `FormData` + `post()` 自动 multipart/form-data |
 | ~~N-04~~ | ~~网络质量实时事件推送~~ | ✅ Rust QualitySubscription callback + TS `networkQualityChange` event 均已实现 |
 | ~~NEW-2~~ | ~~catcher-web 进度回调~~ | ✅ 下载进度通过 ReadableStream 流式跟踪，上传进度在响应头到达时报告 100%（fetch 限制） |
 | ~~NEW-3~~ | ~~TS TLS 配置死代码~~ | ✅ 已接入 Node.js https.Agent（ca/cert/key/minVersion/SNI/PFX），pinSha256 仍 deferred |

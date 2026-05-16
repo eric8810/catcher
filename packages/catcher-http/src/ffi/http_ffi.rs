@@ -414,3 +414,106 @@ pub unsafe extern "C" fn catcher_http_execute_stream(
         request_id
     } else { 0 }
 }
+
+// ── Multipart upload (B-02) ──────────────────────────────────
+
+/// Multipart part descriptor (FFI-safe).
+/// `data` points to bytes of length `data_len`.
+/// For text fields, `filename` and `content_type` may be null.
+/// For file/binary fields, `content_type` should be set.
+#[repr(C)]
+pub struct FfiMultipartPart {
+    pub name: *const c_char,
+    pub value_or_filename: *const c_char,  // text value OR filename
+    pub content_type: *const c_char,        // null for text parts
+    pub data: *const u8,                     // null for text parts
+    pub data_len: usize,
+}
+
+/// Upload a multipart/form-data request.
+///
+/// `parts` is an array of `FfiMultipartPart` with `parts_count` elements.
+/// Text parts: set `name` + `value_or_filename`, leave `data`/`content_type` null.
+/// File parts: set `name` + `value_or_filename` (filename) + `content_type` + `data`/`data_len`.
+#[no_mangle]
+pub unsafe extern "C" fn catcher_http_multipart(
+    handle: *mut c_void,
+    method: *const c_char,       // "POST" or "PUT"
+    url: FfiString,
+    parts: *const FfiMultipartPart,
+    parts_count: usize,
+    headers_json: *const c_char,
+    timeout_ms: u64,
+    callback: Option<EventCallback>,
+    user_data: usize,
+) {
+    if handle.is_null() { return; }
+    let callback = match callback {
+        Some(cb) => cb,
+        None => return,
+    };
+    let id = Box::from_raw(handle as *mut usize);
+    let id_val = *id;
+    std::mem::forget(id); // don't drop, handle stays valid
+
+    let method_str = if method.is_null() {
+        HttpMethod::POST
+    } else {
+        match CStr::from_ptr(method).to_str().unwrap_or("POST") {
+            "PUT" => HttpMethod::PUT,
+            "PATCH" => HttpMethod::PATCH,
+            _ => HttpMethod::POST,
+        }
+    };
+
+    let url_str = ffi_string_to_string(url, "");
+    let per_request_headers = parse_headers_json(headers_json);
+    let per_request_timeout = if timeout_ms > 0 { Some(timeout_ms) } else { None };
+
+    // Build multipart form from FFI parts array
+    let mut form = crate::transport::multipart::MultipartForm::new();
+    if !parts.is_null() && parts_count > 0 {
+        let parts_slice = std::slice::from_raw_parts(parts, parts_count);
+        for part in parts_slice {
+            let name = if part.name.is_null() { continue; }
+            else { CStr::from_ptr(part.name).to_str().unwrap_or("").to_string() };
+            if name.is_empty() { continue; }
+
+            if part.data.is_null() || part.data_len == 0 {
+                // Text field
+                let value = if part.value_or_filename.is_null() { String::new() }
+                else { CStr::from_ptr(part.value_or_filename).to_str().unwrap_or("").to_string() };
+                form = form.text(name, value);
+            } else {
+                // Binary/file field
+                let data = std::slice::from_raw_parts(part.data, part.data_len).to_vec();
+                let filename = if part.value_or_filename.is_null() { "file".to_string() }
+                else { CStr::from_ptr(part.value_or_filename).to_str().unwrap_or("file").to_string() };
+                let ct = if part.content_type.is_null() { "application/octet-stream".to_string() }
+                else { CStr::from_ptr(part.content_type).to_str().unwrap_or("application/octet-stream").to_string() };
+                form = form.file(name, filename, ct, data);
+            }
+        }
+    }
+
+    let ud = user_data;
+    let transport = handles().as_ref().and_then(|m| m.get(&id_val)).cloned();
+    if let Some(t) = transport {
+        runtime().spawn(async move {
+            let request = HttpRequest {
+                method: method_str,
+                url: url_str,
+                headers: per_request_headers,
+                multipart: Some(form),
+                timeout_ms: per_request_timeout,
+                ..Default::default()
+            };
+            let result = t.execute(request).await;
+            let json = match result {
+                Ok(resp) => serde_json::to_string(&resp).unwrap_or_default(),
+                Err(e) => error_json(&e.to_string()),
+            };
+            invoke_http_callback(callback, "http_result", json, ud);
+        });
+    }
+}
