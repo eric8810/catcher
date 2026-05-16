@@ -24,7 +24,7 @@
 | A-02 | WS per-message deflate | `compression.rs:18` 显式忽略 per_message_deflate。根因：tungstenite 全版本不支持 RFC 7692。**评估完成** → 见 `tungstenite-permessage-deflate.md` + `tungstenite-deflate-fork-analysis.md`。短期：升级 0.26+；中期：评估 yawc/ratchet |
 | B-01 | Transport trait 抽象 | 架构级变更，TS 层已标 `@deprecated`，无直接需求 |
 | B-02 | Multipart 编码器（Rust 侧） | G5 Rust❌，Dart 无法原生上传 multipart |
-| N-04 | 网络质量实时事件推送 | 仅 polling，无 subscribe/push 机制 |
+| ~~N-04~~ | ~~网络质量实时事件推送~~ | ✅ Rust QualitySubscription callback + TS `networkQualityChange` event 均已实现 |
 | ~~NEW-2~~ | ~~catcher-web 进度回调~~ | ✅ 下载进度通过 ReadableStream 流式跟踪，上传进度在响应头到达时报告 100%（fetch 限制） |
 | ~~NEW-3~~ | ~~TS TLS 配置死代码~~ | ✅ 已接入 Node.js https.Agent（ca/cert/key/minVersion/SNI/PFX），pinSha256 仍 deferred |
 
@@ -40,10 +40,10 @@
 
 | # | 问题 |
 |---|------|
-| G-03 | Retry 触发过多 |
-| G-07 | retry minTimeout 偏高（退避从 1s 起步） |
-| G-08 | S5 大体积消息缺 retry |
-| G-09 | S7 metric 滥用（msgFinishOrder 当延迟） |
+| ~~G-03~~ | ~~Retry 触发过多~~ | ✅ 已缓解（minTimeout 500ms + retry 时销毁坏连接 + 连接池超时缩短） |
+| ~~G-07~~ | ~~retry minTimeout 偏高~~ | ✅ 已修复（TS minTimeout=500ms, Rust min_backoff_ms=100ms） |
+| ~~G-08~~ | ~~S5 大体积消息缺 retry~~ | ✅ 已修复（`retry: { attempts: 2 }` 已配置，scenarios.test.ts:287） |
+| ~~G-09~~ | ~~S7 metric 滥用~~ | ✅ 已修复（time 用实际延迟 ms，清理了未用 msgFinishOrder） |
 | ~~G-10~~ | ~~chaos parseInt 下划线~~ | ✅ 已修复（`'600000'` 无下划线，chaos.test.ts:28） |
 | ~~G-11~~ | ~~reporter 统计缺陷~~ | ✅ 全失败 P50 返回 0/N/A + P50 增加绝对差值列 |
 | ~~G-12~~ | ~~延迟对比跨重试次数混算~~ | ✅ 已按重试次数分桶（harness.ts retries 字段 + 0-retry/retried 分桶展示） |

@@ -454,7 +454,6 @@ describe('S6: WS高频消息 (压缩+msgpackr)', () => {
 
 async function vanillaS7(baseUrl: string): Promise<IterationResult> {
   clearDnsCache()
-  const start = Date.now()
 
   // 1 high-priority message + 20 low-priority slow requests
   const slowReqs = Array.from({ length: 20 }, (_, i) =>
@@ -464,21 +463,11 @@ async function vanillaS7(baseUrl: string): Promise<IterationResult> {
   const msgReq = axios.post(baseUrl + '/messages', { text: 'prio test' }, { timeout: 10_000 })
 
   // Promise.all — no priority, message competes equally
-  let msgFinishOrder = -1
-  let completed = 0
   const allReqs = [msgReq, ...slowReqs]
 
   const results = await Promise.allSettled(
-    allReqs.map((p, idx) =>
-      p.then(() => {
-        completed++
-        if (idx === 0) msgFinishOrder = completed
-        return true
-      }).catch(() => {
-        completed++
-        if (idx === 0) msgFinishOrder = completed
-        return false
-      })
+    allReqs.map((p) =>
+      p.then(() => true).catch(() => false),
     ),
   )
 
@@ -489,7 +478,6 @@ async function vanillaS7(baseUrl: string): Promise<IterationResult> {
 
 async function catcherS7(baseUrl: string): Promise<IterationResult> {
   clearDnsCache()
-  const start = Date.now()
 
   const client = createHttpClient({
     baseURL: baseUrl, keepAlive: true,
@@ -506,21 +494,11 @@ async function catcherS7(baseUrl: string): Promise<IterationResult> {
   const msgStart = Date.now()
   const msgPromise = client.post('/messages', { text: 'prio test' }).catch(() => null)
 
-  let msgFinishOrder = -1
-  let completed = 0
   const allReqs = [msgPromise, ...avatarReqs]
 
   const results = await Promise.allSettled(
-    allReqs.map((p, idx) =>
-      p.then(() => {
-        completed++
-        if (idx === 0) msgFinishOrder = completed
-        return true
-      }).catch(() => {
-        completed++
-        if (idx === 0) msgFinishOrder = completed
-        return false
-      })
+    allReqs.map((p) =>
+      p.then(() => true).catch(() => false),
     ),
   )
 
