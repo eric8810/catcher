@@ -9,7 +9,7 @@
 | 1 | Retry 建新连接 | 🔴 | 弱网下 catcher 比 vanilla 慢 4 倍 | [retry-reuses-bad-connection.md](./retry-reuses-bad-connection.md) |
 | 2 | keepAlive 无健康检查 | 🔴 | S5/S8 弱网 catcher 成功率低于 vanilla | [keepalive-broken-connection.md](./keepalive-broken-connection.md) |
 | 3 | Retry 触发过多 | 🟡 | 轻度弱网不必要的重试放大延迟 | [retry-over-triggers.md](./retry-over-triggers.md) |
-| 4 | Circuit breaker 未接入 | 🟡 | 配置了熔断参数但未使用，请求放大无保护 | [circuit-breaker-not-wired.md](./circuit-breaker-not-wired.md) |
+| 4 | ~~Circuit breaker 未接入~~ | 🟡 | ✅ 已接入，CB 在 TS 和 Rust 层均正常工作 | [circuit-breaker-not-wired.md](./circuit-breaker-not-wired.md) |
 | 5 | Retry 无跨请求记忆 | 🟡 | 连续失败仍从 1s 退避，但 CB 已覆盖此需求 | [retry-no-cross-request-memory.md](./retry-no-cross-request-memory.md) |
 | 6 | 代理延迟在连接时固化 | 🔴 | keepAlive 连接跨测试复用导致弱网数据被污染 | [proxy-latency-captured-at-connect.md](./proxy-latency-captured-at-connect.md) |
 | 7 | retry minTimeout 偏高 | 🟡 | 退避从 1s 起步，不必要时也白花等待 | [retry-min-timeout-too-high.md](./retry-min-timeout-too-high.md) |
@@ -29,17 +29,17 @@
 | # | Issue | 优先级 | 状态 | 文件 |
 |---|-------|:------:|:----:|------|
 | G1 | ~~请求取消 (AbortSignal)~~ | 🔴 P0 | ✅ 已实现 | — |
-| G2 | 错误上下文丰富化 | 🔴 P0 | 🔲 | 同上 |
-| G3 | CORS / credentials / cookie | 🔴 P0 | 🔲 | 同上 |
-| G4 | 代理设置 (HTTP/SOCKS5) | 🟡 P1 | 🔲 | 同上 |
-| G5 | FormData / 文件上传 | 🟡 P1 | 🔲 | 同上 |
+| G2 | 错误上下文丰富化 | 🔴 P0 | ✅ | 同上 |
+| G3 | CORS / credentials / cookie | 🔴 P0 | ✅ | 同上 |
+| G4 | 代理设置 (HTTP/SOCKS5) | 🟡 P1 | ✅ | 同上 |
+| G5 | FormData / 文件上传 | 🟡 P1 | 🟡 TS✅ Rust❌ | 同上 |
 | G6 | 重定向控制 | 🟡 P1 | 🔲 | 同上 |
-| G7 | 自定义 Hostname 解析 | 🟡 P1 | 🔲 | 同上 |
+| G7 | 自定义 Hostname 解析 | 🟡 P1 | ✅ | 同上 |
 | G8 | HTTPS 配置增强 | 🟡 P1 | 🔲 | 同上 |
 | G9 | Transport trait (Adapter) | 🟡 P1 | 🔲 | 同上 |
-| G10 | 流式响应 | 🟡 P1 | 🔲 | 同上 |
-| G11 | 韧性运行时控制 | 🟡 P1 | 🔲 | 同上 |
-| G12 | 认证辅助 | 🟢 P2 | 🔲 | 同上 |
+| G10 | 流式响应 | 🟡 P1 | ✅ | 同上 |
+| G11 | 韧性运行时控制 | 🟡 P1 | ✅ | 同上 |
+| G12 | 认证辅助 | 🟢 P2 | ✅ | 同上 |
 
 详见 → [api-gap-features.md](./api-gap-features.md)
 
@@ -97,3 +97,34 @@ keepAlive 池中坏连接 → retry 对这个坏连接反复重试 → 重试次
 | retry 提升偏远地区成功率 | S2 🏔️偏远3G: 80% → 100% |
 | DNS 缓存减少重复解析 | DNS 集成测试: 后续请求仅首次的 9% |
 | msgpackr 减少带宽 | S5: catcher bytes < vanilla bytes |
+
+## 架构差距审计（2026-05-15）
+
+> 全面对照设计文档 vs 实际源码，覆盖 Rust / TS / Dart / napi / UniFFI
+
+详见 → [arch-gap-audit-2026.md](./arch-gap-audit-2026.md)
+
+### 发现摘要
+
+| 类别 | 数量 | 说明 |
+|------|:----:|------|
+| A. 代码已实现但未接入管线 | 2 | WS deflate / Transport trait (A-01 已通过 Semaphore 接入, A-03 host_mapping 已接入) |
+| B. 设计有方案但代码未开始 | 2 | Transport trait / Multipart (B-03 circuitBreakerChange + networkQualityChange 已补全) |
+| C. 文档标记 🔲 但代码实际已完成 | 8+ | **文档严重滞后** — G2/G3/G4/G5/G10/G12 等已完成 |
+| D. 已发现但未修复的 Bug | 0 | D-01~05 全部修复 ✅ |
+| E. 类型定义存在但从未使用 | 4 | TransportAdapter / beforeRedirect / TLS / DNS nameservers |
+| F. 缺失的测试 | 8 | TEST-02~10 均未完成 |
+| H. 平台绑定层缺口 | 0 | H-01 roundtrip ✅ (CI已接入), H-02 UniFFI 导出完整 ✅, H-03 napi binary ✅, H-04 stream ✅, H-05 cancel ✅ |
+| I. 规划中功能 | 1 | I-01 catcher-tus (I-02 proxy.ts 已完成) |
+
+### 优先修复
+
+1. **🔴 D-01~05**: review-2026 发现的未修复 Bug（每项 1-10 行改动）
+2. **🟡 A-01**: PriorityRequestQueue 接入 HttpTransport
+3. **🟡 C**: 更新文档状态（G2~G12 大部分已完成）
+4. **🟡 A-03**: DNS 自定义解析接入 reqwest
+5. **🟡 B-03**: 韧性事件推送补全
+
+### ⚠️ 重要更正
+
+Issue #4 "Circuit breaker 未接入" 和 api-gap-features.md 中 G2/G3/G4/G5/G10/G12 标记为 🔲 的功能，经 2026-05-15 源码审查确认**已在代码中实现**。详见 [arch-gap-audit-2026.md](./arch-gap-audit-2026.md) 第四部分。

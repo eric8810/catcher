@@ -7,17 +7,17 @@
 
 | # | Issue | 优先级 | 影响范围 | 状态 |
 |---|-------|:------:|----------|:----:|
-| G2 | 错误上下文丰富化 | 🔴 P0 | TS + Rust | 🔲 |
-| G3 | CORS / credentials / cookie 管理 | 🔴 P0 | TS (web + http-ts) | 🔲 |
-| G4 | 代理设置 (HTTP/SOCKS5) | 🟡 P1 | TS + Rust + FFI | 🔲 |
-| G5 | FormData / 文件上传 | 🟡 P1 | TS + Rust + FFI | 🔲 |
-| G6 | 重定向控制 | 🟡 P1 | TS + Rust | 🔲 |
-| G7 | 自定义 Hostname 解析 (host_mapping) | 🟡 P1 | Rust + TS + FFI | 🔲 |
-| G8 | HTTPS 配置增强 (mTLS / SNI / pinning) | 🟡 P1 | Rust + TS + FFI | 🔲 |
+| G2 | 错误上下文丰富化 | 🔴 P0 | TS + Rust | ✅ |
+| G3 | CORS / credentials / cookie 管理 | 🔴 P0 | TS (web + http-ts) | ✅ |
+| G4 | 代理设置 (HTTP/SOCKS5) | 🟡 P1 | TS + Rust + FFI | ✅ |
+| G5 | FormData / 文件上传 | 🟡 P1 | TS + Rust + FFI | 🟡 TS✅ Rust❌ |
+| G6 | 重定向控制 | 🟡 P1 | TS + Rust | ✅ |
+| G7 | 自定义 Hostname 解析 (host_mapping) | 🟡 P1 | Rust + TS + FFI | ✅ |
+| G8 | HTTPS 配置增强 (mTLS / SNI / pinning) | 🟡 P1 | Rust + TS + FFI | 🟡 mTLS✅ SNI✅ TLS版本✅ pin_sha256❌ |
 | G9 | Transport trait (自定义 Adapter) | 🟡 P1 | Rust + TS | 🔲 |
-| G10 | 流式响应 (Response Stream) | 🟡 P1 | TS + Rust | 🔲 |
-| G11 | 韧性运行时控制 | 🟡 P1 | TS + Rust + FFI | 🔲 |
-| G12 | 认证辅助 (Basic Auth / Bearer / XSRF) | 🟢 P2 | TS | 🔲 |
+| G10 | 流式响应 (Response Stream) | 🟡 P1 | TS + Rust | ✅ |
+| G11 | 韧性运行时控制 | 🟡 P1 | TS + Rust + FFI | ✅ |
+| G12 | 认证辅助 (Basic Auth / Bearer / XSRF) | 🟢 P2 | TS | ✅ |
 
 > ~~G1 (AbortSignal) 已实现~~：catcher-http-ts (client.ts:232-237, :243) 和 catcher-web (client.ts:56-76, :148-152, :169) 均已完整支持，含重试时取消不重试。
 >

@@ -56,3 +56,32 @@ S1 🔴极弱网: vanilla=60% → catcher=100%，catcher 胜出。因为极弱�
 ## 关联问题
 
 - [retry-reuses-bad-connection.md](./retry-reuses-bad-connection.md)
+
+---
+
+## 缓解措施（2026-06-19）
+
+> 状态：🟡 部分缓解（非根治）
+
+### Rust 侧连接池调优
+
+`catcher-http/src/types/http.rs` 中 `PoolConfig` 默认值调整：
+
+| 参数 | 旧值 | 新值 | 效果 |
+|------|------|------|------|
+| `idle_timeout_secs` | 90 | **30** | 坏连接在池中存活时间缩短 3x |
+| `keep_alive_interval_secs` | 60 | **20** | TCP keepalive 探测频率提高 3x，更快发现死连接 |
+
+### TS 侧已有防护
+
+`catcher-http-ts/src/agent/shared-agent.ts` 中已实现：
+- `freeSocketTimeout`: `keepAliveMsecs + 5_000 = 35s`（行 76），自动驱逐空闲超时连接
+- socket error 自动驱逐（行 103-116）：`agent.on('free')` 中监听 socket error，出错时 `socket.destroy()`
+- FIFO 调度（行 85）：`scheduling: 'fifo'` 避免连接囤积
+
+### 仍未解决
+
+- **建议 1**：复用前主动 liveness probe — 未实现
+- **建议 2**：最大复用次数限制 — 未实现
+- **建议 4**：retry 时强制建新连接 — reqwest `Client` 不暴露 pool eviction API
+- 根治验证依赖 G-06（代理延迟在连接时固化）E2E 基础设施修复后重跑

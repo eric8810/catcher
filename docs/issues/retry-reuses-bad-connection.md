@@ -44,3 +44,32 @@ catcher 比 vanilla 慢 4 倍，且重试都在浪费的同一个损坏连接上
 ## 关联问题
 
 - [keepalive-broken-connection.md](./keepalive-broken-connection.md)
+
+---
+
+## 缓解措施（2026-06-19）
+
+> 状态：🟡 部分缓解（非根治）
+
+### Rust 侧连接池调优
+
+`catcher-http/src/types/http.rs` 中 `PoolConfig` 默认值调整：
+
+| 参数 | 旧值 | 新值 | 效果 |
+|------|------|------|------|
+| `idle_timeout_secs` | 90 | **30** | 坏连接在池中存活时间缩短，降低 retry 复用概率 |
+| `keep_alive_interval_secs` | 60 | **20** | 更频繁发送 TCP keepalive 探测，更快发现死连接 |
+
+### TS 侧已有防护
+
+`catcher-http-ts/src/agent/shared-agent.ts` 中已实现：
+- `freeSocketTimeout`: 35s 自动驱逐空闲连接
+- socket error 自动驱逐（`agent.on('free')` + `socket.destroy()`）
+- FIFO 调度避免连接囤积
+
+### 仍未解决
+
+- **复用前主动 liveness probe**（ping/timeout 检查）
+- **retry 时强制新建连接** — reqwest `Client` 不暴露 pool eviction API
+- **最大连接复用次数限制**
+- 根治验证依赖 G-06（代理延迟在连接时固化）E2E 基础设施修复后重跑
