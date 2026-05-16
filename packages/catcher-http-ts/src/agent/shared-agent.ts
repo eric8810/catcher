@@ -11,8 +11,12 @@ import type { SharedAgentOptions, TlsConfig } from '@eric8810/catcher-core'
  * G7 fix: Each agent gets its own CacheableLookup instance so that
  * different clients with different hostMapping don't interfere.
  */
-function createDnsLookup(ttl: number, hostMapping?: Record<string, string>): CacheableLookup {
-  const cache = new CacheableLookup({ maxTtl: ttl })
+function createDnsLookup(ttl: number, hostMapping?: Record<string, string>, nameservers?: string[]): CacheableLookup {
+  const cacheOpts: any = { maxTtl: ttl }
+  if (nameservers && nameservers.length > 0) {
+    cacheOpts.servers = nameservers
+  }
+  const cache = new CacheableLookup(cacheOpts)
 
   // G7: Inject custom host mapping into DNS lookup
   if (hostMapping && Object.keys(hostMapping).length > 0) {
@@ -59,7 +63,7 @@ function createDnsLookup(ttl: number, hostMapping?: Record<string, string>): Cac
  * Note: Each call creates a new Agent with its own DNS cache to ensure
  * hostMapping isolation between different client instances.
  */
-export function createSharedAgent(options: SharedAgentOptions & { hostMapping?: Record<string, string>; tls?: TlsConfig } = {}): http.Agent | https.Agent {
+export function createSharedAgent(options: SharedAgentOptions & { hostMapping?: Record<string, string>; tls?: TlsConfig; nameservers?: string[] } = {}): http.Agent | https.Agent {
   const {
     keepAlive = true,
     keepAliveMsecs = 30_000,
@@ -70,6 +74,7 @@ export function createSharedAgent(options: SharedAgentOptions & { hostMapping?: 
     dnsCacheTtl = 300,
     hostMapping,
     tls,
+    nameservers,
   } = options
 
   // freeSocketTimeout: destroy unused free sockets after this many ms.
@@ -89,7 +94,7 @@ export function createSharedAgent(options: SharedAgentOptions & { hostMapping?: 
 
   if (dnsCacheTtl > 0) {
     // Each agent gets its own DNS cache to ensure hostMapping isolation
-    ;(agentOpts as any).lookup = createDnsLookup(dnsCacheTtl, hostMapping).lookup
+    ;(agentOpts as any).lookup = createDnsLookup(dnsCacheTtl, hostMapping, nameservers).lookup
   }
 
   // Build TLS options for https.Agent

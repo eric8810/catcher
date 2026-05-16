@@ -175,6 +175,10 @@ export function createHttpClient(config: HttpClientConfig): IHttpClient {
   if (config.dns?.hostMapping) {
     ;(agentOptions as any).hostMapping = config.dns.hostMapping
   }
+  // DNS nameservers
+  if (config.dns?.nameservers && config.dns.nameservers.length > 0) {
+    ;(agentOptions as any).nameservers = config.dns.nameservers
+  }
   const agent = createSharedAgent(agentOptions)
 
   // G4: Resolve proxy agent if proxy is configured

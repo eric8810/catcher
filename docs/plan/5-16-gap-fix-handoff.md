@@ -44,7 +44,7 @@
 | G-07 | retry minTimeout 偏高（退避从 1s 起步） |
 | G-08 | S5 大体积消息缺 retry |
 | G-09 | S7 metric 滥用（msgFinishOrder 当延迟） |
-| G-10 | chaos parseInt 下划线（`600_000` → 600ms） |
+| ~~G-10~~ | ~~chaos parseInt 下划线~~ | ✅ 已修复（`'600000'` 无下划线，chaos.test.ts:28） |
 | G-11 | reporter 统计缺陷（全失败假改善等） |
 | G-12 | 延迟对比跨重试次数混算 |
 
@@ -53,7 +53,7 @@
 | # | 问题 |
 |---|------|
 | G6-beforeRedirect | TS beforeRedirect 类型存在但不生效（Axios 限制） |
-| DNS nameservers | types.ts 定义了 nameservers 但 TS/Rust 均未接入 |
+| ~~DNS nameservers~~ | ~~types.ts 定义了 nameservers 但 TS/Rust 均未接入~~ | ✅ TS 已接入 `CacheableLookup({ servers })`（shared-agent.ts:14-18 + client.ts:179-181） |
 
 ## 🟢 测试缺口
 
