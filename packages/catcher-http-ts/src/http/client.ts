@@ -170,7 +170,7 @@ export function createHttpClient(config: HttpClientConfig): IHttpClient {
   } = config
 
   // 1. Build shared Agent (connection pooling + DNS cache + health checks)
-  const agentOptions = { keepAlive, dnsCacheTtl, rejectUnauthorized }
+  const agentOptions = { keepAlive, dnsCacheTtl, rejectUnauthorized, tls: config.tls }
   // G7: custom DNS host mapping
   if (config.dns?.hostMapping) {
     ;(agentOptions as any).hostMapping = config.dns.hostMapping

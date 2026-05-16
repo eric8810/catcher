@@ -1,8 +1,9 @@
 import http from 'node:http'
 import https from 'node:https'
+import { readFileSync } from 'node:fs'
 import type { Socket } from 'node:net'
 import CacheableLookup from 'cacheable-lookup'
-import type { SharedAgentOptions } from '@eric8810/catcher-core'
+import type { SharedAgentOptions, TlsConfig } from '@eric8810/catcher-core'
 
 /**
  * Create a CacheableLookup instance for a specific agent.
@@ -58,7 +59,7 @@ function createDnsLookup(ttl: number, hostMapping?: Record<string, string>): Cac
  * Note: Each call creates a new Agent with its own DNS cache to ensure
  * hostMapping isolation between different client instances.
  */
-export function createSharedAgent(options: SharedAgentOptions & { hostMapping?: Record<string, string> } = {}): http.Agent | https.Agent {
+export function createSharedAgent(options: SharedAgentOptions & { hostMapping?: Record<string, string>; tls?: TlsConfig } = {}): http.Agent | https.Agent {
   const {
     keepAlive = true,
     keepAliveMsecs = 30_000,
@@ -68,6 +69,7 @@ export function createSharedAgent(options: SharedAgentOptions & { hostMapping?: 
     rejectUnauthorized = true,
     dnsCacheTtl = 300,
     hostMapping,
+    tls,
   } = options
 
   // freeSocketTimeout: destroy unused free sockets after this many ms.
@@ -90,7 +92,60 @@ export function createSharedAgent(options: SharedAgentOptions & { hostMapping?: 
     ;(agentOpts as any).lookup = createDnsLookup(dnsCacheTtl, hostMapping).lookup
   }
 
-  const agent = new http.Agent(agentOpts as http.AgentOptions)
+  // Build TLS options for https.Agent
+  const hasTlsConfig = tls && (
+    tls.caCertPem || tls.caCertPath ||
+    tls.clientCertPem || tls.clientCertPath ||
+    tls.clientKeyPem || tls.clientKeyPath ||
+    tls.clientIdentityPfx ||
+    tls.minTlsVersion ||
+    tls.tlsSniOverride ||
+    tls.rejectUnauthorized === false
+  )
+
+  const tlsAgentOpts: https.AgentOptions = {
+    ...agentOpts,
+    rejectUnauthorized: tls?.rejectUnauthorized ?? rejectUnauthorized,
+  }
+
+  // G8: TLS — ca/cert/key from PEM content or file path
+  if (tls?.caCertPem) {
+    tlsAgentOpts.ca = tls.caCertPem
+  } else if (tls?.caCertPath) {
+    tlsAgentOpts.ca = readFileSync(tls.caCertPath, 'utf-8')
+  }
+  if (tls?.clientCertPem) {
+    tlsAgentOpts.cert = tls.clientCertPem
+  } else if (tls?.clientCertPath) {
+    tlsAgentOpts.cert = readFileSync(tls.clientCertPath, 'utf-8')
+  }
+  if (tls?.clientKeyPem) {
+    tlsAgentOpts.key = tls.clientKeyPem
+  } else if (tls?.clientKeyPath) {
+    tlsAgentOpts.key = readFileSync(tls.clientKeyPath, 'utf-8')
+  }
+  if (tls?.clientIdentityPfx) {
+    tlsAgentOpts.pfx = Buffer.from(tls.clientIdentityPfx)
+    if (tls.clientIdentityPassword) {
+      tlsAgentOpts.passphrase = tls.clientIdentityPassword
+    }
+  }
+  if (tls?.minTlsVersion) {
+    const versionMap: Record<string, string> = {
+      '1.0': 'TLSv1',
+      '1.1': 'TLSv1_1',
+      '1.2': 'TLSv1_2',
+      '1.3': 'TLSv1_3',
+    }
+    ;(tlsAgentOpts as any).minVersion = versionMap[tls.minTlsVersion] ?? 'TLSv1_2'
+  }
+  if (tls?.tlsSniOverride) {
+    tlsAgentOpts.servername = tls.tlsSniOverride
+  }
+
+  const agent = hasTlsConfig
+    ? new https.Agent(tlsAgentOpts)
+    : new http.Agent(agentOpts as http.AgentOptions)
 
   // Set freeSocketTimeout — Node destroys idle free sockets older than this
   if (keepAlive && freeSocketTimeout > 0) {

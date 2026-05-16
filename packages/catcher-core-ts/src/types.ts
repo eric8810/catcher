@@ -38,28 +38,33 @@ export interface DnsConfig {
 // === TLS ===
 
 export interface TlsConfig {
+  /** Whether to reject unauthorized certificates (default: true) — TS ✅ / Rust ✅ */
   rejectUnauthorized?: boolean
-  /** Path to CA certificate PEM file */
+  /** Path to CA certificate PEM file — TS ✅ / Rust ✅ */
   caCertPath?: string
-  /** CA certificate PEM content */
+  /** CA certificate PEM content — TS ✅ / Rust ✅ */
   caCertPem?: string
-  /** Path to client certificate PEM file */
+  /** Path to client certificate PEM file — TS ✅ / Rust ✅ */
   clientCertPath?: string
-  /** Client certificate PEM content */
+  /** Client certificate PEM content — TS ✅ / Rust ✅ */
   clientCertPem?: string
-  /** Path to client private key PEM file */
+  /** Path to client private key PEM file — TS ✅ / Rust ✅ */
   clientKeyPath?: string
-  /** Client private key PEM content */
+  /** Client private key PEM content — TS ✅ / Rust ✅ */
   clientKeyPem?: string
-  /** PFX/PKCS12 client identity (binary) */
+  /** PFX/PKCS12 client identity (binary) — TS ✅ / Rust ❌ */
   clientIdentityPfx?: Uint8Array
-  /** Password for PFX identity */
+  /** Password for PFX identity — TS ✅ / Rust ❌ */
   clientIdentityPassword?: string
-  /** Override TLS SNI hostname */
+  /** Override TLS SNI hostname — TS ✅ / Rust ✅ */
   tlsSniOverride?: string
-  /** Minimum TLS version */
+  /** Minimum TLS version — TS ✅ / Rust ✅ */
   minTlsVersion?: '1.0' | '1.1' | '1.2' | '1.3'
-  /** SHA-256 public key pins (deferred — requires custom cert verifier) */
+  /**
+   * SHA-256 public key pins — TS ❌ / Rust ❌ (deferred)
+   * Requires custom cert verifier in both Node.js and rustls.
+   * See NEW-1 in handoff doc.
+   */
   pinSha256?: string[]
 }
 
