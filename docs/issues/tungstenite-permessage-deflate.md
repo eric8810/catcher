@@ -2,7 +2,7 @@
 
 > 严重度: 🟡 中
 > 创建: 2026-06-19
-> 状态: 🔲
+> 状态: 部分缓解（tungstenite 已升级到 0.29；RFC 7692 仍不支持）
 
 ## 问题
 
@@ -29,7 +29,7 @@ CHANGELOG 从 0.24 → 0.29 的变更（Message 改用 Bytes payload、WebSocket
 
 ### tungstenite 升级本身的价值
 
-从 0.24 → 0.26+ 可获得：
+从 0.24 → 0.29 已获得：
 - `read_buffer_size` 默认 128 KiB，高负载读取性能改善
 - `Message` 使用 `Bytes` payload，零拷贝克隆
 - `WebSocketConfig` non-exhaustive + builder 风格
@@ -42,12 +42,12 @@ CHANGELOG 从 0.24 → 0.29 的变更（Message 改用 Bytes payload、WebSocket
 
 ## 解决方案选项
 
-### 方案 A：升级 tungstenite 但不做 deflate（低成本）
+### 方案 A：升级 tungstenite 但不做 deflate（已完成）
 
-将 `tokio-tungstenite` 从 0.24 → 0.26+，适配 API breaking change，但不增加 deflate 支持。
+已将 `tokio-tungstenite` 从 0.24 → 0.29，并完成 Message / CloseFrame / WebSocketConfig API 适配；该升级不增加 deflate 支持。
 
-- 工作量：S（~1-2 天，主要是 Message/Config API 适配 + 测试）
-- 收益：性能改善，消除技术债
+- 工作量：已完成
+- 收益：性能改善，消除旧 API 技术债
 - deflate：仍然不支持
 
 ### 方案 B：Fork tungstenite 添加 deflate 支持（中高成本）
@@ -56,7 +56,7 @@ CHANGELOG 从 0.24 → 0.29 的变更（Message 改用 Bytes payload、WebSocket
 
 ### 方案 C：换用支持 deflate 的 WS 库（高成本）
 
-如 `yawc`（vector 项目已采用）。需要重写整个 WS 传输层。
+如 `yawc` 或 `ratchet`。两者都需要重写整个 WS 传输层；其中 yawc 支持 permessage-deflate，但社区验证和长期维护情况仍需单独评估。
 
 - 工作量：L（~1-2 周）
 - 风险：新库成熟度、API 稳定性、社区活跃度
@@ -70,13 +70,13 @@ CHANGELOG 从 0.24 → 0.29 的变更（Message 改用 Bytes payload、WebSocket
 
 ## 建议
 
-1. **短期**：执行方案 A — 升级到 0.26+，消除技术债，获得性能改善
-2. **评估方案 B**：分析 fork + 实现 deflate 的可行性（见 fork analysis）
-3. **远期**：根据用户需求和方案 B 评估结果决定是否投入
+1. **短期**：✅ 方案 A 已完成 — 已升级到 0.29，消除旧 API 技术债；但 RFC 7692 仍不支持
+2. **评估方案 B/C**：继续关注 upstream PR / Signal fork / ratchet / yawc 等标准 permessage-deflate 路线
+3. **当前可选缓解**：如业务急需压缩，可先采用应用层 gzip/zstd 压缩，但这不能与标准 WS permessage-deflate 互操作
 
 ## 关联
 
 - `arch-gap-audit-2026.md` A-02
-- `compression.rs:13-18` — 当前忽略 per_message_deflate 的代码
-- `ws_client.rs:170` — 注释说明 tungstenite 0.24 限制
+- `compression.rs:11-13` — 当前忽略 per_message_deflate 的代码，并说明 tungstenite 0.29 仍未支持 RFC 7692
+- `ws_client.rs` — 已完成 tungstenite 0.29 Message / CloseFrame / WebSocketConfig API 适配
 - `native-layer-capability-gaps.md` — 无直接关联

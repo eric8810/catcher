@@ -83,7 +83,7 @@ tungstenite 全版本（0.20~0.29）均未实现 RFC 7692。上游 issue [#2](ht
 详细评估见 [`tungstenite-permessage-deflate.md`](./tungstenite-permessage-deflate.md) 和 [`tungstenite-deflate-fork-analysis.md`](./tungstenite-deflate-fork-analysis.md)。
 
 1. **短期**：✅ 已升级 `tokio-tungstenite 0.24 → 0.29` 并完成 API 适配；但 0.29 仍未支持 RFC 7692
-2. **中期**：根据用户需求评估换用 yawc（Vector 背书）或 ratchet（SwimOS 生产使用）（方案 B2/B3）
+2. **中期**：根据用户需求评估 upstream PR / Signal fork / yawc / ratchet 等路线；yawc 支持 permessage-deflate，但社区验证和维护背书仍需单独确认
 3. 不建议 fork+patch（方案 B1），长期维护成本不可控
 
 ---

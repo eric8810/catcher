@@ -19,7 +19,7 @@ members = [
 ```toml
 [package]
 name = "catcher-core"
-version = "0.1.0"
+version = "0.2.2"
 edition = "2021"
 
 [dependencies]
@@ -33,27 +33,36 @@ serde_json = "1"
 ```toml
 [package]
 name = "catcher-http"
-version = "0.1.0"
+version = "0.2.2"
 edition = "2021"
 
 [features]
 default = ["rustls-tls", "hickory-dns"]
-rustls-tls = ["reqwest/rustls-tls"]
+rustls-tls = ["reqwest/rustls", "dep:rustls", "dep:rustls-pki-types", "dep:sha2", "dep:base64", "dep:webpki-roots"]
 native-tls = ["reqwest/native-tls"]
-hickory-dns = ["reqwest/hickory-dns", "dep:hickory-resolver"]
+hickory-dns = ["reqwest/hickory-dns", "dep:hickory-resolver", "dep:hickory-proto"]
 napi = ["dep:napi", "dep:napi-derive"]
 
 [dependencies]
-catcher-core = { path = "../catcher-core" }
+catcher-core = { path = "../catcher-core", version = "0.2.2" }
 tokio = { version = "1", features = ["sync", "time", "net", "io-util", "macros"] }
-reqwest = { version = "0.12", default-features = false, features = ["http2", "gzip", "brotli", "deflate", "stream", "charset"] }
-reqwest-middleware = "0.4"
-reqwest-retry = "0.7"
-retry-policies = "0.4"
+tokio-util = "0.7"
+tokio-stream = "0.1"
+bytes = "1"
+reqwest = { version = "0.13", default-features = false, features = ["http2", "gzip", "brotli", "deflate", "stream", "charset", "query", "form"] }
+reqwest-middleware = "0.5"
+reqwest-retry = "0.9"
+retry-policies = "0.5"
 hickory-resolver = { version = "0.25", optional = true, features = ["tokio"] }
+hickory-proto = { version = "0.25", optional = true }
+rustls = { version = "0.23", optional = true, default-features = false, features = ["aws_lc_rs", "logging", "std", "tls12"] }
+rustls-pki-types = { version = "1", optional = true, features = ["std"] }
+sha2 = { version = "0.10", optional = true }
+base64 = { version = "0.22", optional = true }
+webpki-roots = { version = "0.26", optional = true }
 backon = "1"
-trmp-serde = "1"
-	rmpv = "1"
+rmp-serde = "1"
+rmpv = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 parking_lot = "0.12"
@@ -66,17 +75,17 @@ napi-derive = { version = "2", optional = true }
 ```toml
 [package]
 name = "catcher-ws"
-version = "0.1.0"
+version = "0.2.2"
 edition = "2021"
 
 [dependencies]
-catcher-core = { path = "../catcher-core" }
-tokio = { version = "1", features = ["sync", "time", "net", "io-util", "macros"] }
-tokio-tungstenite = "0.24"
+catcher-core = { path = "../catcher-core", version = "0.2.2" }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "net", "io-util", "macros"] }
+tokio-tungstenite = "0.29"
 futures-util = "0.3"
 backon = "1"
-trmp-serde = "1"
-	rmpv = "1"
+rmp-serde = "1"
+rmpv = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ```

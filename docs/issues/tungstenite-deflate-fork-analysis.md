@@ -8,7 +8,7 @@
 
 ## 背景
 
-catcher-ws 使用 `tokio-tungstenite 0.24` 作为 WebSocket 传输层。tungstenite 是 Rust 生态中**星标最多**（2.3k stars）的 WebSocket 库，由 snapview 维护，被 tokio-tungstenite / async-tungstenite 等异步适配器广泛依赖。
+catcher-ws 使用 `tokio-tungstenite 0.29` 作为 WebSocket 传输层。tungstenite 是 Rust 生态中**星标最多**（2.3k stars）的 WebSocket 库，由 snapview 维护，被 tokio-tungstenite / async-tungstenite 等异步适配器广泛依赖。
 
 **核心问题**：tungstenite 自 2017 年起的 [issue #2](https://github.com/snapview/tungstenite-rs/issues/2) 请求支持 RFC 7692 permessage-deflate，至今（2026-06）**仍未合并**。catcher 的 `compression.rs:18` 显式忽略 `per_message_deflate` 配置。
 
@@ -30,19 +30,19 @@ catcher-ws 使用 `tokio-tungstenite 0.24` 作为 WebSocket 传输层。tungsten
 
 | 项目 | 详情 |
 |------|------|
-| 操作 | `tokio-tungstenite 0.24 → 0.26+`，适配 API breaking change |
-| 工作量 | S（~1-2 天） |
+| 操作 | ✅ 已完成：`tokio-tungstenite 0.24 → 0.29`，适配 Message / CloseFrame / WebSocketConfig API breaking change |
+| 工作量 | 已完成 |
 | 收益 | `Message` 改用 `Bytes` 零拷贝、`read_buffer_size`/`write_buffer_size` 控制、性能改善 |
 | Breaking changes | `Message::Text(String)` → `Message::Text(Utf8Bytes)`；`Message::Binary(Vec<u8>)` → `Message::Binary(Bytes)`；`CloseFrame::reason` → `Utf8Bytes`；`max_send_queue` 移除 |
 | 风险 | 低 — API 迁移机械化 |
 | deflate | ❌ 仍不支持 |
 
 **影响范围**（catcher-ws 内部）：
-- `compression.rs` — 无需改动（不涉及 Message 类型）
-- `ws_client.rs` — 31 处 tungstenite 引用，约 12 处需要适配（Message 匹配分支、CloseFrame 构建）
-- `Cargo.toml` — 版本号更新
+- `compression.rs` — 已更新注释，明确 tungstenite 0.29 仍不支持 RFC 7692
+- `ws_client.rs` — 已适配 tungstenite 0.29 的 Message / CloseFrame / WebSocketConfig API
+- `Cargo.toml` — 已更新到 `tokio-tungstenite = "0.29"`
 
-**结论**：值得做，是方案 B 的前置条件。
+**结论**：已完成，解决了旧版本/API 技术债；但 tungstenite 0.29 仍不支持 RFC 7692。
 
 ---
 
@@ -59,7 +59,7 @@ catcher-ws 使用 `tokio-tungstenite 0.24` 作为 WebSocket 传输层。tungsten
 
 | 子任务 | 工作量 | 说明 |
 |--------|--------|------|
-| Fork + rebase 到 0.26+ | M（~2-3 天） | NextGraph 补丁基于 0.21，需 rebase 到 0.26，可能冲突 |
+| Fork + rebase 到 0.29 | M~L | NextGraph 补丁基于 0.21，需 rebase 到当前 0.29，可能冲突 |
 | 自测 + Autobahn 测试套件 | M（~1-2 天） | 需运行 Autobahn 测试验证 deflate 行为正确性 |
 | catcher-ws 适配 | S（~1 天） | 在 `compression.rs` 中接入 deflate 配置 |
 | 持续维护 | L（长期） | 每次 tungstenite 上游更新都需 rebase，永久维护负担 |
@@ -102,9 +102,9 @@ catcher-ws 使用 `tokio-tungstenite 0.24` 作为 WebSocket 传输层。tungsten
 | 项目 | 详情 |
 |------|------|
 | 来源 | [crates.io/crates/yawc](https://crates.io/crates/yawc) — 零拷贝 WebSocket 客户端 |
-| 采用者 | **Vector**（Datadog）— [PR #24654](https://github.com/vectordotdev/vector/pull/24654) 正在从 tungstenite 迁移到 yawc |
+| 采用情况 | 社区项目；曾有 Vector 迁移 PR 可参考，但不应视为 Vector/Datadog 官方背书 |
 | 特性 | 原生 permessage-deflate、零拷贝、Frame/OpCode API |
-| 成熟度 | 较新，但 Vector 的采用是强背书 |
+| 成熟度 | 较新，使用面和社区验证仍明显小于 tungstenite |
 
 **成本评估**：
 
@@ -112,11 +112,11 @@ catcher-ws 使用 `tokio-tungstenite 0.24` 作为 WebSocket 传输层。tungsten
 |--------|--------|------|
 | 重写传输层 | L（~3-5 天） | 类似 ratchet，API 完全不同 |
 | TLS 适配 | S（~0.5 天） | 需验证 TLS 支持方式 |
-| Vector PR 经验可参考 | 🟢 | Vector PR 有详细的迁移指南和测试策略 |
+| yawc 迁移经验可参考 | 🟡 | 可参考公开 PR/issue，但需重新验证当前版本 API、维护状态和测试覆盖 |
 
 **风险**：
 - 🟡 Vector PR #24654 尚未合并（2026-02 开启，仍 Open）
-- 🟡 yawc 较新，crates.io 版本号低
+- 🟡 yawc 较新，使用面和社区验证不足
 - 🟢 零拷贝设计，性能可能更好
 
 ---
@@ -152,21 +152,22 @@ catcher-ws 使用 `tokio-tungstenite 0.24` 作为 WebSocket 传输层。tungsten
 
 ## 建议
 
-### 短期（v0.3.x）
+### 短期（已完成）
 
-执行**方案 A**：升级 `tokio-tungstenite 0.24 → 0.26+`，获得性能改善，消除技术债。
+✅ **方案 A 已完成**：已升级 `tokio-tungstenite 0.24 → 0.29`，获得性能改善，消除旧 API 技术债。
 
-- 即使后续选方案 B2/B3，升级也是必要前置
-- 工作量最小，风险最低
-- 至少修复 `compression.rs` 中的误导性注释
+- Message / CloseFrame / WebSocketConfig API 已适配
+- `compression.rs` 注释已明确 tungstenite 0.29 仍不支持 RFC 7692
+- 该升级不解决 permessage-deflate，A-02 仍需后续标准压缩方案
 
 ### 中期（v0.4.x）
 
-根据用户需求评估**方案 B2（ratchet）或 B3（yawc）**：
+根据用户需求评估 **upstream PR / Signal fork / B2（ratchet）/ B3（yawc）**：
 
-- 如果有明确的 WS 压缩需求，优先考虑 **yawc**（Vector 背书，API 现代化）
-- 如果 yawc 的 Vector PR 一直未合并或库停滞，回退到 **ratchet**（SwimOS 生产使用）
-- **不建议 Fork+patch（B1）**：长期维护成本不可控
+- 如果有明确的 WS 压缩需求，优先评估上游 PR 或可信 fork，避免长期自维护补丁
+- yawc 支持 permessage-deflate，但社区验证和维护背书不足，不建议默认替换
+- ratchet + ratchet_deflate 支持标准压缩，可作为备选方案评估
+- **不建议自行 Fork+patch（B1）**：长期维护成本不可控
 
 ### 判断标准
 
@@ -179,8 +180,8 @@ catcher-ws 使用 `tokio-tungstenite 0.24` 作为 WebSocket 传输层。tungsten
 
 ## 行动项
 
-- [ ] 方案 A：升级 tokio-tungstenite 到 0.26+，适配 Message/CloseFrame API
-- [ ] 方案 A：更新 `compression.rs` 注释，明确说明不支持 deflate 的原因
+- [x] 方案 A：升级 tokio-tungstenite 到 0.29，适配 Message / CloseFrame / WebSocketConfig API
+- [x] 方案 A：更新 `compression.rs` 注释，明确说明 tungstenite 0.29 仍不支持 deflate
 - [ ] 方案 A：补充 TEST-05（WsTransport 测试）验证升级后行为
-- [ ] 评估：监控 yawc Vector PR #24654 合并状态，作为 B3 决策依据
-- [ ] 评估：监控 tungstenite issue #2，如果上游有进展可重新评估
+- [ ] 评估：监控 tungstenite issue #2 / upstream PR #426 / 可信 fork，如果上游有进展可重新评估
+- [ ] 评估：重新验证 yawc / ratchet 的当前版本、维护状态和 Autobahn 测试覆盖，作为标准压缩方案决策依据

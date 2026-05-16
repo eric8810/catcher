@@ -82,7 +82,7 @@ reqwest 0.13 于 2025 年底发布，当前最新 0.13.3。本项目已升级到
 **Cargo.toml 改动**：
 
 ```toml
-# 当前
+# 升级前
 reqwest = { version = "0.12", default-features = false, features = [
     "json", "stream", "socks", "rustls-tls",
     "hickory-dns", "multipart",
@@ -107,7 +107,7 @@ reqwest = { version = "0.13", default-features = false, features = [
 
 #### 2.1.3 reqwest-retry / reqwest-middleware 兼容性
 
-**风险**：reqwest-middleware 0.4 和 reqwest-retry 0.7 针对 reqwest 0.12。reqwest 0.13 的兼容版本尚未确认。
+**升级前风险**：reqwest-middleware 0.4 和 reqwest-retry 0.7 针对 reqwest 0.12。升级后已确认 `reqwest-middleware 0.5.1` / `reqwest-retry 0.9.1` 与 reqwest 0.13 兼容，当前无需为升级 0.13 移除 reqwest-retry。
 
 | 方案 | 说明 |
 |------|------|
@@ -115,7 +115,7 @@ reqwest = { version = "0.13", default-features = false, features = [
 | **B. 用 reqwest 内置 retry** | 0.13 自带 `ClientBuilder::retry()`，可能替代 reqwest-retry |
 | **C. 自实现中间件** | 用 tower service 层自实现 retry，绕过 reqwest-middleware |
 
-**建议**：先检查 reqwest-middleware 0.5+ 是否已支持 reqwest 0.13。如果已支持，直接升级；否则采用方案 B（用 reqwest 内置 retry 替代）。
+**当前结论**：已直接升级到兼容版本（reqwest-middleware 0.5 / reqwest-retry 0.9）。方案 B 可作为后续依赖精简单独评估，不再是 reqwest 0.13 升级阻塞项。
 
 #### 2.1.4 收益评估
 
@@ -131,7 +131,7 @@ reqwest = { version = "0.13", default-features = false, features = [
 
 | 风险 | 概率 | 影响 | 缓解 |
 |------|:----:|:----:|------|
-| reqwest-middleware 不兼容 0.13 | 中 | 高 | 用内置 retry 替代 |
+| reqwest-middleware 0.4/0.7 旧链路不兼容 0.13 | 已解决 | 中 | 升级到 reqwest-middleware 0.5 / reqwest-retry 0.9 |
 | TLS 行为变化 | 低 | 中 | 回归测试覆盖 |
 | 连接池行为变化 | 低 | 中 | E2E 弱网测试验证 |
 | Cargo.lock 冲突 | 低 | 低 | cargo update |
