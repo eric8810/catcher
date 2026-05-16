@@ -12,7 +12,7 @@
 |---|------|------|------|
 | G-01 | Retry 复用坏连接 | reqwest 连接池中过期连接被 retry 反复使用 | 🟡 已缓解（见下方说明） |
 | G-02 | keepAlive 无健康检查 | 连接池无 liveness probe，无法淘汰死连接 | 🟡 已缓解（见下方说明） |
-| G-06 | 代理延迟在连接时固化 | E2E 测试基础设施 bug，影响 G-01~G-03 证据可信度 | 🔲 |
+| ~~G-06~~ | ~~代理延迟在连接时固化~~ | ✅ 已修复：代理层每 chunk 动态读 conditions + setConditions 后 disruptAll 断开旧连接 + 修复带宽变量名 bug |
 | ~~NEW-1~~ | ~~G8 pin_sha256 证书固定~~ | ✅ 已实现（`PinningVerifier` 包装 `WebPkiServerVerifier`，SHA-256 DER 证书哈希 pin 检查，base64 编码 pin 值） |
 
 ## 🟡 中优先级（功能缺口/质量）

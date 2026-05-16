@@ -288,7 +288,7 @@ export function createNetworkProxy(targetPort: number): NetworkProxy {
       // This ensures setConditions() takes effect on in-flight connections.
       updateBw()
       if (currentBw > 0) {
-        const maxPerWindow = Math.max(1, bw / (1000 / windowMs))
+        const maxPerWindow = Math.max(1, currentBw / (1000 / windowMs))
         if (bytesInWindow + chunk.length > maxPerWindow) {
           buffer.push(chunk)
           return
