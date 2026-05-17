@@ -4,7 +4,7 @@
   "packageManager": "pnpm@10.15.1",
   "scripts": {
     "build": "pnpm build:ts",
-    "build:ts": "pnpm --filter @eric8810/catcher-core --filter @eric8810/catcher-http --filter @eric8810/catcher-ws --filter @eric8810/catcher-web build",
+    "build:ts": "pnpm --filter @eric8810/catcher-core --filter @eric8810/catcher-http --filter @eric8810/catcher-ws --filter @eric8810/catcher-web --filter @eric8810/catcher-napi-http --filter @eric8810/catcher-napi-ws build",
     "test": "vitest run",
     "test:integration": "vitest run",
     "test:napi": "pnpm --filter @eric8810/catcher-napi-http build && pnpm --filter @eric8810/catcher-napi-ws build && vitest run --config vitest.napi.config.ts",

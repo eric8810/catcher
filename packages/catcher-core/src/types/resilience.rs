@@ -16,7 +16,7 @@ pub enum BackoffKind {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RetryConfig {
     /// 最大重试次数
-    #[serde(default = "default_max_attempts")]
+    #[serde(alias = "maxAttempts", default = "default_max_attempts")]
     pub max_attempts: u32,
 
     /// 退避策略
@@ -24,11 +24,11 @@ pub struct RetryConfig {
     pub backoff: BackoffKind,
 
     /// 最小退避延迟（毫秒）
-    #[serde(default = "default_min_backoff")]
+    #[serde(alias = "minBackoffMs", default = "default_min_backoff")]
     pub min_backoff_ms: u64,
 
     /// 最大退避延迟（毫秒）
-    #[serde(default = "default_max_backoff")]
+    #[serde(alias = "maxBackoffMs", default = "default_max_backoff")]
     pub max_backoff_ms: u64,
 
     /// 是否添加抖动 (jitter)
@@ -45,7 +45,7 @@ fn default_min_backoff() -> u64 {
 fn default_max_backoff() -> u64 {
     10_000
 }
-fn default_true() -> bool {
+pub fn default_true() -> bool {
     true
 }
 
@@ -53,7 +53,7 @@ impl Default for RetryConfig {
     fn default() -> Self {
         Self {
             max_attempts: default_max_attempts(),
-            backoff: BackoffKind::Exponential,
+            backoff: BackoffKind::default(),
             min_backoff_ms: default_min_backoff(),
             max_backoff_ms: default_max_backoff(),
             jitter: default_true(),
@@ -65,19 +65,19 @@ impl Default for RetryConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CircuitBreakerConfig {
     /// 连续失败多少次触发熔断
-    #[serde(default = "default_failure_threshold")]
+    #[serde(alias = "failureThreshold", default = "default_failure_threshold")]
     pub failure_threshold: u32,
 
     /// HALF_OPEN 状态下连续成功多少次恢复
-    #[serde(default = "default_success_threshold")]
+    #[serde(alias = "successThreshold", default = "default_success_threshold")]
     pub success_threshold: u32,
 
     /// 熔断后多久进入 HALF_OPEN（毫秒）
-    #[serde(default = "default_reset_timeout")]
+    #[serde(alias = "resetTimeoutMs", default = "default_reset_timeout")]
     pub reset_timeout_ms: u64,
 
     /// HALF_OPEN 期间允许的最大试探请求数
-    #[serde(default = "default_half_open_max")]
+    #[serde(alias = "halfOpenMaxRequests", default = "default_half_open_max")]
     pub half_open_max_requests: u32,
 }
 

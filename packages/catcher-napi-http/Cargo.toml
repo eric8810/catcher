@@ -13,6 +13,7 @@ catcher-core = { path = "../catcher-core", version = "0.2.2" }
 catcher-http = { path = "../catcher-http", version = "0.2.2" }
 napi = { version = "2", default-features = false, features = ["napi4", "tokio_rt", "serde-json"] }
 napi-derive = "2"
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread"] }
 tokio-util = "0.7"

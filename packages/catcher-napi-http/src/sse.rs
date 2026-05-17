@@ -3,6 +3,7 @@ use napi::threadsafe_function::{
     ThreadSafeCallContext, ThreadsafeFunctionCallMode,
 };
 use napi_derive::napi;
+use serde::{Deserialize, Serialize};
 
 use catcher_http::{SseClient, SseStream};
 use catcher_core::types::sse::SseClientConfig;
@@ -175,14 +176,23 @@ pub fn sse_client(
 
 // ── SSE Helpers ──
 
+/// SSE 事件（用于 JSON 序列化推送到 JS 回调）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub(crate) enum SseEvent {
+    Line { data: String },
+    Error { message: String },
+    End,
+}
+
 pub(crate) fn sse_line_json(line: &str) -> String {
-    serde_json::json!({"type": "Line", "data": line}).to_string()
+    serde_json::to_string(&SseEvent::Line { data: line.to_owned() }).unwrap_or_default()
 }
 
 pub(crate) fn sse_error_json(msg: &str) -> String {
-    serde_json::json!({"type": "Error", "message": msg}).to_string()
+    serde_json::to_string(&SseEvent::Error { message: msg.to_owned() }).unwrap_or_default()
 }
 
 pub(crate) fn sse_end_json() -> String {
-    serde_json::json!({"type": "End"}).to_string()
+    serde_json::to_string(&SseEvent::End).unwrap_or_default()
 }

@@ -1,3 +1,4 @@
+use catcher_core::types::default_true;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -45,16 +46,16 @@ pub enum WsState {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReconnectConfig {
     /// 初始退避延迟（毫秒）
-    #[serde(default = "default_initial_delay")]
+    #[serde(alias = "initialDelayMs", default = "default_initial_delay")]
     pub initial_delay_ms: u64,
     /// 最大退避延迟（毫秒）
-    #[serde(default = "default_max_delay")]
+    #[serde(alias = "maxDelayMs", default = "default_max_delay")]
     pub max_delay_ms: u64,
     /// 退避乘数（指数增长）
-    #[serde(default = "default_backoff_multiplier")]
+    #[serde(alias = "backoffMultiplier", default = "default_backoff_multiplier")]
     pub backoff_multiplier: f64,
     /// 最大重试次数
-    #[serde(default = "default_max_reconnect_attempts")]
+    #[serde(alias = "maxAttempts", default = "default_max_reconnect_attempts")]
     pub max_attempts: u32,
 }
 
@@ -86,22 +87,19 @@ impl Default for ReconnectConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HeartbeatConfig {
     /// 心跳间隔（毫秒）
-    #[serde(default = "default_heartbeat_interval")]
+    #[serde(alias = "intervalMs", default = "default_heartbeat_interval")]
     pub interval_ms: u64,
     /// 是否根据 RTT 自适应调整
     #[serde(default = "default_true")]
     pub adaptive: bool,
     /// pong 超时（毫秒）
-    #[serde(default = "default_pong_timeout")]
+    #[serde(alias = "pongTimeoutMs", default = "default_pong_timeout")]
     pub pong_timeout_ms: u64,
     /// 连续丢失多少个 pong 后判定断线
-    #[serde(default = "default_max_missed_pongs")]
+    #[serde(alias = "maxMissedPongs", default = "default_max_missed_pongs")]
     pub max_missed_pongs: u32,
 }
 
-fn default_true() -> bool {
-    true
-}
 fn default_heartbeat_interval() -> u64 {
     30_000
 }
@@ -139,19 +137,19 @@ pub struct WsClientConfig {
     pub headers: HashMap<String, String>,
 
     /// 是否启用 perMessageDeflate 压缩
-    #[serde(default)]
+    #[serde(alias = "perMessageDeflate", default)]
     pub per_message_deflate: bool,
 
     /// 压缩阈值（字节，大于此值的消息才压缩）
-    #[serde(default = "default_deflate_threshold")]
+    #[serde(alias = "deflateThresholdBytes", default = "default_deflate_threshold")]
     pub deflate_threshold_bytes: u32,
 
     /// 握手超时（毫秒）
-    #[serde(default = "default_handshake_timeout")]
+    #[serde(alias = "handshakeTimeoutMs", default = "default_handshake_timeout")]
     pub handshake_timeout_ms: u64,
 
     /// 最大 payload 大小（字节）
-    #[serde(default = "default_max_payload")]
+    #[serde(alias = "maxPayloadBytes", default = "default_max_payload")]
     pub max_payload_bytes: u64,
 
     /// 重连配置
@@ -163,7 +161,7 @@ pub struct WsClientConfig {
     pub heartbeat: Option<HeartbeatConfig>,
 
     /// 同时竞速的端点数
-    #[serde(default = "default_race_count")]
+    #[serde(alias = "raceCount", default = "default_race_count")]
     pub race_count: u32,
 }
 

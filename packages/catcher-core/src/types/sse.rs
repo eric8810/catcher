@@ -24,9 +24,9 @@ pub struct SseClientConfig {
     pub body: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reconnect: Option<SseReconnectConfig>,
-    #[serde(default = "default_timeout")]
+    #[serde(alias = "timeoutMs", default = "default_timeout")]
     pub timeout_ms: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "circuitBreaker", skip_serializing_if = "Option::is_none")]
     pub circuit_breaker: Option<CircuitBreakerConfig>,
 }
 
@@ -51,13 +51,13 @@ impl Default for SseClientConfig {
 /// SSE reconnect configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SseReconnectConfig {
-    #[serde(default = "default_max_retries")]
+    #[serde(alias = "maxRetries", default = "default_max_retries")]
     pub max_retries: u32,
-    #[serde(default = "default_initial_delay")]
+    #[serde(alias = "initialDelayMs", default = "default_initial_delay")]
     pub initial_delay_ms: u64,
-    #[serde(default = "default_max_delay")]
+    #[serde(alias = "maxDelayMs", default = "default_max_delay")]
     pub max_delay_ms: u64,
-    #[serde(default = "default_backoff_multiplier")]
+    #[serde(alias = "backoffMultiplier", default = "default_backoff_multiplier")]
     pub backoff_multiplier: f64,
 }
 

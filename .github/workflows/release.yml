@@ -185,6 +185,10 @@ jobs:
           cache: pnpm
           registry-url: https://registry.npmjs.org
       - run: pnpm install
+      - name: Build TS wrappers for napi packages
+        run: |
+          pnpm --filter @eric8810/catcher-napi-http build:ts
+          pnpm --filter @eric8810/catcher-napi-ws build:ts
       - name: Download all napi artifacts
         uses: actions/download-artifact@v4
         with:
