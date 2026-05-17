@@ -76,9 +76,8 @@ impl JsWsClient {
                     *handle_clone.lock().unwrap() = Some(ws_handle);
 
                     while let Some(event) = rx.recv().await {
-                        if let (Ok(json), Some(ref t)) =
-                            (serde_json::to_string(&event), &tsfn)
-                        {
+                        let json = event.to_ffi_json();
+                        if let Some(ref t) = tsfn {
                             let _ = t.call(Ok(json), ThreadsafeFunctionCallMode::Blocking);
                         }
                     }

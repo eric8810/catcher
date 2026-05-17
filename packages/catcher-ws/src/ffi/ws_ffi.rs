@@ -81,7 +81,7 @@ pub unsafe extern "C" fn catcher_ws_create(
                 WS_REGISTRY.insert_with_id(id, Arc::new(handle));
 
                 while let Some(event) = rx.recv().await {
-                    let json = serde_json::to_string(&event).unwrap_or_default();
+                    let json = event.to_ffi_json();
                     invoke_event_callback(cb, "ws_event", json, ud);
                 }
             }

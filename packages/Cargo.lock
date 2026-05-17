@@ -413,6 +413,7 @@ name = "catcher-ws"
 version = "0.2.2"
 dependencies = [
  "backon",
+ "base64",
  "catcher-core",
  "futures-util",
  "rmp-serde",

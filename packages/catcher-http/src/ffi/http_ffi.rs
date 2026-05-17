@@ -9,6 +9,18 @@ use crate::types::http::{HttpClientConfig, HttpMethod, HttpRequest};
 
 use catcher_core::{EventCallback, FfiString, HandleRegistry};
 
+/// 将 HttpResponse 序列化为 JSON，body 使用 base64 编码以避免 Vec<u8> 展开为数字数组（~5x 膨胀）。
+fn response_to_json(resp: &crate::types::http::HttpResponse) -> String {
+    use base64::Engine;
+    let body_b64 = base64::engine::general_purpose::STANDARD.encode(&resp.body);
+    serde_json::json!({
+        "status": resp.status,
+        "headers": resp.headers,
+        "body_base64": body_b64,
+        "elapsed_ms": resp.elapsed_ms,
+    }).to_string()
+}
+
 static REGISTRY: HandleRegistry<HttpTransport> = HandleRegistry::new();
 
 fn runtime() -> &'static tokio::runtime::Runtime {
@@ -106,7 +118,7 @@ pub unsafe extern "C" fn catcher_http_get(
             };
             let result = t.execute(request).await;
             let json = match result {
-                Ok(resp) => serde_json::to_string(&resp).unwrap_or_default(),
+                Ok(resp) => response_to_json(&resp),
                 Err(e) => error_json(&e.to_string()),
             };
             invoke_http_callback(callback, "http_result", json, ud);
@@ -141,7 +153,7 @@ pub unsafe extern "C" fn catcher_http_post(
             };
             let result = t.execute(request).await;
             let json = match result {
-                Ok(resp) => serde_json::to_string(&resp).unwrap_or_default(),
+                Ok(resp) => response_to_json(&resp),
                 Err(e) => error_json(&e.to_string()),
             };
             invoke_http_callback(callback, "http_result", json, ud);
@@ -193,7 +205,7 @@ pub unsafe extern "C" fn catcher_http_execute(
             };
             let result = t.execute(request).await;
             let json = match result {
-                Ok(resp) => serde_json::to_string(&resp).unwrap_or_default(),
+                Ok(resp) => response_to_json(&resp),
                 Err(e) => error_json(&e.to_string()),
             };
             invoke_http_callback(callback, "http_result", json, ud);
@@ -253,10 +265,14 @@ pub unsafe extern "C" fn catcher_http_execute_with_id(
             let (_rid, result) = t.execute_with_token(request_id, per_request_token, request).await;
             let json = match result {
                 Ok(resp) => {
+                    let body_b64 = {
+                        use base64::Engine;
+                        base64::engine::general_purpose::STANDARD.encode(&resp.body)
+                    };
                     serde_json::json!({
                         "status": resp.status,
                         "headers": resp.headers,
-                        "body": resp.body,
+                        "body_base64": body_b64,
                         "elapsed_ms": resp.elapsed_ms,
                         "request_id": request_id,
                     }).to_string()
@@ -502,7 +518,7 @@ pub unsafe extern "C" fn catcher_http_multipart(
             };
             let result = t.execute(request).await;
             let json = match result {
-                Ok(resp) => serde_json::to_string(&resp).unwrap_or_default(),
+                Ok(resp) => response_to_json(&resp),
                 Err(e) => error_json(&e.to_string()),
             };
             invoke_http_callback(callback, "http_result", json, ud);

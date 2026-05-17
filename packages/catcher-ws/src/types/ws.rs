@@ -13,6 +13,25 @@ pub enum WsEvent {
     HeartbeatRtt { rtt_ms: u64 },
 }
 
+impl WsEvent {
+    /// 序列化为 FFI 回调 JSON。Message 变体的 data 字段使用 base64 编码，
+    /// 避免 Vec<u8> 被展开为 JSON 数字数组（~5x 膨胀）。
+    pub fn to_ffi_json(&self) -> String {
+        match self {
+            WsEvent::Message { data, is_binary } => {
+                use base64::Engine;
+                let data_b64 = base64::engine::general_purpose::STANDARD.encode(data);
+                serde_json::json!({
+                    "type": "Message",
+                    "data_base64": data_b64,
+                    "is_binary": is_binary,
+                }).to_string()
+            }
+            _ => serde_json::to_string(self).unwrap_or_default(),
+        }
+    }
+}
+
 /// WebSocket 连接状态
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum WsState {

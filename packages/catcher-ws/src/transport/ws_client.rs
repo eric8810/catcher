@@ -264,23 +264,15 @@ async fn connection_manager(
             ping_sent_at: None,
         });
 
-        // 心跳定时器任务（channel 驱动，避免 select 内的借用问题）
-        let (ping_tx, mut ping_rx) = mpsc::unbounded_channel::<()>();
-        if config.heartbeat.is_some() {
-            let interval_ms = config.heartbeat.as_ref().unwrap().interval_ms;
-            let tx = ping_tx.clone();
-            tokio::spawn(async move {
-                let mut timer = tokio::time::interval(Duration::from_millis(interval_ms));
-                timer.tick().await; // 首次立即触发，跳过
-                loop {
-                    timer.tick().await;
-                    if tx.send(()).is_err() {
-                        break;
-                    }
-                }
-            });
-        }
-        drop(ping_tx); // 只让 timer task 持有 sender
+        // 心跳定时器 — 使用 sleep_until 实现动态间隔，每次 ping 前查询 HeartbeatManager::interval_ms()
+        let ping_sleep = if let Some(ref mut state) = hb_state {
+            let initial_ms = state.mgr.interval_ms();
+            tokio::time::sleep(Duration::from_millis(initial_ms))
+        } else {
+            // 无心跳配置，创建一个永远不会触发的 sleep
+            tokio::time::sleep(Duration::MAX)
+        };
+        tokio::pin!(ping_sleep);
 
         // 拆分读写
         let (mut writer, mut reader) = stream_opt
@@ -329,8 +321,8 @@ async fn connection_manager(
                     }
                 }
 
-                // 心跳 tick
-                Some(_) = ping_rx.recv() => {
+                // 心跳 tick — 动态间隔
+                _ = &mut ping_sleep, if hb_state.is_some() => {
                     if let Some(ref mut state) = hb_state {
                         if state.waiting_for_pong {
                             state.mgr.on_missed_pong();
@@ -343,6 +335,11 @@ async fn connection_manager(
                         let _ = writer.send(
                             tokio_tungstenite::tungstenite::Message::Ping(Vec::new().into()),
                         ).await;
+                        // 根据自适应间隔重设下一次 ping 时间
+                        let next_ms = state.mgr.interval_ms();
+                        ping_sleep.as_mut().reset(
+                            tokio::time::Instant::now() + Duration::from_millis(next_ms),
+                        );
                     }
                 }
 
