@@ -4,14 +4,28 @@
 //! so history data accumulates across calls.
 
 use std::ffi::{c_char, c_void, CString};
-use std::sync::Mutex;
+use std::sync::Arc;
 
 use crate::observability::network_quality::NetworkQualityEvaluator;
 
 use catcher_core::{EventCallback, FfiString};
 
-/// Global persistent evaluator — sliding window survives across FFI calls.
-static EVALUATOR: Mutex<Option<NetworkQualityEvaluator>> = Mutex::new(None);
+// ── 类型别名 ──
+
+// 使用 tokio::sync::Mutex 以便安全地跨 .await 持锁，
+// 消除 take/put 模式的并发 panic 风险。
+type SharedEvaluator = Arc<tokio::sync::Mutex<NetworkQualityEvaluator>>;
+
+/// 全局共享 evaluator，懒初始化。
+static EVALUATOR: std::sync::OnceLock<SharedEvaluator> = std::sync::OnceLock::new();
+
+fn evaluator() -> SharedEvaluator {
+    EVALUATOR
+        .get_or_init(|| {
+            Arc::new(tokio::sync::Mutex::new(NetworkQualityEvaluator::new(50)))
+        })
+        .clone()
+}
 
 /// Global tokio runtime for quality FFI operations.
 fn runtime() -> &'static tokio::runtime::Runtime {
@@ -52,41 +66,21 @@ pub unsafe extern "C" fn catcher_evaluate_quality(
 ) {
     let host_str = ffi_string_to_string(host, "https://www.example.com");
     let ud = user_data as usize;
+    let shared = evaluator();
 
     runtime().spawn(async move {
-        // Ensure evaluator exists (lock briefly, then release before await)
-        {
-            let mut guard = EVALUATOR.lock().unwrap();
-            if guard.is_none() {
-                *guard = Some(NetworkQualityEvaluator::new(50));
-            }
-        }
-
-        // Perform the async measurement without holding any lock.
-        // We clone the host_str to avoid borrow issues.
-        let result = {
-            // Lock briefly to get the evaluator reference, then release.
-            // We need to call measure_http_rtt on the evaluator inside the lock.
-            // Since measure_http_rtt is async and borrows &mut self, we can't hold the lock across it.
-            // Solution: take the evaluator out, use it, put it back.
-            let mut evaluator = EVALUATOR.lock().unwrap().take().unwrap();
-            let result = evaluator.measure_http_rtt(&host_str, "/").await;
-            EVALUATOR.lock().unwrap().replace(evaluator);
-            result
-        };
-
-        // Record and evaluate (lock briefly)
-        let mut guard = EVALUATOR.lock().unwrap();
-        let evaluator = guard.as_mut().unwrap();
+        // 持锁覆盖整个 measure→evaluate 周期，消除竞态
+        let mut guard = shared.lock().await;
+        let result = guard.measure_http_rtt(&host_str, "/").await;
         match result {
             Ok(_rtt_ms) => {
-                let eval_result = evaluator.evaluate();
+                let eval_result = guard.evaluate();
                 let json = serde_json::to_string(&eval_result).unwrap_or_default();
                 drop(guard);
                 invoke_quality_callback(callback, json, ud);
             }
             Err(e) => {
-                let eval_result = evaluator.evaluate();
+                let eval_result = guard.evaluate();
                 let mut map = serde_json::to_value(&eval_result).unwrap_or_default();
                 if let Some(obj) = map.as_object_mut() {
                     obj.insert("error".into(), e.to_string().into());
@@ -104,11 +98,12 @@ pub unsafe extern "C" fn catcher_evaluate_quality(
 /// Caller must free the returned C string via `catcher_free_data`.
 #[no_mangle]
 pub unsafe extern "C" fn catcher_quality_history() -> *mut c_char {
-    let mut guard = EVALUATOR.lock().unwrap();
-    let json = match guard.as_mut() {
-        Some(evaluator) => {
-            let snapshot = evaluator.rtt_snapshot();
-            let level = evaluator.evaluate();
+    // 同步路径：使用 try_lock 避免阻塞。如果 evaluator 正忙则返回 busy。
+    let shared = evaluator();
+    let json = match shared.try_lock() {
+        Ok(mut guard) => {
+            let snapshot = guard.rtt_snapshot();
+            let level = guard.evaluate();
             serde_json::json!({
                 "rtt_samples": {
                     "avg_rtt_ms": snapshot.avg_rtt_ms,
@@ -121,14 +116,14 @@ pub unsafe extern "C" fn catcher_quality_history() -> *mut c_char {
             })
             .to_string()
         }
-        None => serde_json::json!({"rtt_samples": null, "current_level": "unknown"}).to_string(),
+        Err(_) => serde_json::json!({"rtt_samples": null, "current_level": "busy"}).to_string(),
     };
 
     CString::new(json).unwrap_or_default().into_raw()
 }
 
-// N-04: Quality push subscription
-static SUBSCRIPTIONS: Mutex<Vec<usize>> = Mutex::new(Vec::new());
+// ── Quality push subscription ──
+static SUBSCRIPTIONS: std::sync::Mutex<Vec<usize>> = std::sync::Mutex::new(Vec::new());
 
 #[no_mangle]
 pub unsafe extern "C" fn catcher_quality_subscribe(

@@ -610,9 +610,16 @@ class CatcherHttpClient {
             } catch (_) {}
             break;
           case 'stream_chunk':
-            // Chunk data is the raw bytes in eventData
-            controller.add(StreamChunkEvent(
-                data: List<int>.from(jsonBytes)));
+            try {
+              final parsed = jsonDecode(jsonStr) as Map<String, dynamic>;
+              final b64 = parsed['data_base64'] as String? ?? '';
+              final requestId = parsed['request_id'] as int? ?? 0;
+              controller.add(StreamChunkEvent(
+                  data: base64Decode(b64), requestId: requestId));
+            } catch (_) {
+              controller.add(StreamChunkEvent(
+                  data: List<int>.from(jsonBytes)));
+            }
             break;
           case 'stream_done':
             try {
@@ -1164,7 +1171,8 @@ class StreamHeadersEvent extends StreamEvent {
 /// Received a data chunk (binary).
 class StreamChunkEvent extends StreamEvent {
   final List<int> data;
-  const StreamChunkEvent({this.data = const []});
+  final int requestId;
+  const StreamChunkEvent({this.data = const [], this.requestId = 0});
 }
 
 /// Stream completed successfully.

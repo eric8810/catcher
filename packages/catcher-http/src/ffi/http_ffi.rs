@@ -428,7 +428,12 @@ pub unsafe extern "C" fn catcher_http_execute_stream(
                         ("stream_headers", serde_json::json!({"status":status,"headers":headers,"request_id":request_id}).to_string())
                     }
                     crate::types::http::StreamEvent::Chunk(data) => {
-                        ("stream_chunk", String::from_utf8_lossy(data).to_string())
+                        use base64::Engine;
+                        let data_b64 = base64::engine::general_purpose::STANDARD.encode(data);
+                        ("stream_chunk", serde_json::json!({
+                            "data_base64": data_b64,
+                            "request_id": request_id,
+                        }).to_string())
                     }
                     crate::types::http::StreamEvent::Done => {
                         ("stream_done", serde_json::json!({"request_id":request_id}).to_string())

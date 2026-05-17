@@ -78,9 +78,7 @@ fn parse_headers_json(headers_json: *const c_char) -> HashMap<String, String> {
     serde_json::from_str::<HashMap<String, String>>(json_str).unwrap_or_default()
 }
 
-// ═══════════════════════════════════════════════════════════════
-// SseStream — one-shot POST SSE (OpenAI/Anthropic streaming API)
-// ═══════════════════════════════════════════════════════════════
+// ── SseStream — one-shot POST SSE (OpenAI/Anthropic streaming API) ──
 
 /// One-shot SSE stream. Consumes the SSE response and invokes the callback
 /// for each content line, then sends a "done" event.
@@ -159,9 +157,7 @@ pub unsafe extern "C" fn catcher_sse_stream(
     });
 }
 
-// ═══════════════════════════════════════════════════════════════
-// SseClient — persistent SSE with auto-reconnect
-// ═══════════════════════════════════════════════════════════════
+// ── SseClient — persistent SSE with auto-reconnect ──
 
 /// Create a persistent SSE client with auto-reconnect.
 /// Returns an opaque handle (pointer to id), or null on failure.
@@ -183,8 +179,17 @@ pub unsafe extern "C" fn catcher_sse_connect(
     let ud = user_data as usize;
     let callback_ptr = event_callback;
 
-    let handle = sse_runtime().block_on(async move {
-        match SseClient::connect(config).await {
+    let handle = std::thread::spawn(move || {
+        // 使用独立辅助线程的 runtime，避免在 tokio 上下文内 block_on 导致 panic
+        static AUX_RT: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
+        let rt = AUX_RT.get_or_init(|| {
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("Failed to create aux runtime for SSE connect")
+        });
+        rt.block_on(async move {
+            match SseClient::connect(config).await {
             Ok(client) => {
                 // Send open event
                 let open_json = build_sse_event_json("open", "");
@@ -218,13 +223,17 @@ pub unsafe extern "C" fn catcher_sse_connect(
                     }
                 });
 
-                Box::into_raw(Box::new(id)) as *mut c_void
+                Box::into_raw(Box::new(id)) as usize
             }
-            Err(_) => std::ptr::null_mut(),
-        }
+            Err(_) => 0usize,
+            }
+        })
     });
 
-    handle
+    match handle.join() {
+        Ok(ptr) if ptr != 0 => ptr as *mut c_void,
+        _ => std::ptr::null_mut(),
+    }
 }
 
 /// Get the ready state of an SSE client.
