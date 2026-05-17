@@ -103,9 +103,9 @@ fn stream_event_variants() {
         _ => panic!("Expected Headers"),
     }
 
-    let evt = StreamEvent::Chunk(vec![1, 2, 3]);
+    let evt = StreamEvent::Chunk(bytes::Bytes::from(vec![1, 2, 3]));
     match &evt {
-        StreamEvent::Chunk(data) => assert_eq!(data, &[1, 2, 3]),
+        StreamEvent::Chunk(data) => assert_eq!(&data[..], &[1, 2, 3]),
         _ => panic!("Expected Chunk"),
     }
 

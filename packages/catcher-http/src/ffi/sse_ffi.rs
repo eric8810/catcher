@@ -5,10 +5,10 @@
 
 use std::collections::HashMap;
 use std::ffi::{c_char, c_void, CStr, CString};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use catcher_core::types::sse::{SseClientConfig, SseMethod};
-use catcher_core::{EventCallback, FfiString};
+use catcher_core::{EventCallback, FfiString, HandleRegistry};
 
 use crate::sse::client::{SseClient, SseReadyState};
 use crate::sse::SseStream;
@@ -17,8 +17,7 @@ use crate::sse::SseStream;
 // Inner mutex uses tokio::sync::Mutex so guards are Send-safe across .await
 use tokio::sync::Mutex as TokioMutex;
 
-static SSE_HANDLES: Mutex<Option<HashMap<usize, Arc<TokioMutex<SseClient>>>>> = Mutex::new(None);
-static SSE_NEXT_ID: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(1);
+static SSE_REGISTRY: HandleRegistry<TokioMutex<SseClient>> = HandleRegistry::new();
 
 fn sse_runtime() -> &'static tokio::runtime::Runtime {
     static RT: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
@@ -28,10 +27,6 @@ fn sse_runtime() -> &'static tokio::runtime::Runtime {
             .build()
             .expect("Failed to create tokio runtime for catcher SSE FFI")
     })
-}
-
-fn sse_handles() -> std::sync::MutexGuard<'static, Option<HashMap<usize, Arc<TokioMutex<SseClient>>>>> {
-    SSE_HANDLES.lock().unwrap()
 }
 
 /// Safely read an FfiString as a Rust String. Returns default on null/invalid.
@@ -191,17 +186,13 @@ pub unsafe extern "C" fn catcher_sse_connect(
     let handle = sse_runtime().block_on(async move {
         match SseClient::connect(config).await {
             Ok(client) => {
-                let id = SSE_NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-
                 // Send open event
                 let open_json = build_sse_event_json("open", "");
                 invoke_sse_callback(callback_ptr, open_json, ud);
 
                 // Store client for later operations (close, ready_state, etc.)
                 let client_arc = Arc::new(TokioMutex::new(client));
-                sse_handles()
-                    .get_or_insert_with(HashMap::new)
-                    .insert(id, client_arc.clone());
+                let id = SSE_REGISTRY.insert(client_arc.clone());
 
                 // Spawn background task to forward SSE lines to callback
                 sse_runtime().spawn(async move {
@@ -244,9 +235,7 @@ pub unsafe extern "C" fn catcher_sse_ready_state(sse_handle: *mut c_void) -> i32
         return -1;
     }
     let id = *(sse_handle as *const usize);
-    sse_handles()
-        .as_ref()
-        .and_then(|m| m.get(&id))
+    SSE_REGISTRY.get(id)
         .map(|client| match client.blocking_lock().ready_state() {
             SseReadyState::Connecting => 0,
             SseReadyState::Open => 1,
@@ -263,9 +252,7 @@ pub unsafe extern "C" fn catcher_sse_last_event_id(sse_handle: *mut c_void) -> *
         return std::ptr::null_mut();
     }
     let id = *(sse_handle as *const usize);
-    sse_handles()
-        .as_ref()
-        .and_then(|m| m.get(&id))
+    SSE_REGISTRY.get(id)
         .map(|client| {
             let last_id = client.blocking_lock().last_event_id();
             CString::new(last_id).unwrap_or_default().into_raw()
@@ -280,7 +267,7 @@ pub unsafe extern "C" fn catcher_sse_close(sse_handle: *mut c_void) {
         return;
     }
     let id = *(sse_handle as *const usize);
-    if let Some(client) = sse_handles().as_ref().and_then(|m| m.get(&id)) {
+    if let Some(client) = SSE_REGISTRY.get(id) {
         client.blocking_lock().close();
     }
 }
@@ -292,6 +279,6 @@ pub unsafe extern "C" fn catcher_sse_destroy(sse_handle: *mut c_void) {
         return;
     }
     let id = *(sse_handle as *const usize);
-    sse_handles().as_mut().map(|m| m.remove(&id));
+    SSE_REGISTRY.remove(id);
     drop(Box::from_raw(sse_handle as *mut usize));
 }

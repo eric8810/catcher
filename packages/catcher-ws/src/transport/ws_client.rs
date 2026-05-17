@@ -84,6 +84,7 @@ impl WsHandle {
 struct HeartbeatState {
     mgr: HeartbeatManager,
     waiting_for_pong: bool,
+    ping_sent_at: Option<Instant>,
 }
 
 enum LoopOutcome {
@@ -260,6 +261,7 @@ async fn connection_manager(
         let mut hb_state = config.heartbeat.as_ref().map(|hb_config| HeartbeatState {
             mgr: HeartbeatManager::new(hb_config.clone()),
             waiting_for_pong: false,
+            ping_sent_at: None,
         });
 
         // 心跳定时器任务（channel 驱动，避免 select 内的借用问题）
@@ -337,6 +339,7 @@ async fn connection_manager(
                             }
                         }
                         state.waiting_for_pong = true;
+                        state.ping_sent_at = Some(Instant::now());
                         let _ = writer.send(
                             tokio_tungstenite::tungstenite::Message::Ping(Vec::new().into()),
                         ).await;
@@ -361,10 +364,14 @@ async fn connection_manager(
                         Some(Ok(tokio_tungstenite::tungstenite::Message::Ping(_))) => {}
                         Some(Ok(tokio_tungstenite::tungstenite::Message::Pong(_))) => {
                             if let Some(ref mut state) = hb_state {
-                                state.mgr.on_pong(0);
+                                let rtt_ms = state.ping_sent_at
+                                    .take()
+                                    .map(|t| t.elapsed().as_millis() as u64)
+                                    .unwrap_or(0);
+                                state.mgr.on_pong(rtt_ms);
                                 state.waiting_for_pong = false;
+                                let _ = event_tx.send(WsEvent::HeartbeatRtt { rtt_ms });
                             }
-                            let _ = event_tx.send(WsEvent::HeartbeatRtt { rtt_ms: 0 });
                         }
                         Some(Ok(tokio_tungstenite::tungstenite::Message::Close(frame))) => {
                             let (code, reason) = frame

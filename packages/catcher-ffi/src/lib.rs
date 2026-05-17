@@ -53,7 +53,7 @@ pub unsafe extern "C" fn catcher_pack(json_input: *const c_char) -> FfiResult {
 /// Unpack msgpack binary into a JSON string.
 ///
 /// Returns FfiResult with data pointing to a null-terminated JSON CString
-/// (caller must free via catcher_free_result).
+/// (caller must free via catcher_free_result or catcher_free_data with the reported len).
 #[no_mangle]
 pub unsafe extern "C" fn catcher_unpack(data: *const u8, len: usize) -> FfiResult {
     if data.is_null() || len == 0 {
@@ -65,33 +65,21 @@ pub unsafe extern "C" fn catcher_unpack(data: *const u8, len: usize) -> FfiResul
         Err(e) => return FfiResult::error(2, &e.to_string()),
     };
     let json_str = serde_json::to_string(&value).unwrap_or_default();
+    let alloc_len = json_str.len() + 1; // include null terminator for correct freeing
     let c_str = CString::new(json_str).unwrap_or_default();
     let ptr = c_str.into_raw() as *mut c_void;
-    // into_raw gives null-terminated string; data_len = string length (no null)
-    let len = CStr::from_ptr(ptr as *const c_char).to_bytes().len();
-    FfiResult::ok(ptr, len)
+    FfiResult::ok(ptr, alloc_len)
 }
 
 /// Free data allocated by catcher_pack / catcher_unpack.
 ///
-/// For pack: data is a Box<[u8]> allocated via `into_raw`.
-/// For unpack: data is a CString allocated via `into_raw`.
-/// Both can be freed by reconstructing the Box/CString and dropping it.
-///
-/// Note: catcher_free_result already handles Drop of FfiResult (which frees error_message).
-/// But for the data pointer, we need this separate free function.
-/// Since both Box<[u8]> and CString are just pointers, we reconstruct as a Vec<u8>
-/// with the correct length. For CString (unpack result), the length passed back
-/// is the string length, and the CString had a null terminator — so we add +1.
-///
-/// Actually, the simplest approach: caller uses catcher_free_result which drops the
-/// FfiResult struct. For data pointers, catcher_free_result currently does NOT free them.
-/// So we provide catcher_free_data here.
+/// For pack: data is a Box<[u8]> allocated via `into_raw`, len = byte count.
+/// For unpack: data is a CString allocated via `into_raw`, len includes null terminator.
+/// Both are freed by reconstructing as Vec<u8> with the correct length.
 #[no_mangle]
 pub unsafe extern "C" fn catcher_free_data(data: *mut c_void, len: usize) {
     if data.is_null() {
         return;
     }
-    // Reconstruct as Vec<u8> and drop — works for both Box<[u8]> and CString
     let _ = Vec::from_raw_parts(data as *mut u8, len, len);
 }

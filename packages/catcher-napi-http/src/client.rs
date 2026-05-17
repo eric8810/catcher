@@ -266,7 +266,7 @@ impl JsHttpClient {
         let inner = self.inner.clone();
         tokio::spawn(async move {
             let _ = inner
-                .execute_stream(request, move |event| {
+                .execute_stream(request, tokio_util::sync::CancellationToken::new(), move |event| {
                     let json = stream_event_to_json(&event);
                     let _ = tsfn.call(
                         Ok(json),

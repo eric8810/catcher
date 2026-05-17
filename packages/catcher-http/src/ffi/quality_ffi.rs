@@ -104,8 +104,8 @@ pub unsafe extern "C" fn catcher_evaluate_quality(
 /// Caller must free the returned C string via `catcher_free_data`.
 #[no_mangle]
 pub unsafe extern "C" fn catcher_quality_history() -> *mut c_char {
-    let guard = EVALUATOR.lock().unwrap();
-    let json = match guard.as_ref() {
+    let mut guard = EVALUATOR.lock().unwrap();
+    let json = match guard.as_mut() {
         Some(evaluator) => {
             let snapshot = evaluator.rtt_snapshot();
             let level = evaluator.evaluate();

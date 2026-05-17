@@ -68,48 +68,40 @@ impl CircuitBreaker {
 
     /// 请求成功后调用
     pub fn on_success(&self) {
-        let state = *self.state.lock();
-        match state {
+        let mut state = self.state.lock();
+        match *state {
             CbState::Closed => {
-                // 成功后重置失败计数
                 self.failure_count.store(0, Ordering::Relaxed);
             }
             CbState::HalfOpen => {
                 let count = self.success_count.fetch_add(1, Ordering::Relaxed) + 1;
                 if count >= self.config.success_threshold {
-                    // HALF_OPEN → CLOSED
-                    *self.state.lock() = CbState::Closed;
+                    *state = CbState::Closed;
                     self.failure_count.store(0, Ordering::Relaxed);
                     self.success_count.store(0, Ordering::Relaxed);
                 }
             }
-            CbState::Open => {
-                // Should not receive success in OPEN state
-            }
+            CbState::Open => {}
         }
     }
 
     /// 请求失败后调用
     pub fn on_failure(&self) {
-        let state = *self.state.lock();
-        match state {
+        let mut state = self.state.lock();
+        match *state {
             CbState::Closed => {
                 let count = self.failure_count.fetch_add(1, Ordering::Relaxed) + 1;
                 if count >= self.config.failure_threshold {
-                    // CLOSED → OPEN
-                    *self.state.lock() = CbState::Open;
+                    *state = CbState::Open;
                     self.opened_at_ms.store(now_millis(), Ordering::Relaxed);
                 }
             }
             CbState::HalfOpen => {
-                // 任何失败 → 回到 OPEN
-                *self.state.lock() = CbState::Open;
+                *state = CbState::Open;
                 self.opened_at_ms.store(now_millis(), Ordering::Relaxed);
                 self.success_count.store(0, Ordering::Relaxed);
             }
-            CbState::Open => {
-                // Already open
-            }
+            CbState::Open => {}
         }
     }
 

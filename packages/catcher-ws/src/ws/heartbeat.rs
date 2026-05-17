@@ -14,6 +14,8 @@ pub struct HeartbeatManager {
     missed_pongs: u32,
     rtt_samples: VecDeque<u64>,
     max_samples: usize,
+    cached_p90: Option<u64>,
+    dirty: bool,
 }
 
 impl HeartbeatManager {
@@ -24,11 +26,13 @@ impl HeartbeatManager {
             missed_pongs: 0,
             rtt_samples: VecDeque::with_capacity(20),
             max_samples: 20,
+            cached_p90: None,
+            dirty: false,
         }
     }
 
     /// 返回当前建议的心跳间隔（毫秒）
-    pub fn interval_ms(&self) -> u64 {
+    pub fn interval_ms(&mut self) -> u64 {
         if self.config.adaptive {
             self.adaptive_interval()
         } else {
@@ -45,6 +49,7 @@ impl HeartbeatManager {
             self.rtt_samples.pop_front();
         }
         self.rtt_samples.push_back(rtt_ms);
+        self.dirty = true;
     }
 
     /// 超时检查：返回 true 表示应该判定断线
@@ -68,20 +73,26 @@ impl HeartbeatManager {
         self.missed_pongs >= self.config.max_missed_pongs
     }
 
-    /// 返回 P90 RTT 值（如果有样本）
-    pub fn p90_rtt(&self) -> Option<u64> {
+    /// 返回 P90 RTT 值（如果有样本）。惰性缓存：仅窗口变化时重算。
+    pub fn p90_rtt(&mut self) -> Option<u64> {
         if self.rtt_samples.is_empty() {
             return None;
         }
-        let mut sorted: Vec<u64> = self.rtt_samples.iter().copied().collect();
-        sorted.sort_unstable();
-        let idx = ((sorted.len() as f64) * 0.90_f64).ceil() as usize - 1;
-        let idx = idx.min(sorted.len() - 1);
-        Some(sorted[idx])
+
+        if self.dirty {
+            let mut sorted: Vec<u64> = self.rtt_samples.iter().copied().collect();
+            sorted.sort_unstable();
+            let idx = ((sorted.len() as f64) * 0.90_f64).ceil() as usize - 1;
+            let idx = idx.min(sorted.len() - 1);
+            self.cached_p90 = Some(sorted[idx]);
+            self.dirty = false;
+        }
+
+        self.cached_p90
     }
 
     /// 自适应心跳间隔
-    fn adaptive_interval(&self) -> u64 {
+    fn adaptive_interval(&mut self) -> u64 {
         if let Some(p90) = self.p90_rtt() {
             let interval = p90.saturating_mul(2);
             interval.max(self.config.interval_ms)

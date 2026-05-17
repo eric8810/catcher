@@ -390,6 +390,7 @@ impl HttpTransport {
     pub async fn execute_stream(
         &self,
         request: HttpRequest,
+        per_request_token: tokio_util::sync::CancellationToken,
         chunk_callback: impl Fn(StreamEvent) + Send + 'static,
     ) -> Result<(), CatcherError> {
         use tokio_stream::StreamExt;
@@ -430,6 +431,10 @@ impl HttpTransport {
 
         let response = tokio::select! {
             r = req.send() => r.map_err(|e| map_middleware_error_standalone(e, &*self.config))?,
+            _ = per_request_token.cancelled() => {
+                chunk_callback(StreamEvent::Error("request cancelled".into()));
+                return Err(CatcherError::Internal("request cancelled".into()));
+            }
             _ = global_token.cancelled() => {
                 chunk_callback(StreamEvent::Error("request cancelled".into()));
                 return Err(CatcherError::Internal("request cancelled".into()));
@@ -450,13 +455,17 @@ impl HttpTransport {
             tokio::select! {
                 chunk_opt = stream.next() => {
                     match chunk_opt {
-                        Some(Ok(chunk)) => chunk_callback(StreamEvent::Chunk(chunk.to_vec())),
+                        Some(Ok(chunk)) => chunk_callback(StreamEvent::Chunk(chunk)),
                         Some(Err(e)) => {
                             chunk_callback(StreamEvent::Error(format!("stream read error: {e}")));
                             return Err(CatcherError::Internal(format!("stream read: {e}")));
                         }
                         None => break, // stream exhausted
                     }
+                }
+                _ = per_request_token.cancelled() => {
+                    chunk_callback(StreamEvent::Error("request cancelled".into()));
+                    return Err(CatcherError::Internal("request cancelled".into()));
                 }
                 _ = global_token.cancelled() => {
                     chunk_callback(StreamEvent::Error("request cancelled".into()));
@@ -851,14 +860,14 @@ mod tests {
             headers: HashMap::new(), body: None, content_type: None, timeout_ms: None,
             ..Default::default()
         };
-        transport.execute_stream(request, move |e| { ec.lock().unwrap().push(e); }).await.unwrap();
+        transport.execute_stream(request, tokio_util::sync::CancellationToken::new(), move |e| { ec.lock().unwrap().push(e); }).await.unwrap();
         let evts = events.lock().unwrap();
         assert!(evts.len() >= 3);
         assert!(matches!(&evts[0], StreamEvent::Headers { status: 200, .. }));
         assert!(matches!(evts.last(), Some(StreamEvent::Done)));
         let body: Vec<u8> = evts.iter().filter_map(|e| match e {
-            StreamEvent::Chunk(d) => Some(d.clone()), _ => None,
-        }).flatten().collect();
+            StreamEvent::Chunk(d) => Some(d.as_ref()), _ => None,
+        }).flatten().copied().collect();
         assert_eq!(String::from_utf8(body).unwrap(), "hello world");
     }
 
@@ -879,7 +888,7 @@ mod tests {
             headers: HashMap::new(), body: None, content_type: None, timeout_ms: None,
             ..Default::default()
         };
-        transport.execute_stream(request, move |e| { ec.lock().unwrap().push(e); }).await.unwrap();
+        transport.execute_stream(request, tokio_util::sync::CancellationToken::new(), move |e| { ec.lock().unwrap().push(e); }).await.unwrap();
         let evts = events.lock().unwrap();
         assert_eq!(evts.iter().filter(|e| matches!(e, StreamEvent::Chunk(_))).count(), 0);
         assert!(matches!(&evts[0], StreamEvent::Headers { .. }));
@@ -914,7 +923,7 @@ mod tests {
             headers: HashMap::new(), body: None, content_type: None, timeout_ms: None,
             ..Default::default()
         };
-        let result = transport.execute_stream(request, move |e| { ec.lock().unwrap().push(e); }).await;
+        let result = transport.execute_stream(request, tokio_util::sync::CancellationToken::new(), move |e| { ec.lock().unwrap().push(e); }).await;
         assert!(result.is_err());
         assert!(events.lock().unwrap().iter().any(|e| matches!(e, StreamEvent::Error(m) if m.contains("cancelled"))));
     }
@@ -931,7 +940,7 @@ mod tests {
             headers: HashMap::new(), body: None, content_type: None, timeout_ms: None,
             ..Default::default()
         };
-        assert!(transport.execute_stream(request, |_| {}).await.is_err());
+        assert!(transport.execute_stream(request, tokio_util::sync::CancellationToken::new(), |_| {}).await.is_err());
     }
 
     // ── N-03: Per-request cancel tests ──

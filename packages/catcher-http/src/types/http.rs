@@ -54,7 +54,7 @@ pub struct HttpResponse {
 #[derive(Debug, Clone)]
 pub enum StreamEvent {
     Headers { status: u16, headers: HashMap<String, String> },
-    Chunk(Vec<u8>),
+    Chunk(bytes::Bytes),
     Done,
     Error(String),
 }

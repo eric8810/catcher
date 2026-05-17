@@ -7,10 +7,9 @@ use std::sync::Arc;
 use crate::transport::http_client::HttpTransport;
 use crate::types::http::{HttpClientConfig, HttpMethod, HttpRequest};
 
-use catcher_core::{EventCallback, FfiString};
+use catcher_core::{EventCallback, FfiString, HandleRegistry};
 
-static HANDLES: std::sync::Mutex<Option<HashMap<usize, Arc<HttpTransport>>>> = std::sync::Mutex::new(None);
-static NEXT_ID: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(1);
+static REGISTRY: HandleRegistry<HttpTransport> = HandleRegistry::new();
 
 fn runtime() -> &'static tokio::runtime::Runtime {
     static RT: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
@@ -20,10 +19,6 @@ fn runtime() -> &'static tokio::runtime::Runtime {
             .build()
             .expect("Failed to create tokio runtime for catcher-http FFI")
     })
-}
-
-fn handles() -> std::sync::MutexGuard<'static, Option<HashMap<usize, Arc<HttpTransport>>>> {
-    HANDLES.lock().unwrap()
 }
 
 fn ffi_string_to_string(s: FfiString, default: &str) -> String {
@@ -74,8 +69,7 @@ pub unsafe extern "C" fn catcher_http_client_create(config_json: *const c_char) 
         Ok(t) => t,
         Err(_) => return std::ptr::null_mut(),
     };
-    let id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    handles().get_or_insert_with(HashMap::new).insert(id, Arc::new(transport));
+    let id = REGISTRY.insert(Arc::new(transport));
     Box::into_raw(Box::new(id)) as *mut c_void
 }
 
@@ -83,7 +77,7 @@ pub unsafe extern "C" fn catcher_http_client_create(config_json: *const c_char) 
 pub unsafe extern "C" fn catcher_http_client_destroy(handle: *mut c_void) {
     if handle.is_null() { return; }
     let id = *(handle as *const usize);
-    handles().as_mut().map(|m| m.remove(&id));
+    REGISTRY.remove(id);
     drop(Box::from_raw(handle as *mut usize));
 }
 
@@ -101,7 +95,7 @@ pub unsafe extern "C" fn catcher_http_get(
     let per_request_headers = parse_headers_json(headers_json);
     let per_request_timeout = if timeout_ms > 0 { Some(timeout_ms as u64) } else { None };
     let ud = user_data as usize;
-    let transport = handles().as_ref().and_then(|m| m.get(&id)).cloned();
+    let transport = REGISTRY.get(id);
     if let Some(t) = transport {
         runtime().spawn(async move {
             let request = HttpRequest {
@@ -136,7 +130,7 @@ pub unsafe extern "C" fn catcher_http_post(
     let per_request_headers = parse_headers_json(headers_json);
     let per_request_timeout = if timeout_ms > 0 { Some(timeout_ms as u64) } else { None };
     let ud = user_data as usize;
-    let transport = handles().as_ref().and_then(|m| m.get(&id)).cloned();
+    let transport = REGISTRY.get(id);
     if let Some(t) = transport {
         runtime().spawn(async move {
             let request = HttpRequest {
@@ -188,7 +182,7 @@ pub unsafe extern "C" fn catcher_http_execute(
             return;
         }
     };
-    let transport = handles().as_ref().and_then(|m| m.get(&id)).cloned();
+    let transport = REGISTRY.get(id);
     if let Some(t) = transport {
         runtime().spawn(async move {
             let request = HttpRequest {
@@ -246,7 +240,7 @@ pub unsafe extern "C" fn catcher_http_execute_with_id(
             return 0;
         }
     };
-    let transport = handles().as_ref().and_then(|m| m.get(&id)).cloned();
+    let transport = REGISTRY.get(id);
     if let Some(t) = transport {
         let (request_id, per_request_token) = t.allocate_pending_request();
         runtime().spawn(async move {
@@ -289,7 +283,7 @@ pub unsafe extern "C" fn catcher_http_cancel_request(
 ) -> i32 {
     if handle.is_null() { return -1; }
     let id = *(handle as *const usize);
-    if let Some(transport) = handles().as_ref().and_then(|m| m.get(&id)) {
+    if let Some(transport) = REGISTRY.get(id) {
         if transport.cancel_request(request_id) { 0 } else { -1 }
     } else { -1 }
 }
@@ -300,7 +294,7 @@ pub unsafe extern "C" fn catcher_http_cancel_request(
 pub unsafe extern "C" fn catcher_http_circuit_breaker_state(handle: *mut c_void) -> *mut c_char {
     if handle.is_null() { return std::ptr::null_mut(); }
     let id = *(handle as *const usize);
-    let state = handles().as_ref().and_then(|m| m.get(&id)).and_then(|t| t.circuit_breaker_state());
+    let state = REGISTRY.get(id).and_then(|t| t.circuit_breaker_state());
     let json = match state {
         Some(s) => serde_json::to_string(&s).unwrap_or_default(),
         None => serde_json::json!({"state":"disabled"}).to_string(),
@@ -312,7 +306,7 @@ pub unsafe extern "C" fn catcher_http_circuit_breaker_state(handle: *mut c_void)
 pub unsafe extern "C" fn catcher_http_metrics(handle: *mut c_void) -> *mut c_char {
     if handle.is_null() { return std::ptr::null_mut(); }
     let id = *(handle as *const usize);
-    let snapshot = handles().as_ref().and_then(|m| m.get(&id)).map(|t| t.metrics());
+    let snapshot = REGISTRY.get(id).map(|t| t.metrics());
     let json = match snapshot {
         Some(s) => serde_json::to_string(&s).unwrap_or_default(),
         None => "{}".to_string(),
@@ -324,7 +318,7 @@ pub unsafe extern "C" fn catcher_http_metrics(handle: *mut c_void) -> *mut c_cha
 pub unsafe extern "C" fn catcher_http_client_cancel_all(handle: *mut c_void) {
     if handle.is_null() { return; }
     let id = *(handle as *const usize);
-    if let Some(transport) = handles().as_ref().and_then(|m| m.get(&id)) {
+    if let Some(transport) = REGISTRY.get(id) {
         transport.cancel_all();
     }
 }
@@ -337,7 +331,7 @@ pub unsafe extern "C" fn catcher_http_adaptive_timeout_config(
 ) {
     if handle.is_null() { return; }
     let id = *(handle as *const usize);
-    if let Some(transport) = handles().as_ref().and_then(|m| m.get(&id)) {
+    if let Some(transport) = REGISTRY.get(id) {
         if enabled != 0 {
             transport.set_adaptive_timeout(
                 min_timeout_ms as u64, max_timeout_ms as u64,
@@ -383,9 +377,9 @@ pub unsafe extern "C" fn catcher_http_execute_stream(
             return 0;
         }
     };
-    let transport = handles().as_ref().and_then(|m| m.get(&id)).cloned();
+    let transport = REGISTRY.get(id);
     if let Some(t) = transport {
-        let (request_id, _pt) = t.allocate_pending_request();
+        let (request_id, pt) = t.allocate_pending_request();
         runtime().spawn(async move {
             let req = HttpRequest {
                 method: http_method, url: url_str,
@@ -393,7 +387,7 @@ pub unsafe extern "C" fn catcher_http_execute_stream(
                 content_type: ct_str, timeout_ms: per_request_timeout,
                 ..Default::default()
             };
-            let _ = t.execute_stream(req, move |event| {
+            let _ = t.execute_stream(req, pt, move |event| {
                 let (et, ed) = match &event {
                     crate::types::http::StreamEvent::Headers { status, headers } => {
                         ("stream_headers", serde_json::json!({"status":status,"headers":headers,"request_id":request_id}).to_string())
@@ -495,7 +489,7 @@ pub unsafe extern "C" fn catcher_http_multipart(
     }
 
     let ud = user_data;
-    let transport = handles().as_ref().and_then(|m| m.get(&id_val)).cloned();
+    let transport = REGISTRY.get(id_val);
     if let Some(t) = transport {
         runtime().spawn(async move {
             let request = HttpRequest {

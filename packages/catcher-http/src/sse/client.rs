@@ -46,6 +46,10 @@ impl SseClient {
         let reconnect_delay_bg = reconnect_delay.clone();
 
         tokio::spawn(async move {
+            let client = Client::builder()
+                .build()
+                .expect("reqwest Client build should not fail");
+
             let reconnect_config = config_clone.reconnect.clone();
             let max_retries = reconnect_config
                 .as_ref()
@@ -75,7 +79,7 @@ impl SseClient {
                 // Mark as Connecting before each connection attempt
                 *ready_state_bg.lock().unwrap() = SseReadyState::Connecting;
 
-                match connect_once(&config_clone, &lines_tx, &last_event_id_bg, &ready_state_bg, &reconnect_delay_bg).await {
+                match connect_once(&client, &config_clone, &lines_tx, &last_event_id_bg, &ready_state_bg, &reconnect_delay_bg).await {
                     Ok(()) => {
                         // Stream ended normally — check if we should reconnect
                         if cancel_rx.try_recv().is_ok() {
@@ -172,15 +176,13 @@ fn rand_jitter() -> f64 {
 
 /// Perform a single SSE connection attempt.
 async fn connect_once(
+    client: &Client,
     config: &SseClientConfig,
     lines_tx: &mpsc::UnboundedSender<Result<String, CatcherError>>,
     last_event_id: &Arc<Mutex<String>>,
     ready_state: &Arc<Mutex<SseReadyState>>,
     reconnect_delay: &Arc<Mutex<Option<u64>>>,
 ) -> Result<(), CatcherError> {
-    let client = Client::builder()
-        .build()
-        .map_err(|e| CatcherError::Internal(format!("reqwest build: {e}")))?;
 
     let method = match config.method {
         catcher_core::types::sse::SseMethod::GET => reqwest::Method::GET,

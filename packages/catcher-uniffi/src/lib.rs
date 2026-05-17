@@ -25,6 +25,7 @@ use catcher_http::{
     types::http::{HttpClientConfig, HttpMethod, HttpRequest},
     sse::client::SseClient,
     sse::SseStream,
+    observability::NetworkQualityEvaluator,
     HttpTransport,
 };
 
@@ -38,21 +39,33 @@ use catcher_core::types::sse::{SseClientConfig, SseMethod};
 use catcher_core::CatcherError as CoreCatcherError;
 use tokio_stream::StreamExt;
 
+/// Auxiliary runtime for `block_on_aux_thread` — reused across calls.
+fn aux_runtime() -> &'static tokio::runtime::Runtime {
+    static RT: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
+    RT.get_or_init(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .expect("Failed to create aux tokio runtime")
+    })
+}
+
 /// Run an async future synchronously, on a **dedicated auxiliary thread**
-/// with its own tokio runtime. This avoids `block_on()` re-entrance panics
+/// with a shared tokio runtime. This avoids `block_on()` re-entrance panics
 /// when called from within a tokio worker thread (e.g., WsEventObserver callbacks).
 fn block_on_aux_thread<F, T>(future: F) -> std::thread::JoinHandle<T>
 where
     F: std::future::Future<Output = T> + Send + 'static,
     T: Send + 'static,
 {
-    std::thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("Failed to create aux tokio runtime");
-        rt.block_on(future)
-    })
+    let rt = aux_runtime();
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    rt.spawn(async move {
+        let result = future.await;
+        let _ = tx.send(result);
+    });
+    std::thread::spawn(move || rx.recv().expect("aux runtime task panicked"))
 }
 
 /// Global tokio runtime for spawned tasks (WS event forwarding, SSE events, etc.)
@@ -462,10 +475,11 @@ impl WsClient {
     }
 }
 
-// When WsClient is dropped, abort the event-forwarding task to prevent
-// callbacks to a GC'd observer.
+// When WsClient is dropped, close the WebSocket connection and abort
+// the event-forwarding task to prevent callbacks to a GC'd observer.
 impl Drop for WsClient {
     fn drop(&mut self) {
+        let _ = self.handle.close(1000, "client dropped");
         self._event_task.abort();
     }
 }
@@ -564,15 +578,29 @@ pub fn catcher_unpack(data: Vec<u8>) -> Result<String, CatcherError> {
 // Network Quality
 // ═══════════════════════════════════════════════════════════════
 
+static EVALUATOR: std::sync::Mutex<Option<NetworkQualityEvaluator>> = std::sync::Mutex::new(None);
+
 /// Evaluate network quality to the given host (single HTTP HEAD measurement).
 /// Returns a JSON string with level, avg_rtt_ms, jitter_ms, etc.
 #[uniffi::export]
 pub fn evaluate_quality(host: String) -> Result<String, CatcherError> {
-    use catcher_http::observability::network_quality::NetworkQualityEvaluator;
-
     let handle = block_on_aux_thread(async move {
-        let mut evaluator = NetworkQualityEvaluator::new(20);
-        match evaluator.measure_http_rtt(&host, "/").await {
+        // Ensure evaluator exists
+        {
+            let mut guard = EVALUATOR.lock().unwrap();
+            if guard.is_none() {
+                *guard = Some(NetworkQualityEvaluator::new(50));
+            }
+        }
+
+        // Take evaluator out, use it, put it back (avoid holding lock across await)
+        let mut evaluator = EVALUATOR.lock().unwrap().take().unwrap();
+        let result = evaluator.measure_http_rtt(&host, "/").await;
+        EVALUATOR.lock().unwrap().replace(evaluator);
+
+        let mut guard = EVALUATOR.lock().unwrap();
+        let evaluator = guard.as_mut().unwrap();
+        match result {
             Ok(_rtt) => {
                 let result = evaluator.evaluate();
                 Ok(serde_json::to_string(&result).unwrap_or_default())

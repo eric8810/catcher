@@ -1,16 +1,14 @@
 //! WebSocket C ABI — create / send / close / destroy
 
-use std::collections::HashMap;
 use std::ffi::{c_char, c_void, CStr, CString};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::transport::ws_client::{WsHandle, WsTransport};
 use crate::types::ws::WsClientConfig;
 
-use catcher_core::{EventCallback, FfiResult, FfiString};
+use catcher_core::{EventCallback, FfiResult, FfiString, HandleRegistry};
 
-static WS_HANDLES: Mutex<Option<HashMap<usize, Arc<WsHandle>>>> = Mutex::new(None);
-static WS_NEXT_ID: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(1);
+static WS_REGISTRY: HandleRegistry<WsHandle> = HandleRegistry::new();
 
 /// Global tokio runtime for WS async operations (spawning, etc.)
 fn runtime() -> &'static tokio::runtime::Runtime {
@@ -21,10 +19,6 @@ fn runtime() -> &'static tokio::runtime::Runtime {
             .build()
             .expect("Failed to create tokio runtime for catcher-ws FFI")
     })
-}
-
-fn ws_handles() -> std::sync::MutexGuard<'static, Option<HashMap<usize, Arc<WsHandle>>>> {
-    WS_HANDLES.lock().unwrap()
 }
 
 /// Safely read an FfiString as a Rust String. Returns default on null/invalid.
@@ -77,17 +71,14 @@ pub unsafe extern "C" fn catcher_ws_create(
         return std::ptr::null_mut();
     }
 
-    let id = WS_NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let id = WS_REGISTRY.next_id();
     let cb = event_callback;
     let ud = user_data as usize;
 
     runtime().spawn(async move {
         match WsTransport::connect(&config).await {
             Ok((handle, mut rx)) => {
-                let ws_handle = Arc::new(handle);
-                ws_handles()
-                    .get_or_insert_with(HashMap::new)
-                    .insert(id, ws_handle);
+                WS_REGISTRY.insert_with_id(id, Arc::new(handle));
 
                 while let Some(event) = rx.recv().await {
                     let json = serde_json::to_string(&event).unwrap_or_default();
@@ -111,18 +102,12 @@ pub unsafe extern "C" fn catcher_ws_send_text(handle: *mut c_void, message: FfiS
     }
     let id = *(handle as *const usize);
     let text = ffi_string_to_string(message, "");
-    let handles = ws_handles();
-    if let Some(ref map) = *handles {
-        if let Some(h) = map.get(&id) {
-            match h.send_text(&text) {
-                Ok(()) => FfiResult::ok(std::ptr::null_mut(), 0),
-                Err(e) => FfiResult::error(1, &e.to_string()),
-            }
-        } else {
-            FfiResult::error(1, "handle not found")
-        }
-    } else {
-        FfiResult::error(1, "no handles")
+    match WS_REGISTRY.get(id) {
+        Some(h) => match h.send_text(&text) {
+            Ok(()) => FfiResult::ok(std::ptr::null_mut(), 0),
+            Err(e) => FfiResult::error(1, &e.to_string()),
+        },
+        None => FfiResult::error(1, "handle not found"),
     }
 }
 
@@ -140,18 +125,12 @@ pub unsafe extern "C" fn catcher_ws_send_binary(
     }
     let id = *(handle as *const usize);
     let bytes = std::slice::from_raw_parts(data, len);
-    let handles = ws_handles();
-    if let Some(ref map) = *handles {
-        if let Some(h) = map.get(&id) {
-            match h.send_binary(bytes) {
-                Ok(()) => FfiResult::ok(std::ptr::null_mut(), 0),
-                Err(e) => FfiResult::error(1, &e.to_string()),
-            }
-        } else {
-            FfiResult::error(1, "handle not found")
-        }
-    } else {
-        FfiResult::error(1, "no handles")
+    match WS_REGISTRY.get(id) {
+        Some(h) => match h.send_binary(bytes) {
+            Ok(()) => FfiResult::ok(std::ptr::null_mut(), 0),
+            Err(e) => FfiResult::error(1, &e.to_string()),
+        },
+        None => FfiResult::error(1, "handle not found"),
     }
 }
 
@@ -162,11 +141,8 @@ pub unsafe extern "C" fn catcher_ws_close(handle: *mut c_void, code: u16, reason
     }
     let id = *(handle as *const usize);
     let reason_str = ffi_string_to_string(reason, "normal");
-    let handles = ws_handles();
-    if let Some(ref map) = *handles {
-        if let Some(h) = map.get(&id) {
-            let _ = h.close(code, &reason_str);
-        }
+    if let Some(h) = WS_REGISTRY.get(id) {
+        let _ = h.close(code, &reason_str);
     }
 }
 
@@ -176,7 +152,7 @@ pub unsafe extern "C" fn catcher_ws_destroy(handle: *mut c_void) {
         return;
     }
     let id = *(handle as *const usize);
-    ws_handles().as_mut().map(|m| m.remove(&id));
+    WS_REGISTRY.remove(id);
     drop(Box::from_raw(handle as *mut usize));
 }
 

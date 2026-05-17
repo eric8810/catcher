@@ -9,11 +9,13 @@
 
 pub mod error;
 pub mod ffi_types;
+pub mod handle_registry;
 pub mod types;
 
 // Re-export everything at crate root for convenience
 pub use error::{CatcherError, ErrorCategory};
 pub use ffi_types::{EventCallback, FfiBytes, FfiResult, FfiString};
+pub use handle_registry::HandleRegistry;
 pub use types::observability::{
     ConnectionType, NetworkQualityLevel, NetworkQualityResult, Priority, RttSnapshot,
 };

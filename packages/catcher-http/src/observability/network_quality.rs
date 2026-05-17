@@ -9,6 +9,8 @@ pub struct NetworkQualityEvaluator {
     sliding_window: Vec<u64>,
     window_size: usize,
     connection_type: ConnectionType,
+    cached_snapshot: Option<RttSnapshot>,
+    dirty: bool,
 }
 
 impl NetworkQualityEvaluator {
@@ -21,6 +23,8 @@ impl NetworkQualityEvaluator {
             sliding_window: Vec::with_capacity(window_size),
             window_size,
             connection_type: ConnectionType::Unknown,
+            cached_snapshot: None,
+            dirty: false,
         }
     }
 
@@ -31,6 +35,8 @@ impl NetworkQualityEvaluator {
             sliding_window: Vec::with_capacity(window_size),
             window_size,
             connection_type: ConnectionType::Unknown,
+            cached_snapshot: None,
+            dirty: false,
         }
     }
 
@@ -67,38 +73,45 @@ impl NetworkQualityEvaluator {
             self.sliding_window.remove(0);
         }
         self.sliding_window.push(rtt_ms);
+        self.dirty = true;
     }
 
-    /// RTT 滑动窗口统计快照
-    pub fn rtt_snapshot(&self) -> RttSnapshot {
+    /// RTT 滑动窗口统计快照（惰性缓存：仅窗口变化时重算）
+    pub fn rtt_snapshot(&mut self) -> RttSnapshot {
         if self.sliding_window.is_empty() {
             return RttSnapshot::default();
         }
-        let mut sorted = self.sliding_window.clone();
-        sorted.sort_unstable();
-        let sum: u64 = sorted.iter().sum();
-        let avg = sum / sorted.len() as u64;
-        let jitter = if sorted.len() > 1 {
-            sorted
-                .iter()
-                .map(|&v| (v as i64 - avg as i64).unsigned_abs())
-                .sum::<u64>()
-                / sorted.len() as u64
-        } else {
-            0
-        };
-        RttSnapshot {
-            avg_rtt_ms: avg,
-            min_rtt_ms: sorted[0],
-            max_rtt_ms: sorted[sorted.len() - 1],
-            jitter_ms: jitter,
-            packet_loss_rate: 0.0,
-            sample_count: sorted.len(),
+
+        if self.dirty {
+            let mut sorted = self.sliding_window.clone();
+            sorted.sort_unstable();
+            let sum: u64 = sorted.iter().sum();
+            let avg = sum / sorted.len() as u64;
+            let jitter = if sorted.len() > 1 {
+                sorted
+                    .iter()
+                    .map(|&v| (v as i64 - avg as i64).unsigned_abs())
+                    .sum::<u64>()
+                    / sorted.len() as u64
+            } else {
+                0
+            };
+            self.cached_snapshot = Some(RttSnapshot {
+                avg_rtt_ms: avg,
+                min_rtt_ms: sorted[0],
+                max_rtt_ms: sorted[sorted.len() - 1],
+                jitter_ms: jitter,
+                packet_loss_rate: 0.0,
+                sample_count: sorted.len(),
+            });
+            self.dirty = false;
         }
+
+        self.cached_snapshot.clone().unwrap_or_default()
     }
 
     /// 综合评估网络质量等级
-    pub fn evaluate(&self) -> NetworkQualityResult {
+    pub fn evaluate(&mut self) -> NetworkQualityResult {
         let snapshot = self.rtt_snapshot();
         let level = classify_quality(&snapshot);
         NetworkQualityResult {
@@ -225,7 +238,7 @@ mod tests {
 
     #[test]
     fn empty_window_returns_bad() {
-        let eval = NetworkQualityEvaluator::new(10);
+        let mut eval = NetworkQualityEvaluator::new(10);
         assert_eq!(eval.evaluate().level, NetworkQualityLevel::Bad);
     }
 

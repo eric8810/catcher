@@ -11,6 +11,7 @@ pub struct AdaptiveTimeout {
     max_timeout_ms: u64,
     multiplier: f64,
     cached_p90: Option<u64>,
+    cached_snapshot: Option<RttSnapshot>,
     dirty: bool,
 }
 
@@ -28,6 +29,7 @@ impl AdaptiveTimeout {
             max_timeout_ms,
             multiplier,
             cached_p90: None,
+            cached_snapshot: None,
             dirty: false,
         }
     }
@@ -66,32 +68,42 @@ impl AdaptiveTimeout {
         Duration::from_millis(self.timeout_ms())
     }
 
-    /// 返回滑动窗口快照
-    pub fn snapshot(&self) -> RttSnapshot {
+    /// 返回滑动窗口快照（惰性缓存：仅窗口变化时重算）
+    pub fn snapshot(&mut self) -> RttSnapshot {
         if self.rtt_window.is_empty() {
             return RttSnapshot::default();
         }
-        let mut sorted = self.rtt_window.clone();
-        sorted.sort_unstable();
-        let sum: u64 = sorted.iter().sum();
-        let avg = sum / sorted.len() as u64;
-        let jitter = if sorted.len() > 1 {
-            sorted
-                .iter()
-                .map(|&v| (v as i64 - avg as i64).unsigned_abs())
-                .sum::<u64>()
-                / sorted.len() as u64
-        } else {
-            0
-        };
-        RttSnapshot {
-            avg_rtt_ms: avg,
-            min_rtt_ms: sorted[0],
-            max_rtt_ms: sorted[sorted.len() - 1],
-            jitter_ms: jitter,
-            packet_loss_rate: 0.0,
-            sample_count: sorted.len(),
+
+        if self.dirty {
+            let mut sorted = self.rtt_window.clone();
+            sorted.sort_unstable();
+            let sum: u64 = sorted.iter().sum();
+            let avg = sum / sorted.len() as u64;
+            let jitter = if sorted.len() > 1 {
+                sorted
+                    .iter()
+                    .map(|&v| (v as i64 - avg as i64).unsigned_abs())
+                    .sum::<u64>()
+                    / sorted.len() as u64
+            } else {
+                0
+            };
+            self.cached_snapshot = Some(RttSnapshot {
+                avg_rtt_ms: avg,
+                min_rtt_ms: sorted[0],
+                max_rtt_ms: sorted[sorted.len() - 1],
+                jitter_ms: jitter,
+                packet_loss_rate: 0.0,
+                sample_count: sorted.len(),
+            });
+            // 同时更新 cached_p90
+            let p90_idx = ((sorted.len() as f64) * 0.90).ceil() as usize - 1;
+            let p90_idx = p90_idx.min(sorted.len() - 1);
+            self.cached_p90 = Some(sorted[p90_idx]);
+            self.dirty = false;
         }
+
+        self.cached_snapshot.clone().unwrap_or_default()
     }
 
     /// 从快照静态计算超时
