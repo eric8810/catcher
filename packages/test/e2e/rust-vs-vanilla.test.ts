@@ -503,22 +503,22 @@ describe('S7: Priority queue (Rust)', () => {
 // S8: DNS cache — slow DNS proxy + real domain
 // ═════════════════════════════════════════════════════════════
 //
-// A local slow DNS proxy adds 200ms latency per DNS query.
-// Both sides hit example.com through the slow proxy.
+// A local slow DNS proxy (UDP) adds 200ms latency per DNS query.
+// Both sides hit example.com through the SAME slow DNS proxy.
 //
-// Vanilla (axios): Node.js has no application-level DNS cache.
-//   We simulate slow DNS by adding 200ms before each request
-//   (equivalent to DNS cache miss on every request).
-//   5 sequential requests × 200ms = ~1000ms DNS overhead
+// Vanilla (axios): custom http.Agent with lookup via slow proxy.
+//   No DNS cache — every HTTP request triggers a new DNS query.
+//   5 sequential requests × 200ms DNS = ~1000ms DNS overhead
 //
 // Catcher (Rust): dnsCacheTtl=300s, nameservers point to slow proxy.
-//   1st request: 200ms DNS overhead (cache miss)
-//   2nd-5th requests: 0ms DNS overhead (cache hit)
+//   1st request: 200ms DNS (cache miss) + ~100ms HTTP
+//   2nd-5th requests: 0ms DNS (cache hit) + ~100ms HTTP
 //   = ~200ms DNS overhead total
 //
 // Expected: catcher ~800ms faster per iteration due to DNS caching.
 
-import { createSlowDnsProxy, type SlowDnsProxy } from '../network/slow-dns-proxy.js'
+import http from 'node:http'
+import { createSlowDnsProxy, createDnsLookupViaProxy, type SlowDnsProxy } from '../network/slow-dns-proxy.js'
 
 const DNS_TARGET = 'http://example.com'
 const DNS_DELAY_MS = 200
@@ -531,9 +531,19 @@ async function vanillaS8(_baseUrl: string): Promise<IterationResult> {
   for (let i = 0; i < 5; i++) {
     const start = Date.now()
     try {
-      // Simulate slow DNS on every request (no cache)
-      await new Promise((r) => setTimeout(r, DNS_DELAY_MS))
-      await axios.get(DNS_TARGET, { timeout: 10_000 })
+      // Every request: resolve via slow DNS proxy (no caching)
+      // Then HTTP GET with Host header to preserve virtual hosting
+      const lookup = createDnsLookupViaProxy(slowDns.port)
+      const ip = await new Promise<string>((resolve, reject) => {
+        lookup('example.com', {}, (err, address) => {
+          if (err) reject(err)
+          else resolve(address!)
+        })
+      })
+      await axios.get(`http://${ip}/`, {
+        timeout: 10_000,
+        headers: { Host: 'example.com' },
+      })
       times.push(Date.now() - start)
     } catch { success = false; times.push(10_000) }
   }

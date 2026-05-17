@@ -89,6 +89,138 @@ function parseDnsQueryName(msg: Buffer): string | null {
 }
 
 /**
+ * Create a Node.js `lookup` function that resolves hostnames
+ * via the slow DNS proxy (UDP). Each call sends a real DNS query
+ * through the proxy, incurring the proxy's configured delay.
+ *
+ * Usage:
+ *   const lookup = createDnsLookupViaProxy(proxyPort)
+ *   const agent = new http.Agent({ lookup })
+ *   axios.get('http://example.com', { httpAgent: agent })
+ */
+export function createDnsLookupViaProxy(proxyPort: number): (hostname: string, options: dns.LookupOptions, callback: (err: NodeJS.ErrnoException | null, address: string, family: number) => void) => void {
+  return (hostname, options, callback) => {
+    dnsLookupViaProxy(proxyPort, hostname)
+      .then(({ address, family }) => callback(null, address, family))
+      .catch((err) => callback(err as NodeJS.ErrnoException, '', 4))
+  }
+}
+
+async function dnsLookupViaProxy(proxyPort: number, hostname: string): Promise<{ address: string; family: number }> {
+  const query = buildDnsQuery(hostname)
+  const socket = dgram.createSocket('udp4')
+
+  try {
+    const response = await new Promise<Buffer>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error(`DNS lookup timeout for ${hostname}`))
+        socket.close()
+      }, 5000)
+
+      socket.on('message', (msg: Buffer) => {
+        clearTimeout(timeout)
+        resolve(msg)
+      })
+
+      socket.on('error', (err) => {
+        clearTimeout(timeout)
+        reject(err)
+      })
+
+      socket.send(query, proxyPort, '127.0.0.1', (err) => {
+        if (err) {
+          clearTimeout(timeout)
+          reject(err)
+        }
+      })
+    })
+
+    // Parse the first A record from the answer section
+    const ip = parseDnsResponseA(response)
+    if (!ip) throw new Error(`No A record in DNS response for ${hostname}`)
+    return { address: ip, family: 4 }
+  } finally {
+    try { socket.close() } catch { /* ignore */ }
+  }
+}
+
+/**
+ * Build a minimal DNS query packet for an A record lookup.
+ */
+function buildDnsQuery(hostname: string): Buffer {
+  // Header: ID(2) + Flags(2) + QDCOUNT(2) + ANCOUNT(2) + NSCOUNT(2) + ARCOUNT(2)
+  const header = Buffer.alloc(12)
+  header.writeUInt16BE(0x1234, 0)   // Transaction ID
+  header.writeUInt16BE(0x0100, 2)   // Flags: standard query, recursion desired
+  header.writeUInt16BE(1, 4)        // QDCOUNT = 1
+  // ANCOUNT, NSCOUNT, ARCOUNT = 0 (already zeroed)
+
+  // Question section: QNAME + QTYPE(A=1) + QCLASS(IN=1)
+  const labels = hostname.split('.')
+  const qnameParts: Buffer[] = []
+  for (const label of labels) {
+    qnameParts.push(Buffer.from([label.length]))
+    qnameParts.push(Buffer.from(label, 'ascii'))
+  }
+  qnameParts.push(Buffer.from([0])) // Root label
+
+  const qtype = Buffer.alloc(4)
+  qtype.writeUInt16BE(1, 0)  // TYPE = A
+  qtype.writeUInt16BE(1, 2)  // CLASS = IN
+
+  return Buffer.concat([header, ...qnameParts, qtype])
+}
+
+/**
+ * Parse the first A record IP address from a DNS response.
+ */
+function parseDnsResponseA(msg: Buffer): string | null {
+  if (msg.length < 12) return null
+
+  const ancount = msg.readUInt16BE(6)
+  if (ancount === 0) return null
+
+  // Skip header (12 bytes) + question section
+  let offset = 12
+  // Skip QNAME
+  while (offset < msg.length) {
+    const len = msg[offset]
+    if (len === 0) { offset++; break }
+    offset += len + 1
+  }
+  offset += 4 // Skip QTYPE + QCLASS
+
+  // Parse answer records
+  for (let i = 0; i < ancount && offset < msg.length; i++) {
+    // Name (could be pointer or labels)
+    if ((msg[offset] & 0xc0) === 0xc0) {
+      offset += 2 // Compressed name pointer
+    } else {
+      while (offset < msg.length) {
+        const len = msg[offset]
+        if (len === 0) { offset++; break }
+        offset += len + 1
+      }
+    }
+
+    if (offset + 10 > msg.length) return null
+    const rtype = msg.readUInt16BE(offset)
+    // const rclass = msg.readUInt16BE(offset + 2)
+    // const ttl = msg.readUInt32BE(offset + 4)
+    const rdlength = msg.readUInt16BE(offset + 8)
+    offset += 10
+
+    if (rtype === 1 && rdlength === 4 && offset + 4 <= msg.length) {
+      // A record
+      return `${msg[offset]}.${msg[offset + 1]}.${msg[offset + 2]}.${msg[offset + 3]}`
+    }
+    offset += rdlength
+  }
+
+  return null
+}
+
+/**
  * Build a DNS response for the given query + resolved addresses.
  */
 function buildDnsResponse(query: Buffer, addresses: string[]): Buffer {
