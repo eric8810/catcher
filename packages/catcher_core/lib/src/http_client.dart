@@ -365,7 +365,7 @@ class CatcherHttpClient {
     final methodFfi = _allocFfiString(method);
     final urlFfi = _allocFfiString(url);
     final headersJson = (headers != null && headers.isNotEmpty)
-        ? jsonEncode(headers).toNativeUtf8()
+        ? jsonEncode(headers).toNativeUtf8().cast<Char>()
         : nullptr.cast<Char>();
 
     final bodyPtr = (body != null)
@@ -511,7 +511,7 @@ class CatcherHttpClient {
         ? _allocFfiString(contentType)
         : _allocFfiString('');
     final headersJson = (headers != null && headers.isNotEmpty)
-        ? jsonEncode(headers).toNativeUtf8()
+        ? jsonEncode(headers).toNativeUtf8().cast<Char>()
         : nullptr.cast<Char>();
     final bodyPtr = (body != null && body.isNotEmpty)
         ? malloc<Uint8>(body.length)
@@ -587,8 +587,8 @@ class CatcherHttpClient {
     _ensureHandle();
     final controller = StreamController<StreamEvent>();
     bool cleanedUp = false;
-
-    final nativeCallback = NativeCallable<EventCallbackNative>.listener(
+    late final NativeCallable<EventCallbackNative> nativeCallback;
+    nativeCallback = NativeCallable<EventCallbackNative>.listener(
       (Pointer<Char> eventType, Pointer<Uint8> eventData, int eventDataLen,
           Pointer<Void> userData) {
         final jsonBytes = eventData.asTypedList(eventDataLen);
@@ -652,7 +652,7 @@ class CatcherHttpClient {
         ? _allocFfiString(contentType)
         : _allocFfiString('');
     final headersJson = (headers != null && headers.isNotEmpty)
-        ? jsonEncode(headers).toNativeUtf8()
+        ? jsonEncode(headers).toNativeUtf8().cast<Char>()
         : nullptr.cast<Char>();
     final bodyPtr = (body != null && body.isNotEmpty)
         ? malloc<Uint8>(body.length)
@@ -790,7 +790,7 @@ class CatcherHttpClient {
         : _allocFfiString('');
 
     final headersJson = (headers != null && headers.isNotEmpty)
-        ? jsonEncode(headers).toNativeUtf8()
+        ? jsonEncode(headers).toNativeUtf8().cast<Char>()
         : nullptr.cast<Char>();
 
     final bodyPtr = (body != null && body.isNotEmpty)
@@ -1139,7 +1139,9 @@ class CatcherHttpError implements Exception {
 // ═══════════════════════════════════════════════════════════════
 
 /// Base class for streaming download events.
-sealed class StreamEvent {}
+sealed class StreamEvent {
+  const StreamEvent();
+}
 
 /// Received response headers.
 class StreamHeadersEvent extends StreamEvent {

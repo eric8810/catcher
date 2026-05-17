@@ -18,6 +18,7 @@ import 'dart:ffi';
 import 'dart:io';
 
 import 'package:catcher_core/catcher_core.dart';
+import 'package:catcher_core/src/ffi_bindings.dart';
 import 'package:ffi/ffi.dart';
 import 'package:test/test.dart';
 
