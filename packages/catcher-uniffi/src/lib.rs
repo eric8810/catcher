@@ -578,35 +578,33 @@ pub fn catcher_unpack(data: Vec<u8>) -> Result<String, CatcherError> {
 // Network Quality
 // ═══════════════════════════════════════════════════════════════
 
-static EVALUATOR: std::sync::Mutex<Option<NetworkQualityEvaluator>> = std::sync::Mutex::new(None);
+// 使用 tokio::sync::Mutex 以便安全地跨 .await 持锁，消除 take/put 竞态。
+static EVALUATOR: std::sync::OnceLock<Arc<tokio::sync::Mutex<NetworkQualityEvaluator>>> = std::sync::OnceLock::new();
+
+fn evaluator() -> Arc<tokio::sync::Mutex<NetworkQualityEvaluator>> {
+    EVALUATOR
+        .get_or_init(|| {
+            Arc::new(tokio::sync::Mutex::new(NetworkQualityEvaluator::new(50)))
+        })
+        .clone()
+}
 
 /// Evaluate network quality to the given host (single HTTP HEAD measurement).
 /// Returns a JSON string with level, avg_rtt_ms, jitter_ms, etc.
 #[uniffi::export]
 pub fn evaluate_quality(host: String) -> Result<String, CatcherError> {
+    let shared = evaluator();
+
     let handle = block_on_aux_thread(async move {
-        // Ensure evaluator exists
-        {
-            let mut guard = EVALUATOR.lock().unwrap();
-            if guard.is_none() {
-                *guard = Some(NetworkQualityEvaluator::new(50));
-            }
-        }
-
-        // Take evaluator out, use it, put it back (avoid holding lock across await)
-        let mut evaluator = EVALUATOR.lock().unwrap().take().unwrap();
-        let result = evaluator.measure_http_rtt(&host, "/").await;
-        EVALUATOR.lock().unwrap().replace(evaluator);
-
-        let mut guard = EVALUATOR.lock().unwrap();
-        let evaluator = guard.as_mut().unwrap();
+        let mut guard = shared.lock().await;
+        let result = guard.measure_http_rtt(&host, "/").await;
         match result {
             Ok(_rtt) => {
-                let result = evaluator.evaluate();
+                let result = guard.evaluate();
                 Ok(serde_json::to_string(&result).unwrap_or_default())
             }
             Err(e) => {
-                let result = evaluator.evaluate();
+                let result = guard.evaluate();
                 let mut map = serde_json::to_value(&result).unwrap_or_default();
                 if let Some(obj) = map.as_object_mut() {
                     obj.insert("error".into(), e.to_string().into());
