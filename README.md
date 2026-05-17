@@ -68,8 +68,8 @@ catcher  catcher              @eric8810  @eric8810
 | [`@eric8810/catcher-http`](https://www.npmjs.com/package/@eric8810/catcher-http) | [![npm](https://img.shields.io/npm/v/@eric8810/catcher-http.svg)](https://www.npmjs.com/package/@eric8810/catcher-http) | HTTP + SSE client — retry, CB, queue, interceptors |
 | [`@eric8810/catcher-ws`](https://www.npmjs.com/package/@eric8810/catcher-ws) | [![npm](https://img.shields.io/npm/v/@eric8810/catcher-ws.svg)](https://www.npmjs.com/package/@eric8810/catcher-ws) | WebSocket — reconnect, multi-endpoint, codec |
 | [`@eric8810/catcher-web`](https://www.npmjs.com/package/@eric8810/catcher-web) | [![npm](https://img.shields.io/npm/v/@eric8810/catcher-web.svg)](https://www.npmjs.com/package/@eric8810/catcher-web) | Browser HTTP + SSE client — fetch-based |
-| [`@eric8810/catcher-napi-http`](https://www.npmjs.com/package/@eric8810/catcher-napi-http) | [![npm](https://img.shields.io/npm/v/@eric8810/catcher-napi-http.svg)](https://www.npmjs.com/package/@eric8810/catcher-napi-http) | Rust native via napi-rs |
-| [`@eric8810/catcher-napi-ws`](https://www.npmjs.com/package/@eric8810/catcher-napi-ws) | [![npm](https://img.shields.io/npm/v/@eric8810/catcher-napi-ws.svg)](https://www.npmjs.com/package/@eric8810/catcher-napi-ws) | Rust native via napi-rs |
+| [`@eric8810/catcher-napi-http`](https://www.npmjs.com/package/@eric8810/catcher-napi-http) | [![npm](https://img.shields.io/npm/v/@eric8810/catcher-napi-http.svg)](https://www.npmjs.com/package/@eric8810/catcher-napi-http) | Rust native via napi-rs (HTTP + SSE, typed wrappers) |
+| [`@eric8810/catcher-napi-ws`](https://www.npmjs.com/package/@eric8810/catcher-napi-ws) | [![npm](https://img.shields.io/npm/v/@eric8810/catcher-napi-ws.svg)](https://www.npmjs.com/package/@eric8810/catcher-napi-ws) | Rust native via napi-rs (WS, typed wrappers) |
 
 ### pub.dev
 

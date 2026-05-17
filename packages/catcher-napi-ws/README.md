@@ -5,7 +5,7 @@
 
 **Rust-powered WebSocket client** for Node.js via [napi-rs](https://napi.rs). Part of the [catcher](https://github.com/eric8810/catcher) toolkit.
 
-Wraps `catcher-ws`'s `WsTransport` — tokio-tungstenite + auto-reconnect + heartbeat, compiled to a native addon.
+Wraps `catcher-ws`'s `WsTransport` — tokio-tungstenite + auto-reconnect + heartbeat, compiled to a native addon. Includes typed TypeScript wrappers with auto-generated `.d.ts`.
 
 ## Install
 
@@ -13,57 +13,70 @@ Wraps `catcher-ws`'s `WsTransport` — tokio-tungstenite + auto-reconnect + hear
 npm install @eric8810/catcher-napi-ws
 ```
 
-Pre-built binaries available for Linux (x64/arm64), macOS (x64/arm64), and Windows (x64).
+Pre-built binaries available for Linux (x64 gnu/musl), macOS (x64/arm64), and Windows (x64).
 
 ## Usage
 
-```javascript
-const { JsWsClient } = require('@eric8810/catcher-napi-ws')
+```typescript
+import { WsClient } from '@eric8810/catcher-napi-ws'
+import type { WsEvent } from '@eric8810/catcher-napi-ws'
 
-const ws = new JsWsClient(
-  JSON.stringify({
+// Config as typed object (recommended) or JSON string
+const ws = new WsClient(
+  {
     urls: ['wss://echo.example.com'],
     reconnect: { initial_delay_ms: 500, max_delay_ms: 30000 },
     heartbeat: { interval_ms: 30000, adaptive: true },
-  }),
-  (eventJson) => {
-    const event = JSON.parse(eventJson)
+  },
+  (event: WsEvent) => {
     switch (event.type) {
       case 'Connected':
         console.log(`Connected to ${event.url} (${event.latency_ms}ms)`)
         break
       case 'Message':
-        console.log('Received:', event.data)
+        console.log('Received:', event.is_binary ? '(binary)' : Buffer.from(event.data_base64, 'base64').toString())
         break
       case 'Disconnected':
         console.log(`Disconnected: ${event.code} ${event.reason}`)
         break
+      case 'Reconnecting':
+        console.log(`Reconnecting attempt ${event.attempt} in ${event.delay_ms}ms`)
+        break
+      case 'HeartbeatRtt':
+        console.log(`RTT: ${event.rtt_ms}ms`)
+        break
       case 'Error':
-        console.error('WS Error:', event.message)
+        console.error('Error:', event.message)
         break
     }
-  }
+  },
 )
 
 ws.send('hello')
-// ...
+// later:
 ws.close()
 ```
 
+> **Note**: Do not call `send()` synchronously inside event callbacks — this can deadlock due to napi's single-threaded nature. Use `setImmediate` or `process.nextTick` to defer.
+
 ## API
 
-### `new JsWsClient(configJson: string, onEvent?: (eventJson: string) => void)`
+### `new WsClient(config: WsClientConfig | string, onEvent?: (event: WsEvent) => void)`
 
-Create a WebSocket client and connect. Events are delivered as JSON strings to the callback.
-
-#### Config JSON
+Create a WebSocket client and connect. Config is a typed object or JSON string. Events are delivered as **parsed objects** (not JSON strings). Supports both `snake_case` and `camelCase` field names.
 
 ```typescript
 interface WsClientConfig {
-  urls: string[]
-  reconnect?: { initial_delay_ms?: number; max_delay_ms?: number; backoff_multiplier?: number; max_attempts?: number }
-  heartbeat?: { interval_ms?: number; adaptive?: boolean; pong_timeout_ms?: number }
-  per_message_deflate?: boolean
+  urls: string[]                              // required
+  protocols?: string[]
+  headers?: Record<string, string>
+  per_message_deflate?: boolean               // default: false
+  deflate_threshold_bytes?: number            // default: 1024
+  handshake_timeout_ms?: number               // default: 15000
+  max_payload_bytes?: number                  // default: 67108864 (64MB)
+  reconnect?: ReconnectConfig
+  heartbeat?: HeartbeatConfig
+  race_count?: number                         // default: 1
 }
 ```
 
@@ -72,23 +85,31 @@ interface WsClientConfig {
 | Method | Signature |
 |--------|-----------|
 | `send(data)` | `(data: string) => void` |
-| `close()` | `() => void` |
+| `sendBinary(data)` | `(data: Buffer \| ArrayBuffer \| Uint8Array) => void` |
+| `close(code?, reason?)` | `(code?: number, reason?: string) => void` |
 
-### Event Types (JSON)
+### Event Types
+
+Events are delivered as typed objects (auto-parsed from JSON):
 
 | Event | Shape |
 |-------|-------|
-| Connected | `{ "type": "Connected", "url": "...", "latency_ms": 5 }` |
-| Disconnected | `{ "type": "Disconnected", "code": 1000, "reason": "..." }` |
-| Message | `{ "type": "Message", "data": "...", "is_binary": false }` |
-| Error | `{ "type": "Error", "message": "..." }` |
+| Connected | `{ type: 'Connected', url: string, latency_ms: number }` |
+| Disconnected | `{ type: 'Disconnected', code: number, reason: string }` |
+| Message | `{ type: 'Message', data_base64: string, is_binary: boolean }` |
+| Error | `{ type: 'Error', message: string }` |
+| Reconnecting | `{ type: 'Reconnecting', attempt: number, delay_ms: number }` |
+| HeartbeatRtt | `{ type: 'HeartbeatRtt', rtt_ms: number }` |
+
+> `data_base64` is the base64-encoded payload. Decode with `Buffer.from(event.data_base64, 'base64')`.
 
 ## Build from Source
 
 Requires Rust toolchain.
 
 ```bash
-npm run build
+npm run build       # napi build + tsup compile
+npm run build:ts    # tsup only (no Rust rebuild)
 ```
 
 ## License

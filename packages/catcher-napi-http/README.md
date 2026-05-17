@@ -3,9 +3,9 @@
 [![npm version](https://img.shields.io/npm/v/@eric8810/catcher-napi-http.svg)](https://www.npmjs.com/package/@eric8810/catcher-napi-http)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**Rust-powered HTTP client** for Node.js via [napi-rs](https://napi.rs). Part of the [catcher](https://github.com/eric8810/catcher) toolkit.
+**Rust-powered HTTP + SSE client** for Node.js via [napi-rs](https://napi.rs). Part of the [catcher](https://github.com/eric8810/catcher) toolkit.
 
-Wraps `catcher-http`'s `HttpTransport` — reqwest + retry + circuit breaker, compiled to a native addon.
+Wraps `catcher-http`'s `HttpTransport` — reqwest + retry + circuit breaker, compiled to a native addon. Includes typed TypeScript wrappers with auto-generated `.d.ts`.
 
 ## Install
 
@@ -13,48 +13,82 @@ Wraps `catcher-http`'s `HttpTransport` — reqwest + retry + circuit breaker, co
 npm install @eric8810/catcher-napi-http
 ```
 
-Pre-built binaries available for Linux (x64/arm64), macOS (x64/arm64), and Windows (x64).
+Pre-built binaries available for Linux (x64 gnu/musl), macOS (x64/arm64), and Windows (x64).
 
 ## Usage
 
-```javascript
-const { JsHttpClient } = require('@eric8810/catcher-napi-http')
+```typescript
+import { HttpClient } from '@eric8810/catcher-napi-http'
+import type { HttpClientConfig, SseEvent } from '@eric8810/catcher-napi-http'
 
-const client = new JsHttpClient(JSON.stringify({
+// Config as typed object (recommended) or JSON string
+const client = new HttpClient({
   base_url: 'https://api.example.com',
   connect_timeout_ms: 5000,
-  response_timeout_ms: 30000,
-  retry: { max_attempts: 3, backoff: 'Exponential' },
+  retry: { max_attempts: 3, backoff: 'Fixed' },
   circuit_breaker: { failure_threshold: 5, reset_timeout_ms: 30000 },
-}))
+})
 
 // GET
 const resp = await client.get('/users/1')
 console.log(resp.status, resp.body.toString())
 
 // POST
-const created = await client.post('/messages', Buffer.from(JSON.stringify({ text: 'hello' })), {
-  content_type: 'application/json',
+await client.post('/messages', Buffer.from('hello'), {
+  content_type: 'text/plain',
 })
 
 // Circuit breaker state
-console.log(client.circuit_breaker_state()) // "closed" | "open" | "half-open"
+console.log(client.circuitBreakerState()) // 'closed' | 'open' | 'half-open'
+
+// SSE (one-shot stream)
+import { SseStream } from '@eric8810/catcher-napi-http'
+
+const stream = new SseStream(
+  { url: 'https://stream.example.com/events' },
+  (event: SseEvent) => {
+    if (event.type === 'Line') console.log(event.data)
+  },
+)
+// later: stream.close()
+
+// SSE (auto-reconnect client)
+import { SseClient } from '@eric8810/catcher-napi-http'
+
+const sse = new SseClient(
+  {
+    url: 'https://stream.example.com/events',
+    reconnect: { max_retries: 10, initial_delay_ms: 1000 },
+  },
+  (event: SseEvent) => {
+    if (event.type === 'Line') console.log(event.data)
+  },
+)
 ```
 
 ## API
 
-### `new JsHttpClient(configJson: string)`
+### `new HttpClient(config: HttpClientConfig | string)`
 
-Create a client from a JSON config string. All fields are optional with sensible defaults.
+Create a client from a typed config object or JSON string. All fields are optional with sensible defaults. Supports both `snake_case` and `camelCase` field names.
 
 ```typescript
 interface HttpClientConfig {
   base_url?: string
-  connect_timeout_ms?: number
-  response_timeout_ms?: number
-  pool?: { keep_alive?: boolean; max_idle_per_host?: number }
-  retry?: { max_attempts?: number; backoff?: 'Fixed' | 'Exponential' | 'DecorrelatedJitter' }
-  circuit_breaker?: { failure_threshold?: number; reset_timeout_ms?: number }
+  connect_timeout_ms?: number      // default: 10000
+  response_timeout_ms?: number     // default: 30000
+  pool?: PoolConfig
+  tls?: TlsConfig
+  dns?: DnsConfig
+  retry?: RetryConfig
+  circuit_breaker?: CircuitBreakerConfig
+  max_concurrency?: number         // default: 50
+  default_headers?: Record<string, string>
+  hostname_override?: string
+  proxy?: ProxyConfig
+  redirect?: RedirectConfig
+  auth?: { username: string; password: string }
+  bearer_token?: string
 }
 ```
 
@@ -62,17 +96,21 @@ interface HttpClientConfig {
 
 | Method | Signature |
 |--------|-----------|
-| `get(url, options?)` | `async (url: string, options?: RequestOptions) => JsHttpResponse` |
-| `post(url, body?, options?)` | `async (url: string, body?: Buffer, options?: RequestOptions) => JsHttpResponse` |
-| `put(url, body?, options?)` | `async (url: string, body?: Buffer, options?: RequestOptions) => JsHttpResponse` |
-| `delete(url, options?)` | `async (url: string, options?: RequestOptions) => JsHttpResponse` |
-| `patch(url, body?, options?)` | `async (url: string, body?: Buffer, options?: RequestOptions) => JsHttpResponse` |
-| `circuit_breaker_state()` | `() => string` |
+| `get(url, options?)` | `async (url: string, options?: RequestOptions) => HttpResponse` |
+| `post(url, body?, options?)` | `async (url: string, body?: Buffer, options?: RequestOptions) => HttpResponse` |
+| `put(url, body?, options?)` | `async (url: string, body?: Buffer, options?: RequestOptions) => HttpResponse` |
+| `delete(url, options?)` | `async (url: string, options?: RequestOptions) => HttpResponse` |
+| `patch(url, body?, options?)` | `async (url: string, body?: Buffer, options?: RequestOptions) => HttpResponse` |
+| `circuitBreakerState()` | `() => 'closed' \| 'open' \| 'half-open'` |
+| `metrics()` | `() => Metrics` |
+| `executeStream(method, url, body?, options?, onChunk?)` | `(method: string, url: string, body?: Buffer, options?: RequestOptions, onChunk?: (event: StreamEvent) => void) => void` |
+| `setAdaptiveTimeout(min, max, mult, win)` | `(min: number, max: number, mult: number, win: number) => void` |
+| `cancelAll()` | `() => void` |
 
-### `JsHttpResponse`
+### `HttpResponse`
 
 ```typescript
-interface JsHttpResponse {
+interface HttpResponse {
   status: number
   headers: Record<string, string>
   body: Buffer
@@ -80,14 +118,31 @@ interface JsHttpResponse {
 }
 ```
 
-### `RequestOptions`
+### SSE
+
+| Class | Description |
+|-------|-------------|
+| `SseStream` | One-shot SSE stream (no auto-reconnect) |
+| `SseClient` | Long-lived SSE client with auto-reconnect |
 
 ```typescript
-interface RequestOptions {
-  headers?: Record<string, string>
-  timeout_ms?: number
-  content_type?: string
-}
+new SseStream(config: SseClientConfig | string, onEvent: (event: SseEvent) => void)
+new SseClient(config: SseClientConfig | string, onEvent: (event: SseEvent) => void)
+
+type SseEvent =
+  | { type: 'Line'; data: string }
+  | { type: 'Error'; message: string }
+  | { type: 'End' }
+```
+
+### `StreamEvent`
+
+```typescript
+type StreamEvent =
+  | { type: 'Headers'; status: number; headers: Record<string, string> }
+  | { type: 'Chunk'; data: string }  // base64 encoded
+  | { type: 'Done' }
+  | { type: 'Error'; message: string }
 ```
 
 ## Build from Source
@@ -95,7 +150,8 @@ interface RequestOptions {
 Requires Rust toolchain.
 
 ```bash
-npm run build
+npm run build       # napi build + tsup compile
+npm run build:ts    # tsup only (no Rust rebuild)
 ```
 
 ## License
