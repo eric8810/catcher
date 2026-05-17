@@ -248,7 +248,7 @@ async fn connect_once(
             let line = buffer[..newline_pos]
                 .trim_end_matches('\r')
                 .to_string();
-            buffer = buffer[newline_pos + 1..].to_string();
+            buffer.drain(..newline_pos + 1);
 
             match route_line(&line) {
                 RouteAction::Yield(l) => {

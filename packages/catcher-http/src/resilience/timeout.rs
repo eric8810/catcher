@@ -10,6 +10,8 @@ pub struct AdaptiveTimeout {
     min_timeout_ms: u64,
     max_timeout_ms: u64,
     multiplier: f64,
+    cached_p90: Option<u64>,
+    dirty: bool,
 }
 
 impl AdaptiveTimeout {
@@ -25,6 +27,8 @@ impl AdaptiveTimeout {
             min_timeout_ms,
             max_timeout_ms,
             multiplier,
+            cached_p90: None,
+            dirty: false,
         }
     }
 
@@ -34,26 +38,31 @@ impl AdaptiveTimeout {
             self.rtt_window.remove(0);
         }
         self.rtt_window.push(rtt_ms);
+        self.dirty = true;
     }
 
-    /// 计算当前应使用的超时
-    pub fn timeout_ms(&self) -> u64 {
+    /// 计算当前应使用的超时（惰性缓存：仅窗口变化时重算）
+    pub fn timeout_ms(&mut self) -> u64 {
         if self.rtt_window.is_empty() {
             return self.min_timeout_ms;
         }
 
-        let p90_idx = ((self.rtt_window.len() as f64) * 0.90).ceil() as usize - 1;
-        let p90_idx = p90_idx.min(self.rtt_window.len() - 1);
-        let mut sorted = self.rtt_window.clone();
-        sorted.sort_unstable();
-        let p90 = sorted[p90_idx];
+        if self.dirty {
+            let p90_idx = ((self.rtt_window.len() as f64) * 0.90).ceil() as usize - 1;
+            let p90_idx = p90_idx.min(self.rtt_window.len() - 1);
+            let mut sorted = self.rtt_window.clone();
+            sorted.sort_unstable();
+            self.cached_p90 = Some(sorted[p90_idx]);
+            self.dirty = false;
+        }
 
+        let p90 = self.cached_p90.unwrap_or(self.min_timeout_ms);
         let timeout = (p90 as f64 * self.multiplier) as u64;
         timeout.clamp(self.min_timeout_ms, self.max_timeout_ms)
     }
 
     /// 计算当前应使用的超时 (Duration)
-    pub fn compute(&self) -> Duration {
+    pub fn compute(&mut self) -> Duration {
         Duration::from_millis(self.timeout_ms())
     }
 
@@ -123,7 +132,7 @@ mod tests {
 
     #[test]
     fn timeout_defaults_to_min_when_empty() {
-        let t = AdaptiveTimeout::new(1000, 5000, 2.0, 10);
+        let mut t = AdaptiveTimeout::new(1000, 5000, 2.0, 10);
         assert_eq!(t.timeout_ms(), 1000);
     }
 

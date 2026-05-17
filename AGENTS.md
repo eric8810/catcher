@@ -1,6 +1,7 @@
 # AGENTS.md — 版本管理与发布规范
 
 > 本文件记录 catcher 项目的版本管理、CI/CD、发版流程，供开发者和 AI agent 遵循。
+> 代码编写规范详见 [RUST_STYLE_GUIDE.md](./RUST_STYLE_GUIDE.md)。
 
 ---
 
@@ -65,7 +66,7 @@ catcher-core → catcher-http / catcher-ws → catcher-ffi / catcher-uniffi / ca
 **流程**：
 1. `typecheck` — `pnpm typecheck`（所有 TS 包类型检查）
 2. `test` — `pnpm build:ts && pnpm test`（构建 + TS 单元测试）
-3. `rust-check` — `cargo check --workspace && cargo test --workspace`（Rust 编译 + 测试）
+3. `rust-check` — `cargo check --workspace && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace`（Rust 编译 + clippy lint + 测试）
 
 ### 2. Release Please（自动版本管理）
 
@@ -170,6 +171,7 @@ docs: 文档更新        → 不 bump
 test: 测试补充        → 不 bump
 refactor: 代码重构    → 不 bump
 ci: CI 配置更新       → 不 bump
+style: 代码风格调整    → 不 bump
 chore: 杂项           → 不 bump
 ```
 
@@ -181,13 +183,56 @@ chore: 杂项           → 不 bump
 - [ ] **Rust 依赖版本**：Cargo.toml 中 `catcher-core`/`catcher-http`/`catcher-ws` 的依赖 `version` 字段已更新
 - [ ] **CHANGELOG.md** 已更新，包含本版本所有变更
 - [ ] **编译验证**：`cargo check --workspace --all-targets` 零错误零警告
+- [ ] **Clippy 零警告**：`cargo clippy --workspace --all-targets -- -D warnings`
 - [ ] **Rust 测试**：`cargo test --workspace` 全部通过
+- [ ] **重复代码审查**：无新增跨模块重复函数（参考 RUST_STYLE_GUIDE.md）
 - [ ] **TS 构建**：`pnpm build:ts` 成功
 - [ ] **TS 测试**：`pnpm test` 全部通过
 - [ ] **E2E 测试**（可选）：`pnpm test:e2e` 全部通过
 - [ ] **文档一致性**：docs/ 中的版本号引用已更新（如符号数量、文件路径等）
 - [ ] **Git 状态干净**：无未提交变更
 - [ ] **Tag 创建并推送**
+
+---
+
+## Rust 编码强制规则
+
+> 编写或修改 Rust 代码时必须遵守。完整规范见 [RUST_STYLE_GUIDE.md](./RUST_STYLE_GUIDE.md)。
+
+### 代码结构
+- **禁止** `use xxx::*;` 通配符导入，必须显式列出每个导入项。
+- `lib.rs` 仅含 `pub mod` + `pub use`；`mod.rs` 仅含 `pub mod` + `pub use`，不含逻辑。
+- 禁止在多个 crate 中重复定义相同函数。公共 helper 归入 `catcher-core`。
+
+### 类型定义
+- 所有 Config 结构体必须遵循统一模板：`#[serde(default = "default_xxx")]` + 同名默认函数 + `impl Default`。
+- `default_true()` / `default_false()` 须从 `catcher-core` 公共模块导入，禁止在各 crate 中重复定义。
+- 需 JSON 序列化的 enum 统一使用 `#[serde(tag = "type")]`，禁止手动 `serde_json::json!` 构建。
+
+### 注释
+- 公共 API 文档注释 (`///` / `//!`) 统一使用**中文**。内部 `//` 行注释中英文均可，同文件保持一致。
+- 区段分隔线统一使用 `// ──`，禁止 `// ═══`。
+- **禁止**提交 Phase 追踪注释（`// Phase 3`）、需求编号注释（`// N-03`、`// A-01`）。
+
+### 错误处理
+- 所有可恢复错误使用 `catcher_core::CatcherError`。新增变体须同步更新 `category()` 方法。
+- 非测试代码**禁止**无注释的 `unwrap()`。
+- FFI 层 `CString::new()` 前必须 `replace('\0', "")` 去除 null 字节。
+
+### 并发
+- `std::sync::OnceLock` 初始化全局 `tokio::Runtime`，禁止使用其他 once-init 方案。
+- `Atomic*` 的 `Ordering`：纯统计计数器 → `Relaxed`；状态机字段 → `AcqRel`。
+- 禁止在 `.await` 期间持有 `std::sync::MutexGuard`。
+
+### FFI
+- 所有 FFI 函数入口必须检查指针是否为 null。
+- `CString::into_raw()` 转移所有权后，必须在文档中标注调用方释放责任。
+- **禁止** `Box::from_raw` + `mem::forget` 误用。直接解引用：`*(handle as *const usize)`。
+- 读 body 必须检查 `body.is_null() || body_len == 0`。
+
+### 测试
+- 单元测试置于 `#[cfg(test)] mod tests { }`。
+- 测试命名使用 `snake_case` 描述行为，**禁止**编号式命名（如 `test_14_retry_zero`）。
 
 ---
 
@@ -210,3 +255,6 @@ chore: 杂项           → 不 bump
 
 ### Q: Cargo.lock 冲突
 **A**: 版本 bump 后需在 `packages/` 目录下运行 `cargo check` 或 `cargo generate-lockfile` 更新 Cargo.lock，然后提交。
+
+### Q: clippy 报重复代码警告
+**A**: 检查是否在多个 crate 中定义了相同函数。公共 helper 应抽取到 `catcher-core`。参考 RUST_STYLE_GUIDE.md。

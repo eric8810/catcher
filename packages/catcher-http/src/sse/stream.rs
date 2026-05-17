@@ -84,7 +84,7 @@ impl SseStream {
             let line = self.buffer[..newline_pos]
                 .trim_end_matches('\r')
                 .to_string();
-            self.buffer = self.buffer[newline_pos + 1..].to_string();
+            self.buffer.drain(..newline_pos + 1);
             self.process_line(&line);
         }
     }

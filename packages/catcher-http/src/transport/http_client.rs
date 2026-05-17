@@ -27,7 +27,7 @@ use catcher_core::types::resilience::CbState;
 /// Phase 7: 增加 Semaphore 并发控制 + 优先级队列 (A-01)
 pub struct HttpTransport {
     client: ClientWithMiddleware,
-    config: HttpClientConfig,
+    config: Arc<HttpClientConfig>,
     circuit_breaker: Option<CircuitBreaker>,
     cancel_token: Arc<Mutex<tokio_util::sync::CancellationToken>>,
     metrics: MetricsCollector,
@@ -172,7 +172,7 @@ impl HttpTransport {
 
         Ok(Self {
             client: client_builder.build(),
-            config,
+            config: Arc::new(config),
             circuit_breaker,
             cancel_token: Arc::new(Mutex::new(tokio_util::sync::CancellationToken::new())),
             metrics,
@@ -215,7 +215,7 @@ impl HttpTransport {
 
         // Apply adaptive timeout if enabled and no per-request override
         if request.timeout_ms.is_none() {
-            if let Some(ref at) = *self.adaptive_timeout.lock().unwrap() {
+            if let Some(ref mut at) = *self.adaptive_timeout.lock().unwrap() {
                 request.timeout_ms = Some(at.timeout_ms());
             }
         }
@@ -429,7 +429,7 @@ impl HttpTransport {
         };
 
         let response = tokio::select! {
-            r = req.send() => r.map_err(|e| map_middleware_error_standalone(e, &self.config))?,
+            r = req.send() => r.map_err(|e| map_middleware_error_standalone(e, &*self.config))?,
             _ = global_token.cancelled() => {
                 chunk_callback(StreamEvent::Error("request cancelled".into()));
                 return Err(CatcherError::Internal("request cancelled".into()));
@@ -547,7 +547,7 @@ impl HttpTransport {
 /// Takes owned client + config to satisfy `'static` bounds.
 async fn execute_http_request(
     client: ClientWithMiddleware,
-    config: HttpClientConfig,
+    config: Arc<HttpClientConfig>,
     request: HttpRequest,
 ) -> Result<HttpResponse, CatcherError> {
     let start = Instant::now();
@@ -622,7 +622,7 @@ async fn execute_http_request(
     let response = req
         .send()
         .await
-        .map_err(|e| map_middleware_error_standalone(e, &config))?;
+        .map_err(|e| map_middleware_error_standalone(e, &*config))?;
 
     let status = response.status().as_u16();
     let headers: HashMap<String, String> = response

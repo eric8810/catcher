@@ -452,9 +452,7 @@ pub unsafe extern "C" fn catcher_http_multipart(
         Some(cb) => cb,
         None => return,
     };
-    let id = Box::from_raw(handle as *mut usize);
-    let id_val = *id;
-    std::mem::forget(id); // don't drop, handle stays valid
+    let id_val = *(handle as *const usize);
 
     let method_str = if method.is_null() {
         HttpMethod::POST
