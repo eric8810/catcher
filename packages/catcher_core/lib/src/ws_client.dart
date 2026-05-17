@@ -214,6 +214,14 @@ class CatcherWsClient {
           delayMs: json['delay_ms'] as int? ?? 0,
         );
       case 'Message':
+        // 优先读取 base64 编码的 data（Rust FFI 路径），回退兼容旧格式
+        final dataBase64 = json['data_base64'];
+        if (dataBase64 is String && dataBase64.isNotEmpty) {
+          return WsMessageEvent(
+            data: base64.decode(dataBase64),
+            isBinary: json['is_binary'] as bool? ?? false,
+          );
+        }
         final data = json['data'];
         final isBinary = json['is_binary'] as bool? ?? false;
         if (data is String) {

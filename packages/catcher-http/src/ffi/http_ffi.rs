@@ -21,6 +21,25 @@ fn response_to_json(resp: &crate::types::http::HttpResponse) -> String {
     }).to_string()
 }
 
+/// 将 HTTP 执行结果序列化为 FFI JSON。
+/// `CatcherError::HttpError`（4xx/5xx）转为正常 response JSON，调用方可读取 status code。
+fn http_result_to_json(result: Result<crate::types::http::HttpResponse, catcher_core::CatcherError>) -> String {
+    match result {
+        Ok(resp) => response_to_json(&resp),
+        Err(catcher_core::CatcherError::HttpError { status, body }) => {
+            use base64::Engine;
+            let body_b64 = base64::engine::general_purpose::STANDARD.encode(body.as_bytes());
+            serde_json::json!({
+                "status": status,
+                "headers": {},
+                "body_base64": body_b64,
+                "elapsed_ms": 0u64,
+            }).to_string()
+        }
+        Err(e) => error_json(&e.to_string()),
+    }
+}
+
 static REGISTRY: HandleRegistry<HttpTransport> = HandleRegistry::new();
 
 fn runtime() -> &'static tokio::runtime::Runtime {
@@ -117,10 +136,7 @@ pub unsafe extern "C" fn catcher_http_get(
                 ..Default::default()
             };
             let result = t.execute(request).await;
-            let json = match result {
-                Ok(resp) => response_to_json(&resp),
-                Err(e) => error_json(&e.to_string()),
-            };
+            let json = http_result_to_json(result);
             invoke_http_callback(callback, "http_result", json, ud);
         });
     }
@@ -152,10 +168,7 @@ pub unsafe extern "C" fn catcher_http_post(
                 ..Default::default()
             };
             let result = t.execute(request).await;
-            let json = match result {
-                Ok(resp) => response_to_json(&resp),
-                Err(e) => error_json(&e.to_string()),
-            };
+            let json = http_result_to_json(result);
             invoke_http_callback(callback, "http_result", json, ud);
         });
     }
@@ -204,10 +217,7 @@ pub unsafe extern "C" fn catcher_http_execute(
                 ..Default::default()
             };
             let result = t.execute(request).await;
-            let json = match result {
-                Ok(resp) => response_to_json(&resp),
-                Err(e) => error_json(&e.to_string()),
-            };
+            let json = http_result_to_json(result);
             invoke_http_callback(callback, "http_result", json, ud);
         });
     }
@@ -265,15 +275,24 @@ pub unsafe extern "C" fn catcher_http_execute_with_id(
             let (_rid, result) = t.execute_with_token(request_id, per_request_token, request).await;
             let json = match result {
                 Ok(resp) => {
-                    let body_b64 = {
-                        use base64::Engine;
-                        base64::engine::general_purpose::STANDARD.encode(&resp.body)
-                    };
+                    use base64::Engine;
+                    let body_b64 = base64::engine::general_purpose::STANDARD.encode(&resp.body);
                     serde_json::json!({
                         "status": resp.status,
                         "headers": resp.headers,
                         "body_base64": body_b64,
                         "elapsed_ms": resp.elapsed_ms,
+                        "request_id": request_id,
+                    }).to_string()
+                }
+                Err(catcher_core::CatcherError::HttpError { status, body }) => {
+                    use base64::Engine;
+                    let body_b64 = base64::engine::general_purpose::STANDARD.encode(body.as_bytes());
+                    serde_json::json!({
+                        "status": status,
+                        "headers": {},
+                        "body_base64": body_b64,
+                        "elapsed_ms": 0u64,
                         "request_id": request_id,
                     }).to_string()
                 }
@@ -517,10 +536,7 @@ pub unsafe extern "C" fn catcher_http_multipart(
                 ..Default::default()
             };
             let result = t.execute(request).await;
-            let json = match result {
-                Ok(resp) => response_to_json(&resp),
-                Err(e) => error_json(&e.to_string()),
-            };
+            let json = http_result_to_json(result);
             invoke_http_callback(callback, "http_result", json, ud);
         });
     }

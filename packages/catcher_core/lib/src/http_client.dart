@@ -1099,18 +1099,24 @@ class HttpResponse {
   });
 
   factory HttpResponse.fromJson(Map<String, dynamic> json) {
-    final rawBody = json['body'];
     List<int> bodyBytes;
-    if (rawBody is List) {
-      if (rawBody.isNotEmpty && rawBody.first is int) {
-        bodyBytes = rawBody.cast<int>();
+    // 优先读取 base64 编码的 body（Rust FFI 路径），回退兼容旧 JSON number array 格式
+    final rawBodyBase64 = json['body_base64'];
+    if (rawBodyBase64 is String && rawBodyBase64.isNotEmpty) {
+      bodyBytes = base64.decode(rawBodyBase64);
+    } else {
+      final rawBody = json['body'];
+      if (rawBody is List) {
+        if (rawBody.isNotEmpty && rawBody.first is int) {
+          bodyBytes = rawBody.cast<int>();
+        } else {
+          bodyBytes = [];
+        }
+      } else if (rawBody is String) {
+        bodyBytes = base64.decode(rawBody);
       } else {
         bodyBytes = [];
       }
-    } else if (rawBody is String) {
-      bodyBytes = base64.decode(rawBody);
-    } else {
-      bodyBytes = [];
     }
 
     return HttpResponse(
