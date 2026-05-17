@@ -90,6 +90,8 @@ flutter pub add catcher_core
 | 13 | [`13-dart-ffi.md`](./13-dart-ffi.md) | Dart FFI 绑定设计（dart:ffi ✅, flutter_rust_bridge ❌） |
 | 14 | [`14-workspace.md`](./14-workspace.md) | v0.3 workspace 架构总览 |
 | 15 | [`15-ffi-layering.md`](./15-ffi-layering.md) | FFI 分层策略：TS vs Rust 职责边界 + 待实现原生能力缺口 |
+| 16 | [`16-napi-ts-wrapper.md`](./16-napi-ts-wrapper.md) | napi TS wrapper 架构 — 类型安全、事件类型化、tsup 构建 |
+| 17 | [`17-dart-config-alignment.md`](./17-dart-config-alignment.md) | Dart FFI 配置类型对齐 — 默认值修正、SseReconnectConfig 重写、缺失字段补齐 |
 
 ## 阅读路径
 
