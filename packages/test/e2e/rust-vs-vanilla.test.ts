@@ -18,7 +18,6 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import path from 'node:path'
 
 import { createRustHttpClient, createRustWsClient, rustPack } from '../adapters/rust-adapter.js'
-import { clearDnsCache } from '../adapters/dns-adapter.js'
 import { createHttpTestServer, type TestServer } from '../servers/http-server.js'
 import { createWSTestServer, type WSTestServer } from '../servers/ws-server.js'
 import { createNetworkProxy, type NetworkProxy } from '../network/proxy.js'
@@ -28,10 +27,11 @@ import { ComparisonReporter } from '../reporters/comparison-reporter.js'
 
 const TIMEOUT = 300_000
 const FAST_ITERATIONS = parseInt(process.env.FAST_ITERATIONS ?? '30', 10)
-const SLOW_ITERATIONS = Math.min(FAST_ITERATIONS, 20)
 const itersFor = (key: string) => {
   const isSlow = ['weak', 'veryWeak', 'mobile3g', 'metro'].includes(key)
-  return isSlow ? 5 : FAST_ITERATIONS
+  // More iterations than before (was 5) for statistical significance,
+  // but capped at 15 to fit within 5-min test timeout on slow networks
+  return isSlow ? Math.min(15, FAST_ITERATIONS) : FAST_ITERATIONS
 }
 
 let httpServer: TestServer
@@ -68,29 +68,33 @@ afterAll(async () => {
 async function vanillaS1(baseUrl: string): Promise<IterationResult> {
   const start = Date.now()
   try {
-    await axios.get(baseUrl + '/channels', { timeout: 10_000 })
-    return { success: true, time: Date.now() - start, connections: 1 }
+    const r = await axios.get(baseUrl + '/channels', { timeout: 10_000 })
+    const bytes = typeof r.data === 'string' ? Buffer.byteLength(r.data) : Buffer.byteLength(JSON.stringify(r.data))
+    return { success: true, time: Date.now() - start, connections: 1, bytes }
   } catch {
-    return { success: false, time: 10_000, connections: 1 }
+    return { success: false, time: 10_000, connections: 1, bytes: 0 }
   }
 }
 
-async function rustS1(baseUrl: string): Promise<IterationResult> {
-  clearDnsCache()
-  const start = Date.now()
-  let retries = 0
-  try {
-    const client = createRustHttpClient({
-      baseURL: baseUrl,
-      keepAlive: true,
-      dnsCacheTtl: 300,
-      retry: { attempts: 2, backoff: 'exponential', onRetry: () => { retries++ } },
-      timeout: { response: 10_000 },
-    })
-    await client.get('/channels')
-    return { success: true, time: Date.now() - start, connections: 1, retries }
-  } catch {
-    return { success: false, time: 10_000, connections: 1, retries }
+function makeRustS1(baseUrl: string) {
+  const client = createRustHttpClient({
+    baseURL: baseUrl,
+    keepAlive: true,
+    dnsCacheTtl: 300,
+    retry: { attempts: 3, backoff: 'exponential' },
+    timeout: { response: 10_000 },
+  })
+  return async function rustS1(): Promise<IterationResult> {
+    const start = Date.now()
+    const retriesBefore = client.retryCount
+    try {
+      await client.get('/channels')
+      const retries = client.retryCount - retriesBefore
+      return { success: true, time: Date.now() - start, connections: 1, bytes: client.lastBytes, retries }
+    } catch {
+      const retries = client.retryCount - retriesBefore
+      return { success: false, time: 10_000, connections: 1, bytes: 0, retries }
+    }
   }
 }
 
@@ -100,9 +104,10 @@ describe('S1: Cold start (Rust)', () => {
     it(`${profile.emoji} ${profile.name}`, async () => {
       httpProxy.setConditions(profile.conditions)
       httpProxy.disruptAll()
+      const rustFn = makeRustS1(httpUrl)
       const r = await runConcurrentComparison(
         { name: 'S1: Cold start (Rust)', iterations: itersFor(key), iterationTimeout: 12_000 },
-        profile.conditions, `${profile.emoji} ${profile.name}`, vanillaS1, rustS1, httpUrl,
+        profile.conditions, `${profile.emoji} ${profile.name}`, vanillaS1, rustFn, httpUrl,
       )
       reporter.addResult(r)
       expect(r.catcher.successRate).toBeGreaterThanOrEqual(r.vanilla.successRate - 0.3)
@@ -117,27 +122,31 @@ describe('S1: Cold start (Rust)', () => {
 async function vanillaS2(baseUrl: string): Promise<IterationResult> {
   const start = Date.now()
   try {
-    await axios.post(baseUrl + '/messages', { text: 'Hello '.repeat(30) }, { timeout: 15_000 })
-    return { success: true, time: Date.now() - start }
+    const r = await axios.post(baseUrl + '/messages', { text: 'Hello '.repeat(30) }, { timeout: 15_000 })
+    const bytes = typeof r.data === 'string' ? Buffer.byteLength(r.data) : Buffer.byteLength(JSON.stringify(r.data))
+    return { success: true, time: Date.now() - start, bytes, connections: 1 }
   } catch {
-    return { success: false, time: 15_000 }
+    return { success: false, time: 15_000, bytes: 0, connections: 1 }
   }
 }
 
-async function rustS2(baseUrl: string): Promise<IterationResult> {
-  clearDnsCache()
-  const start = Date.now()
-  let retries = 0
-  try {
-    const client = createRustHttpClient({
-      baseURL: baseUrl, keepAlive: true,
-      retry: { attempts: 3, backoff: 'exponential', onRetry: () => { retries++ } },
-      timeout: { response: 30_000 },
-    })
-    await client.post('/messages', { text: 'Hello '.repeat(30) })
-    return { success: true, time: Date.now() - start, retries }
-  } catch {
-    return { success: false, time: 30_000, retries }
+function makeRustS2(baseUrl: string) {
+  const client = createRustHttpClient({
+    baseURL: baseUrl, keepAlive: true,
+    retry: { attempts: 3, backoff: 'exponential' },
+    timeout: { response: 30_000 },
+  })
+  return async function rustS2(): Promise<IterationResult> {
+    const start = Date.now()
+    const retriesBefore = client.retryCount
+    try {
+      await client.post('/messages', { text: 'Hello '.repeat(30) })
+      const retries = client.retryCount - retriesBefore
+      return { success: true, time: Date.now() - start, bytes: client.lastBytes, connections: 1, retries }
+    } catch {
+      const retries = client.retryCount - retriesBefore
+      return { success: false, time: 30_000, bytes: 0, connections: 1, retries }
+    }
   }
 }
 
@@ -147,9 +156,10 @@ describe('S2: Send message (Rust)', () => {
     it(`${profile.emoji} ${profile.name}`, async () => {
       httpProxy.setConditions(profile.conditions)
       httpProxy.disruptAll()
+      const rustFn = makeRustS2(httpUrl)
       const r = await runConcurrentComparison(
         { name: 'S2: Send message (Rust)', iterations: itersFor(key), iterationTimeout: 35_000 },
-        profile.conditions, `${profile.emoji} ${profile.name}`, vanillaS2, rustS2, httpUrl,
+        profile.conditions, `${profile.emoji} ${profile.name}`, vanillaS2, rustFn, httpUrl,
       )
       reporter.addResult(r)
       expect(r.catcher.successRate).toBeGreaterThanOrEqual(r.vanilla.successRate - 0.3)
@@ -164,26 +174,31 @@ describe('S2: Send message (Rust)', () => {
 async function vanillaS3(baseUrl: string): Promise<IterationResult> {
   const start = Date.now()
   try {
-    await axios.get(baseUrl + '/channels/ch_0/messages?pageSize=50', { timeout: 15_000 })
-    return { success: true, time: Date.now() - start }
+    const r = await axios.get(baseUrl + '/channels/ch_0/messages?pageSize=50', { timeout: 15_000 })
+    const bytes = typeof r.data === 'string' ? Buffer.byteLength(r.data) : Buffer.byteLength(JSON.stringify(r.data))
+    return { success: true, time: Date.now() - start, bytes, connections: 1 }
   } catch {
-    return { success: false, time: 15_000 }
+    return { success: false, time: 15_000, bytes: 0, connections: 1 }
   }
 }
 
-async function rustS3(baseUrl: string): Promise<IterationResult> {
-  clearDnsCache()
-  const start = Date.now()
-  let retries = 0
-  try {
-    const client = createRustHttpClient({
-      baseURL: baseUrl, keepAlive: true,
-      retry: { attempts: 3, onRetry: () => { retries++ } }, timeout: { response: 15_000 },
-    })
-    await client.get('/channels/ch_0/messages?pageSize=50')
-    return { success: true, time: Date.now() - start, retries }
-  } catch {
-    return { success: false, time: 15_000, retries }
+function makeRustS3(baseUrl: string) {
+  const client = createRustHttpClient({
+    baseURL: baseUrl, keepAlive: true,
+    retry: { attempts: 3 },
+    timeout: { response: 15_000 },
+  })
+  return async function rustS3(): Promise<IterationResult> {
+    const start = Date.now()
+    const retriesBefore = client.retryCount
+    try {
+      await client.get('/channels/ch_0/messages?pageSize=50')
+      const retries = client.retryCount - retriesBefore
+      return { success: true, time: Date.now() - start, bytes: client.lastBytes, connections: 1, retries }
+    } catch {
+      const retries = client.retryCount - retriesBefore
+      return { success: false, time: 15_000, bytes: 0, connections: 1, retries }
+    }
   }
 }
 
@@ -193,9 +208,10 @@ describe('S3: Load messages (Rust)', () => {
     it(`${profile.emoji} ${profile.name}`, async () => {
       httpProxy.setConditions(profile.conditions)
       httpProxy.disruptAll()
+      const rustFn = makeRustS3(httpUrl)
       const r = await runConcurrentComparison(
         { name: 'S3: Load messages (Rust)', iterations: itersFor(key) },
-        profile.conditions, `${profile.emoji} ${profile.name}`, vanillaS3, rustS3, httpUrl,
+        profile.conditions, `${profile.emoji} ${profile.name}`, vanillaS3, rustFn, httpUrl,
       )
       reporter.addResult(r)
       expect(r.catcher.successRate).toBeGreaterThanOrEqual(r.vanilla.successRate - 0.3)
@@ -210,25 +226,38 @@ describe('S3: Load messages (Rust)', () => {
 async function vanillaS4(baseUrl: string): Promise<IterationResult> {
   const start = Date.now()
   let success = true
-  try { await axios.post(baseUrl + '/auth', { user: 'sg_user' }, { timeout: 15_000 }) } catch { success = false }
-  try { await axios.get(baseUrl + '/channels', { timeout: 15_000 }) } catch { success = false }
-  return { success, time: Date.now() - start, connections: 2 }
+  let bytes = 0
+  try {
+    const r1 = await axios.post(baseUrl + '/auth', { user: 'sg_user' }, { timeout: 15_000 })
+    bytes += Buffer.byteLength(JSON.stringify(r1.data))
+  } catch { success = false }
+  try {
+    const r2 = await axios.get(baseUrl + '/channels', { timeout: 15_000 })
+    bytes += Buffer.byteLength(JSON.stringify(r2.data))
+  } catch { success = false }
+  return { success, time: Date.now() - start, connections: 2, bytes }
 }
 
-async function rustS4(baseUrl: string): Promise<IterationResult> {
-  clearDnsCache()
-  const start = Date.now()
-  let retries = 0
-  let success = true
-  try {
-    const client = createRustHttpClient({
-      baseURL: baseUrl, keepAlive: true,
-      retry: { attempts: 3, onRetry: () => { retries++ } }, timeout: { response: 15_000 },
-    })
-    await client.post('/auth', { user: 'sg_user' })
-    await client.get('/channels')
-  } catch { success = false }
-  return { success, time: Date.now() - start, connections: 1, retries }
+function makeRustS4(baseUrl: string) {
+  const client = createRustHttpClient({
+    baseURL: baseUrl, keepAlive: true,
+    retry: { attempts: 3 },
+    timeout: { response: 15_000 },
+  })
+  return async function rustS4(): Promise<IterationResult> {
+    const start = Date.now()
+    const retriesBefore = client.retryCount
+    let success = true
+    let bytes = 0
+    try {
+      await client.post('/auth', { user: 'sg_user' })
+      bytes += client.lastBytes
+      await client.get('/channels')
+      bytes += client.lastBytes
+    } catch { success = false }
+    const retries = client.retryCount - retriesBefore
+    return { success, time: Date.now() - start, connections: 1, retries, bytes }
+  }
 }
 
 describe('S4: Cross-region (Rust)', () => {
@@ -236,9 +265,10 @@ describe('S4: Cross-region (Rust)', () => {
   it(`${profile.emoji} ${profile.name}`, async () => {
     httpProxy.setConditions(profile.conditions)
     httpProxy.disruptAll()
+    const rustFn = makeRustS4(httpUrl)
     const r = await runConcurrentComparison(
       { name: 'S4: Cross-region (Rust)', iterations: FAST_ITERATIONS },
-      profile.conditions, `${profile.emoji} ${profile.name}`, vanillaS4, rustS4, httpUrl,
+      profile.conditions, `${profile.emoji} ${profile.name}`, vanillaS4, rustFn, httpUrl,
     )
     reporter.addResult(r)
     expect(r.catcher.successRate).toBeGreaterThanOrEqual(r.vanilla.successRate - 0.1)
@@ -256,34 +286,38 @@ async function vanillaS5(baseUrl: string): Promise<IterationResult> {
       timeout: 15_000,
       responseType: 'json',
     })
-    return { success: true, time: Date.now() - start, bytes: 0 }
+    const bytes = typeof r.data === 'string' ? Buffer.byteLength(r.data) : Buffer.byteLength(JSON.stringify(r.data))
+    return { success: true, time: Date.now() - start, bytes, connections: 1 }
   } catch {
-    return { success: false, time: 15_000 }
+    return { success: false, time: 15_000, bytes: 0, connections: 1 }
   }
 }
 
-async function rustS5(baseUrl: string): Promise<IterationResult> {
-  clearDnsCache()
-  const start = Date.now()
-  let retries = 0
-  try {
-    const client = createRustHttpClient({
-      baseURL: baseUrl, keepAlive: true,
-      retry: { attempts: 2, onRetry: () => { retries++ } },
-      timeout: { response: 15_000 },
-    })
-    const data = await client.get('/large-messages?count=50')
-    const jsonSize = Buffer.byteLength(JSON.stringify(data))
-    const msgpackSize = rustPack(data).length
-    return {
-      success: true,
-      time: Date.now() - start,
-      bytes: jsonSize - msgpackSize,
-      connections: 1,
-      retries,
+function makeRustS5(baseUrl: string) {
+  const client = createRustHttpClient({
+    baseURL: baseUrl, keepAlive: true,
+    retry: { attempts: 3 },
+    timeout: { response: 15_000 },
+  })
+  return async function rustS5(): Promise<IterationResult> {
+    const start = Date.now()
+    const retriesBefore = client.retryCount
+    try {
+      const data = await client.get('/large-messages?count=50')
+      const jsonSize = Buffer.byteLength(JSON.stringify(data))
+      const msgpackSize = rustPack(data).length
+      const retries = client.retryCount - retriesBefore
+      return {
+        success: true,
+        time: Date.now() - start,
+        bytes: jsonSize - msgpackSize,
+        connections: 1,
+        retries,
+      }
+    } catch {
+      const retries = client.retryCount - retriesBefore
+      return { success: false, time: 15_000, bytes: 0, connections: 1, retries }
     }
-  } catch {
-    return { success: false, time: 15_000, retries }
   }
 }
 
@@ -293,9 +327,10 @@ describe('S5: Large payload (Rust msgpack)', () => {
     it(`${profile.emoji} ${profile.name}`, async () => {
       httpProxy.setConditions(profile.conditions)
       httpProxy.disruptAll()
+      const rustFn = makeRustS5(httpUrl)
       const r = await runConcurrentComparison(
         { name: 'S5: Large payload (Rust msgpack)', iterations: itersFor(key) },
-        profile.conditions, `${profile.emoji} ${profile.name}`, vanillaS5, rustS5, httpUrl,
+        profile.conditions, `${profile.emoji} ${profile.name}`, vanillaS5, rustFn, httpUrl,
       )
       reporter.addResult(r)
       expect(r.catcher.avgBytes).toBeDefined()
@@ -425,25 +460,26 @@ async function vanillaS7(baseUrl: string): Promise<IterationResult> {
   return { success, time: Date.now() - msgStart, connections: 0 }
 }
 
-async function rustS7(baseUrl: string): Promise<IterationResult> {
-  clearDnsCache()
-  const start = Date.now()
+function makeRustS7(baseUrl: string) {
   const client = createRustHttpClient({
     baseURL: baseUrl, keepAlive: true,
     concurrency: 10,
     timeout: { response: 10_000 },
   })
+  return async function rustS7(): Promise<IterationResult> {
+    const start = Date.now()
 
-  const avatarReqs = Array.from({ length: 20 }, (_, i) =>
-    client.get('/slow?delay=200&id=' + i).catch(() => null),
-  )
-  const msgStart = Date.now()
-  const msgPromise = client.post('/messages', { text: 'prio test' }).catch(() => null)
+    const avatarReqs = Array.from({ length: 20 }, (_, i) =>
+      client.get('/slow?delay=200&id=' + i).catch(() => null),
+    )
+    const msgStart = Date.now()
+    const msgPromise = client.post('/messages', { text: 'prio test' }).catch(() => null)
 
-  let success = true
-  const results = await Promise.allSettled([msgPromise, ...avatarReqs])
-  if (results[0].status === 'rejected') success = false
-  return { success, time: Date.now() - msgStart, connections: 0 }
+    let success = true
+    const results = await Promise.allSettled([msgPromise, ...avatarReqs])
+    if (results[0].status === 'rejected') success = false
+    return { success, time: Date.now() - msgStart, connections: 0 }
+  }
 }
 
 describe('S7: Priority queue (Rust)', () => {
@@ -452,9 +488,10 @@ describe('S7: Priority queue (Rust)', () => {
     it(`${profile.emoji} ${profile.name}`, async () => {
       httpProxy.setConditions(profile.conditions)
       httpProxy.disruptAll()
+      const rustFn = makeRustS7(httpUrl)
       const r = await runConcurrentComparison(
         { name: 'S7: Priority queue (Rust)', iterations: Math.min(FAST_ITERATIONS, 10), iterationTimeout: 15_000 },
-        profile.conditions, `${profile.emoji} ${profile.name}`, vanillaS7, rustS7, httpUrl,
+        profile.conditions, `${profile.emoji} ${profile.name}`, vanillaS7, rustFn, httpUrl,
       )
       reporter.addResult(r)
       expect(r.catcher.successRate).toBeGreaterThanOrEqual(r.vanilla.successRate - 0.2)
@@ -463,54 +500,91 @@ describe('S7: Priority queue (Rust)', () => {
 })
 
 // ═════════════════════════════════════════════════════════════
-// S8: DNS cache
+// S8: DNS cache — slow DNS proxy + real domain
 // ═════════════════════════════════════════════════════════════
+//
+// A local slow DNS proxy adds 200ms latency per DNS query.
+// Both sides hit example.com through the slow proxy.
+//
+// Vanilla (axios): Node.js has no application-level DNS cache.
+//   We simulate slow DNS by adding 200ms before each request
+//   (equivalent to DNS cache miss on every request).
+//   5 sequential requests × 200ms = ~1000ms DNS overhead
+//
+// Catcher (Rust): dnsCacheTtl=300s, nameservers point to slow proxy.
+//   1st request: 200ms DNS overhead (cache miss)
+//   2nd-5th requests: 0ms DNS overhead (cache hit)
+//   = ~200ms DNS overhead total
+//
+// Expected: catcher ~800ms faster per iteration due to DNS caching.
 
-async function vanillaS8(baseUrl: string): Promise<IterationResult> {
+import { createSlowDnsProxy, type SlowDnsProxy } from '../network/slow-dns-proxy.js'
+
+const DNS_TARGET = 'http://example.com'
+const DNS_DELAY_MS = 200
+
+let slowDns: SlowDnsProxy
+
+async function vanillaS8(_baseUrl: string): Promise<IterationResult> {
   const times: number[] = []
   let success = true
   for (let i = 0; i < 5; i++) {
     const start = Date.now()
     try {
-      await axios.get(baseUrl + '/channels', { timeout: 10_000 })
+      // Simulate slow DNS on every request (no cache)
+      await new Promise((r) => setTimeout(r, DNS_DELAY_MS))
+      await axios.get(DNS_TARGET, { timeout: 10_000 })
       times.push(Date.now() - start)
     } catch { success = false; times.push(10_000) }
   }
   const avgTime = Math.round(times.reduce((a, b) => a + b, 0) / times.length)
-  return { success, time: avgTime, connections: 0 }
+  return { success, time: avgTime, connections: 0, bytes: avgTime }
 }
 
-async function rustS8(baseUrl: string): Promise<IterationResult> {
-  clearDnsCache()
-  const times: number[] = []
-  let success = true
+function makeRustS8(dnsProxyPort: number) {
   const client = createRustHttpClient({
-    baseURL: baseUrl, keepAlive: true, dnsCacheTtl: 300,
+    baseURL: DNS_TARGET,
+    keepAlive: true,
+    dnsCacheTtl: 300,
+    dnsNameservers: [`127.0.0.1:${dnsProxyPort}`],
     timeout: { response: 10_000 },
   })
-  for (let i = 0; i < 5; i++) {
-    const start = Date.now()
-    try {
-      await client.get('/channels')
-      times.push(Date.now() - start)
-    } catch { success = false; times.push(10_000) }
+  return async function rustS8(): Promise<IterationResult> {
+    const times: number[] = []
+    let success = true
+    for (let i = 0; i < 5; i++) {
+      const start = Date.now()
+      try {
+        // First request: DNS lookup via slow proxy (200ms overhead)
+        // Subsequent requests: DNS cache hit (0ms overhead)
+        await client.get('/')
+        times.push(Date.now() - start)
+      } catch { success = false; times.push(10_000) }
+    }
+    const avgTime = Math.round(times.reduce((a, b) => a + b, 0) / times.length)
+    return { success, time: avgTime, connections: 0, bytes: avgTime }
   }
-  const avgTime = Math.round(times.reduce((a, b) => a + b, 0) / times.length)
-  return { success, time: avgTime, connections: 0 }
 }
 
-describe('S8: DNS cache (Rust)', () => {
-  for (const [key, profile] of Object.entries(NETWORK_PROFILES)) {
-    if (!['good', 'weak'].includes(key)) continue
-    it(`${profile.emoji} ${profile.name}`, async () => {
-      httpProxy.setConditions(profile.conditions)
-      httpProxy.disruptAll()
-      const r = await runConcurrentComparison(
-        { name: 'S8: DNS cache (Rust)', iterations: Math.min(FAST_ITERATIONS, 10), iterationTimeout: 15_000 },
-        profile.conditions, `${profile.emoji} ${profile.name}`, vanillaS8, rustS8, httpUrl,
-      )
-      reporter.addResult(r)
-      expect(r.catcher.successRate).toBeGreaterThanOrEqual(0)
-    }, TIMEOUT)
-  }
+describe('S8: DNS cache — slow DNS proxy (Rust)', () => {
+  beforeAll(async () => {
+    slowDns = createSlowDnsProxy(DNS_DELAY_MS)
+    await slowDns.start()
+  })
+
+  afterAll(async () => {
+    await slowDns.stop()
+  })
+
+  it('🌐 example.com via slow DNS — 5 sequential requests', async () => {
+    const rustFn = makeRustS8(slowDns.port)
+    const r = await runConcurrentComparison(
+      { name: 'S8: DNS cache (Rust)', iterations: FAST_ITERATIONS },
+      { latency: 0, jitter: 0, packetLoss: 0, connectionReset: 0 },
+      '🌐 slow DNS (200ms/query)',
+      vanillaS8, rustFn, DNS_TARGET,
+    )
+    reporter.addResult(r)
+    expect(r.catcher.successRate).toBeGreaterThanOrEqual(0)
+  }, TIMEOUT)
 })

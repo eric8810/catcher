@@ -9,20 +9,28 @@
 import { HttpClient } from '@eric8810/catcher-napi-http'
 import { WsClient } from '@eric8810/catcher-napi-ws'
 import { pack, unpack } from '@eric8810/catcher-ws'
-import type { IterationResult } from '../harness.js'
 
 // ── HTTP ────────────────────────────────────────────────────
 
 export interface RustHttpConfig {
   baseURL: string
   keepAlive: boolean
-  dnsCacheTtl: number
-  retry: { attempts: number; backoff: string; onRetry?: () => void }
+  dnsCacheTtl?: number
+  dnsNameservers?: string[]
+  retry?: { attempts: number; backoff?: string }
   timeout: { response: number }
   concurrency?: number
 }
 
 export function createRustHttpClient(config: RustHttpConfig) {
+  const dnsConfig = (config.dnsCacheTtl || config.dnsNameservers)
+    ? {
+        cache_ttl_secs: config.dnsCacheTtl ?? 300,
+        nameservers: config.dnsNameservers ?? [],
+        host_mapping: {} as Record<string, string>,
+      }
+    : undefined
+
   const inner = new HttpClient(JSON.stringify({
     base_url: config.baseURL,
     connect_timeout_ms: 5000,
@@ -33,10 +41,11 @@ export function createRustHttpClient(config: RustHttpConfig) {
       max_idle_per_host: 10,
       idle_timeout_secs: 90,
     },
+    dns: dnsConfig ?? null,
     retry: config.retry
       ? {
           max_attempts: config.retry.attempts,
-          backoff: mapBackoff(config.retry.backoff),
+          backoff: mapBackoff(config.retry.backoff ?? 'exponential'),
           min_backoff_ms: 100,
           max_backoff_ms: 10_000,
           jitter: true,
@@ -46,12 +55,6 @@ export function createRustHttpClient(config: RustHttpConfig) {
     max_concurrency: config.concurrency ?? 50,
   }))
 
-  const retryDelta = (before: any, after: any) => {
-    const b = before?.http_retries ?? 0
-    const a = after?.http_retries ?? 0
-    return Math.max(0, a - b)
-  }
-
   const debugError = (method: string, path: string, error: unknown) => {
     if (process.env.DEBUG_RUST_E2E === '1') {
       const message = error instanceof Error ? error.message : String(error)
@@ -59,32 +62,59 @@ export function createRustHttpClient(config: RustHttpConfig) {
     }
   }
 
+  // Per-request counters — reset before each request, readable after
+  let lastBytes = 0
+  // Cumulative retry count from the Rust MetricsCollector (monotonically increasing)
+  let lastKnownRetries = 0
+
   return {
+    /** Bytes received in the last request (response body length) */
+    get lastBytes() { return lastBytes },
+    /**
+     * Cumulative number of retries since client creation.
+     * Read from `MetricsCollector::http_retries` after each request.
+     */
+    get retryCount() {
+      const snap = inner.metrics?.()
+      if (snap) lastKnownRetries = snap.http_retries ?? lastKnownRetries
+      return lastKnownRetries
+    },
     async get(path: string): Promise<any> {
-      const before = inner.metrics?.()
       try {
         const resp = await inner.get(path)
+        lastBytes = resp.body.length
+        // Sync retryCount from metrics
+        const snap = inner.metrics?.()
+        if (snap) lastKnownRetries = snap.http_retries ?? lastKnownRetries
         if (resp.status >= 400) throw new Error(`HTTP ${resp.status}`)
-        const after = inner.metrics?.()
-        const retries = retryDelta(before, after)
-        for (let i = 0; i < retries; i++) config.retry?.onRetry?.()
-        return JSON.parse(Buffer.from(resp.body).toString('utf-8'))
+        const body = Buffer.from(resp.body).toString('utf-8')
+        try { return JSON.parse(body) } catch { return body }
       } catch (e) {
+        lastBytes = 0
+        // Sync retryCount from metrics even on failure
+        const snap = inner.metrics?.()
+        if (snap) lastKnownRetries = snap.http_retries ?? lastKnownRetries
         debugError('GET', path, e)
         throw e
       }
     },
     async post(path: string, body: unknown): Promise<any> {
-      const before = inner.metrics?.()
       try {
         const json = JSON.stringify(body)
+        const reqBytes = Buffer.byteLength(json)
         const resp = await inner.post(path, Buffer.from(json), { content_type: 'application/json' })
+        lastBytes = reqBytes + resp.body.length
+        // Sync retryCount from metrics
+        const snap = inner.metrics?.()
+        if (snap) lastKnownRetries = snap.http_retries ?? lastKnownRetries
         if (resp.status >= 400) throw new Error(`HTTP ${resp.status}`)
-        const after = inner.metrics?.()
-        const retries = retryDelta(before, after)
-        for (let i = 0; i < retries; i++) config.retry?.onRetry?.()
-        return JSON.parse(Buffer.from(resp.body).toString('utf-8'))
+        const raw = Buffer.from(resp.body).toString('utf-8')
+        try { return JSON.parse(raw) } catch { return raw }
       } catch (e) {
+        lastBytes = 0
+        // Sync retryCount from metrics even on failure
+        const snap = inner.metrics?.()
+        if (snap) lastKnownRetries = snap.http_retries ?? lastKnownRetries
         debugError('POST', path, e)
         throw e
       }
