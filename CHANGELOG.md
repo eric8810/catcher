@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file. See [release-please](https://github.com/googleapis/release-please) for automated management.
 
+## 0.3.3 (2026-07-20)
+
+### 🐛 Bug Fixes
+
+- **Linux native addon loading (critical)**: `native.ts` used `platform-arch` format (e.g., `linux-x64`) but napi prepublish generates files with full triple names (e.g., `linux-x64-gnu`). This caused all Linux users to get "native addon not found" errors. Fixed by adding libc suffix detection and multiple fallback path patterns.
+
 ## 0.3.2 (2026-07-20)
 
 ### 🐛 Bug Fixes
