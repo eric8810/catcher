@@ -54,7 +54,7 @@
 
 | 场景 | catcher-web 覆盖 | 建议 |
 |------|:--------------:|------|
-| WKWebView 第三方 Cookie 阻止 | ❌ | `credentials: 'include'` 可能被静默忽略 |
+| WKWebView 第三方 Cookie 阻止 | ❌ | `credentials: 'include'` 可能被静默忽略 [1] |
 | WKWebView CORS 严格模式 | ⚠️ | CORS 头必须完整 |
 | Android WebView Cookie 同步 | ❌ | CookieManager 需 flush |
 | Web Worker 中 `fetch` | ❌ | catcher-web 能否在 Worker 中使用 |
@@ -69,8 +69,8 @@
 
 | 场景 | 建议 |
 |------|------|
-| Alpine Linux (musl libc) | musl 的 DNS 解析行为与 glibc 不同（无 `search domains` 自动补全） |
-| Docker DNS (127.0.0.11) | 内置 DNS 有并发限制（~30 并发查询） |
+| Alpine Linux (musl libc) | musl 的 DNS 解析行为与 glibc 不同（无 `search domains` 自动补全）[2] |
+| Docker DNS (127.0.0.11) | 内置 DNS 有并发限制（~30 并发查询）[3] |
 | Docker 网络模式 (bridge/host/none) | host 模式下 `localhost` 可达宿主机服务 |
 | Docker Compose 服务名解析 | DNS 名如 `http://api:8080` 不含 `.`，非 FQDN |
 
@@ -92,3 +92,11 @@
 3. **Docker DNS 并发限制** — 127.0.0.11 在大量并发 DNS 时返回错误
 4. **macOS App Sandbox** — 网络客户端 entitlement 文档
 5. **多进程 fork 安全** — 连接池在 fork 后的行为
+
+---
+
+## 引用来源
+
+1. WebKit Bugzilla #200857, "WKWebView does not include cookies/credentials in cross-origin requests," https://bugs.webkit.org/show_bug.cgi?id=200857
+2. BellSoft, "Solving DNS issues in musl," https://bell-sw.com/blog/how-to-deal-with-alpine-dns-issues/ ; and "Why Lowering ndots Breaks Alpine Pods (But Not Debian)," https://dev.to/bianbbc87/why-lowering-ndots-breaks-alpine-pods-but-not-debian-a-deep-dive-into-glibc-vs-musl-resolvers-1lhb
+3. Docker, "Networking overview — embedded DNS server (127.0.0.11)," https://docs.docker.com/engine/network/

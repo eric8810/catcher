@@ -83,12 +83,12 @@ catcher 当前已支持 HTTP 代理和 SOCKS5 代理。但生产环境中代理�
 
 | 负载均衡器 | 典型行为 | catcher 影响 |
 |-----------|---------|-------------|
-| AWS Classic ELB | 60s idle timeout，可配置 | keepAlive 需 < 60s |
-| AWS ALB | HTTP/2 aware，支持 gRPC | ALB 可能在空闲 60s 后断开 |
-| AWS NLB | TCP 层，无 HTTP 语义 | 不感知 HTTP keepAlive，由后端决定 |
-| Nginx | `keepalive_timeout` 默认 75s | 可能与 client keepalive 不同步 |
-| HAProxy | `timeout client` / `timeout server` | 可能两端独立断开 |
-| Envoy (Service Mesh) | Sidecar 模式，每个 Pod 一个代理 | 连接池在 sidecar 层生效 |
+| AWS Classic ELB | 60s idle timeout，可配置 [1] | keepAlive 需 < 60s |
+| AWS ALB | HTTP/2 aware，支持 gRPC [2] | ALB 可能在空闲 60s 后断开 |
+| AWS NLB | TCP 层，无 HTTP 语义 [3] | 不感知 HTTP keepAlive，由后端决定 |
+| Nginx | `keepalive_timeout` 默认 75s [4] | 可能与 client keepalive 不同步 |
+| HAProxy | `timeout client` / `timeout server` [5] | 可能两端独立断开 |
+| Envoy (Service Mesh) | Sidecar 模式，每个 Pod 一个代理 [6] | 连接池在 sidecar 层生效 |
 
 | 场景 | catcher 覆盖 | 建议 |
 |------|:----------:|------|
@@ -116,7 +116,7 @@ catcher 当前已支持 HTTP 代理和 SOCKS5 代理。但生产环境中代理�
 |------|------|:----------:|------|
 | Pod IP 变化 | Pod 重启后 IP 改变 | ❌ | DNS cache 需及时刷新 |
 | 服务网格 sidecar | Envoy/Linkerd 拦截所有流量 | ❌ | 连接池在 sidecar 层双重叠加问题 |
-| 容器 DNS 超时 | Alpine musl DNS 并发限制 | ❌ | 验证 DNS 超时不阻塞请求 |
+| 容器 DNS 超时 | Alpine musl DNS 并发限制 [8] | ❌ | 验证 DNS 超时不阻塞请求 |
 | 资源限制 (CPU throttling) | K8s CPU limit 导致超时 | ❌ | 超时类错误的 retry 策略验证 |
 | OOM Kill | 被 K8s kill 时的 graceful shutdown | ❌ | 进行中请求的状态（由 OS 处理） |
 
@@ -126,7 +126,7 @@ catcher 当前已支持 HTTP 代理和 SOCKS5 代理。但生产环境中代理�
 |------|:----------:|------|
 | CDN 回源失败 | CDN 返回 5xx，源站正常 | ⚠️ | 验证 CB 作用域是 CDN 节点还是源站 |
 | 多 CDN 故障切换 | 主 CDN 故障→备用 CDN | ❌ | 需要 DNS 重解析或多域名支持 |
-| Edge Function 超时 | Cloudflare Workers 有 30s CPU 限制 | ❌ | 超时后 SSE 流中断 |
+| Edge Function 超时 | Cloudflare Workers 有 30s CPU 限制 [7] | ❌ | 超时后 SSE 流中断 |
 | 边缘节点回源延迟 | 冷启动 + 回源慢 | ⚠️ | 首次连接 RTT 异常高 |
 
 ---
@@ -147,7 +147,7 @@ catcher 当前已支持 HTTP 代理和 SOCKS5 代理。但生产环境中代理�
 | 场景 | 延迟 | catcher 覆盖 | 建议 |
 |------|------|:----------:|------|
 | GEO 卫星 | 500-600ms RTT | ⚠️ `response_timeout_ms` | 默认超时可能不够 |
-| LEO 卫星 (Starlink) | 20-100ms RTT, 高抖动 | ⚠️ | 验证 adaptive timeout 对高抖动的适应性 |
+| LEO 卫星 (Starlink) | 20-100ms RTT, 高抖动 [9] | ⚠️ | 验证 adaptive timeout 对高抖动的适应性 |
 | 偏远 3G/2G | 200-2000ms RTT | ⚠️ (已有部分测试) | 验证 retry min_backoff 是否仍为 500ms |
 
 ### B5.3 单向/间歇网络
@@ -193,3 +193,18 @@ catcher 的 E2E 测试已覆盖 7 种预设网络条件（good→metro），以�
 12. **MTU 变化（VPN/PPPoE）** — 大 payload 分片问题
 13. **LEO 卫星高抖动** — adaptive timeout 调优
 14. **Black hole 路由** — 数据包静默丢弃的超时策略
+
+---
+
+## 引用来源
+
+1. AWS, "Configure the idle connection timeout for your Classic Load Balancer," https://docs.aws.amazon.com/elasticloadbalancing/latest/classic/config-idle-timeout.html
+2. AWS, "Application Load Balancer attributes," https://docs.aws.amazon.com/elasticloadbalancing/latest/application/edit-load-balancer-attributes.html
+3. AWS, "Network Load Balancer target groups health checks," https://docs.aws.amazon.com/elasticloadbalancing/latest/network/target-group-health-checks.html
+4. Nginx, "Module ngx_http_proxy_module — proxy_read_timeout," https://nginx.org/en/docs/http/ngx_http_proxy_module.html
+5. HAProxy, "timeout client / timeout server documentation," https://docs.haproxy.org/
+6. Envoy, "Service Mesh sidecar architecture," https://www.envoyproxy.io/docs/
+7. Cloudflare, "Workers Limits — CPU time limit (default 30s)," https://developers.cloudflare.com/workers/platform/limits/
+8. K3s issue #6132, "DNS resolution in alpine (musl) based containers fails," https://github.com/k3s-io/k3s/issues/6132 ; and "The ndots:5 Tax" (K8s DNS performance), https://loke.dev/blog/kubernetes-dns-ndots-performance
+9. Packetstorm, "Starlink Satellite Internet in 2026: Bandwidth, Latency, and Packet Loss Analyzed," https://packetstorm.com/starlink-satellite-internet-in-2026-bandwidth-latency-and-packet-loss-analyzed/ ; and APNIC Labs, "Measuring Starlink Protocol Performance," https://labs.apnic.net/presentations/store/2025-05-07-starlink-lacnic.pdf
+10. Anders Trier, "My ISP Is Killing My Idle SSH Sessions. Yours Might Be Too." (CGNAT session timeout), https://anderstrier.dk/2021/01/11/my-isp-is-killing-my-idle-ssh-sessions-yours-might-be-too/

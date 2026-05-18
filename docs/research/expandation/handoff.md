@@ -29,9 +29,11 @@ catcher 是一个跨平台网络韧性库（HTTP + WebSocket + SSE），目标�
 | 来源 | 比重 | 具体方法 |
 |------|:----:|---------|
 | 内部设计文档 | 40% | 精读全部 `docs/arch-rs/`、`docs/arch-ts/`、`docs/plan/`、`docs/issues/`，画出能力边界 |
-| Web 搜索 | 35% | Google/textise dot iitty 搜索 RFC、竞品 issue tracker、生产事故 postmortem、社区讨论 |
-| 竞品分析 | 15% | reqwest/axios/OkHttp/ws 库的 issue tracker 和测试套件 |
-| 协议规范 | 10% | RFC 6455 (WS)、RFC 7540 (HTTP/2)、W3C SSE、RFC 8305 (Happy Eyeballs) |
+| Web 搜索 | 35% | 搜索 RFC、竞品 issue tracker（reqwest#2283, tokio-tungstenite#35, ws#1617）、生产事故 postmortem（Mike Talbot SSE）、社区讨论（Stack Overflow, HN） |
+| 竞品分析 | 15% | reqwest / axios / OkHttp / ws 库的 issue tracker 和测试套件 |
+| 协议规范 | 10% | RFC 7231 (HTTP/1.1), RFC 7540 (HTTP/2), RFC 6455 (WebSocket), RFC 8305 (Happy Eyeballs), W3C SSE, OWASP CRLF Injection |
+
+> 所有外部引用来源的完整索引详见 `00-summary.md` 第七节。
 
 ### 2.2 分析方法
 

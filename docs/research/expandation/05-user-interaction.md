@@ -111,3 +111,12 @@ catcher 的 E2E 测试已覆盖 `good`/`weak`/`veryWeak`/`metro`/`highLatency`/`
 5. **连接建立时 DNS/TLS 极端慢** — 超时覆盖范围验证
 6. **重连与手动 close 竞态** — close 必须优先
 7. **null 回调/参数** — FFI 边界健壮性
+
+---
+
+## 引用来源
+
+1. AWS Architecture Blog, "Exponential Backoff And Jitter" (thundering herd mitigation), https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/
+2. tokio-tungstenite Issue #35, "WebSocketStream Sink implementation doesn't apply back-pressure" (send queue unbounded), https://github.com/snapview/tokio-tungstenite/issues/35
+3. OneUptime, "How to Fix 'Memory Leak' Issues in WebSocket Servers" (event listener accumulation, timer leak), https://oneuptime.com/blog/post/2026-01-24-websocket-memory-leak-issues/view
+4. "The WebSocket Connection Leak That Cost Us $40K in AWS Bills," https://javascript.plainenglish.io/the-websocket-connection-leak-that-cost-us-40k-in-aws-bills-0871a61acdaa

@@ -186,7 +186,35 @@
 
 ---
 
-## 六、结论
+## 七、引用来源总索引
+
+各阶段详细报告均包含"引用来源"章节。以下为跨报告的核心外部来源汇总：
+
+| # | 来源 | 类型 | 涉及阶段 | 关键主张 |
+|:--:|------|:----:|:------:|---------|
+| 1 | RFC 7231 §6.5.7 | 标准 | 01, 06 | HTTP 408 是 keepalive race 信号 |
+| 2 | RFC 8305 (Happy Eyeballs) | 标准 | 01, 02 | IPv6→IPv4 快速回退算法 |
+| 3 | reqwest#2283 | Issue | 01 | HTTP/2 升级后超时问题 |
+| 4 | tokio-tungstenite#35 | Issue | 01, 05 | WS send 队列无背压导致 OOM |
+| 5 | ws#1617 | Issue | 01 | perMessageDeflate zlib 内存泄漏 |
+| 6 | Mike Talbot SSE Post (dev.to) | Postmortem | 01 | SSE 被企业代理缓冲的生产事故 |
+| 7 | AWS ELB idle timeout docs | 文档 | 02 | ELB 默认 60s idle timeout |
+| 8 | Nginx proxy_read_timeout docs | 文档 | 02 | Nginx WebSocket 代理默认 60s 断开 |
+| 9 | Anders Trier CGNAT Post | Blog | 02 | ISP CGNAT 在 60-120s 后清除映射 |
+| 10 | Cloudflare Workers Limits | 文档 | 02 | Workers 默认 30s CPU 限制 |
+| 11 | K3s#6132 / ndots:5 Tax | Issue+Blog | 02, 04 | Alpine musl DNS 并发和 ndots 问题 |
+| 12 | Android Doze docs | 文档 | 03 | Doze 模式下网络访问被限制到维护窗口 |
+| 13 | Stack Overflow iOS background | 社区 | 03 | iOS 13+ 后台 30s 限制 |
+| 14 | WebKit Bugzilla #200857 | Bug | 04, 06 | WKWebView 跨域 credentials 被静默丢弃 |
+| 15 | BellSoft musl DNS | Blog | 04 | musl DNS resolver 与 glibc 行为差异 |
+| 16 | OWASP CRLF Injection | 安全标准 | 06 | HTTP header 注入攻击向量 |
+| 17 | CVE-2024-48924 (MessagePack DoS) | CVE | 06 | msgpack 反序列化 DoS（hash collisions + stack overflow） |
+| 18 | AWS Backoff & Jitter Blog | Blog | 05 | thundering herd 问题及 jitter 缓解 |
+| 19 | APNIC/Packetstorm Starlink | 研究 | 02 | LEO 卫星 RTT 25-65ms, 15s 周期性抖动 |
+
+---
+
+## 八、结论
 
 本次调研通过 6 个维度、42+ 个细分领域，系统性地识别了 catcher 当前设计中未覆盖的** 25 个高优先级**和 **16 个中优先级**场景。
 

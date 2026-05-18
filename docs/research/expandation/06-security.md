@@ -46,7 +46,7 @@
 | 场景 | 建议 |
 |------|------|
 | 通过 HTTP 代理发送请求 | 代理可能被投毒，但 catcher 作为客户端不直接受影响 |
-| 自定义 headers 注入 `\r\n` | 验证 headers value 不允许 CRLF (防止 HTTP Response Splitting) |
+| 自定义 headers 注入 `\r\n` | 验证 headers value 不允许 CRLF (防止 HTTP Response Splitting) [1] |
 | URL 中注入 `\r\n` | 验证 URL 参数过滤 CRLF |
 
 ### F2.2 SSRF (Server-Side Request Forgery)
@@ -97,8 +97,8 @@ catcher 作为客户端库，SSRF 是调用方（服务端代码）的职责。�
 
 | 场景 | catcher 覆盖 | 建议 |
 |------|:----------:|------|
-| 恶意超大数据包 | ⚠️ `rmp_serde` 无大小限制 | 需增加 `max_unpack_size` 限制 |
-| 递归嵌套攻击 | ❌ | 需增加 `max_nesting_depth` 限制 |
+| 恶意超大数据包 | ⚠️ `rmp_serde` 无大小限制 [2] | 需增加 `max_unpack_size` 限制 |
+| 递归嵌套攻击 | ❌ | 需增加 `max_nesting_depth` 限制 [2] |
 | 类型混淆 | ✅ serde 类型安全 | 验证反序列化失败 → DecodeError |
 | ext 类型注入 | ❌ | msgpack ext 类型可能触发意外行为 |
 
@@ -132,3 +132,12 @@ catcher 作为客户端库，SSRF 是调用方（服务端代码）的职责。�
 5. **并发 FFI 调用安全** — 多线程同时调用 `catcher_http_execute`
 6. **callback 单次触发** — 验证 use-after-free 不导致 callback 多调
 7. **DNS rebinding 文档** — 建议调用方 `beforeRedirect` 过滤内网 IP
+
+---
+
+## 引用来源
+
+1. OWASP, "CRLF Injection," https://owasp.org/www-community/vulnerabilities/CRLF_Injection ; and OWASP, "HTTP Response Splitting," https://owasp.org/www-community/attacks/HTTP_Response_Splitting
+2. CVE-2024-48924, "MessagePack-CSharp DoS via hash collisions and stack overflow during deserialization," https://nvd.nist.gov/vuln/detail/CVE-2024-48924 — 同类问题适用于所有 msgpack 实现（含 Rust `rmp-serde`），攻击向量包括超大数据包和深度嵌套结构
+3. RFC 7231 §6.5.7, "408 Request Timeout — keepalive race condition signal," https://datatracker.ietf.org/doc/html/rfc7231#section-6.5.7
+4. Palo Alto Networks, "What Is DNS Rebinding?" https://www.paloaltonetworks.com/cyberpedia/what-is-dns-rebinding

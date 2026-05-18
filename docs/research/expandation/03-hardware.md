@@ -21,8 +21,8 @@
 
 | 平台 | 限制 | catcher 影响 |
 |------|------|-------------|
-| iOS 后台 | 30 秒后台执行时间 | 长连接/SSE 可能被挂起，恢复后连接已断开 |
-| Android Doze | 网络访问受限（维护窗口） | 维持的连接可能超时 |
+| iOS 后台 | 30 秒后台执行时间 | 长连接/SSE 可能被挂起，恢复后连接已断开 [1] |
+| Android Doze | 网络访问受限（维护窗口）[2] | 维持的连接可能超时 |
 | iOS Low Data Mode | 减少网络使用 | 无影响（客户端库不感知） |
 | Android Data Saver | 限制后台数据 | 前台应用不受限，但后台 Service 受限 |
 
@@ -77,3 +77,11 @@ catcher 当前支持的 Rust 架构（通过 napi-rs）：
 2. **移动 OS 后台限制** — SSE/WS 长连接在 iOS/Android 后台行为的文档说明
 3. **网络类型切换后的重连** — 确保不继承旧网络的退避状态
 4. **WiFi 漫游/BSS Transition** — 短暂丢包不应触发重连
+
+---
+
+## 引用来源
+
+1. Stack Overflow, "iOS app get killed in background if spend more than 30 seconds," https://stackoverflow.com/questions/60704085/ios-app-get-killed-in-background-if-spend-more-than-30-seconds-ios-13-mostly
+2. Android Developers, "Doze mode — network access suspension and maintenance windows," https://developer.android.com/training/monitoring-device-state/doze-standby
+3. Stack Overflow, "iOS reachability detect network changes when app brought to foreground," https://stackoverflow.com/questions/29922026/does-ios-reachability-detect-network-changes-when-app-is-brought-to-foreground
