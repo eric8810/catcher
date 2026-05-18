@@ -7,6 +7,34 @@
 
 Wraps `catcher-ws`'s `WsTransport` — tokio-tungstenite + auto-reconnect + heartbeat, compiled to a native addon. Includes typed TypeScript wrappers with auto-generated `.d.ts`.
 
+## ⚠️ Breaking Changes (0.3.0)
+
+> **Migrate from 0.2.x → 0.3.x** — see [napi API docs](https://github.com/eric8810/catcher/blob/master/docs/user-manual/api/napi.md) for full details.
+
+| Change | Before | After |
+|--------|--------|-------|
+| Entry point | `client.js` / `client.d.ts` | `dist/client.js` / `dist/client.d.ts` |
+| Config format | `JSON.stringify(config)` only | Typed object **or** JSON string |
+| Class name | `JsWsClient` | `WsClient` |
+| Callback events | Raw JSON strings, need `JSON.parse()` | Typed objects, auto-parsed |
+| Message event data | `event.data` (raw) | `event.data_base64` (base64 encoded) |
+| Default `handshake_timeout_ms` | `10000` | `15000` |
+| Default `per_message_deflate` | `true` | `false` |
+| Default `initial_delay_ms` | `1000` | `500` |
+| camelCase fields | Not supported | `#[serde(alias)]` — both `snake_case` and `camelCase` accepted |
+
+```diff
+- const ws = new WsClient(JSON.stringify(config), (eventJson) => {
+-   const event = JSON.parse(eventJson)
+-   console.log(event.data)
++ import { WsClient } from '@eric8810/catcher-napi-ws'
++ const ws = new WsClient(config, (event) => {
++   if (event.type === 'Message') {
++     console.log(Buffer.from(event.data_base64, 'base64').toString())
++   }
+})
+```
+
 ## Install
 
 ```bash

@@ -50,7 +50,7 @@ class CatcherHttpClient {
 | 参数 | 类型 | 默认 | 说明 |
 |------|------|------|------|
 | `maxAttempts` | `int` | `3` | 最多尝试次数 |
-| `backoff` | `String` | `'exponential'` | `'fixed'` 或 `'exponential'` |
+| `backoff` | `String` | `'fixed'` | `'fixed'` 或 `'exponential'` |
 
 ### CircuitBreakerConfig
 
@@ -87,7 +87,7 @@ final client = CatcherHttpClient(HttpClientConfig(
   baseUrl: 'https://api.example.com',
   connectTimeoutMs: 5000,
   responseTimeoutMs: 30000,
-  retry: RetryConfig(maxAttempts: 3, backoff: 'exponential'),
+  retry: RetryConfig(maxAttempts: 3, backoff: 'fixed'),
   circuitBreaker: CircuitBreakerConfig(
     failureThreshold: 5,
     resetTimeoutMs: 30000,
@@ -237,15 +237,19 @@ ws.dispose();      // 释放 WebSocket 客户端 + Rust handle
 
 ## 与 Node.js 的 API 对应
 
-| Node.js | Flutter |
+| napi (推荐) | Flutter |
 |---------|---------|
-| `createHttpClient(config)` | `CatcherHttpClient(config)` |
+| `new HttpClient(config)` | `CatcherHttpClient(config)` |
 | `client.get(url)` | `client.get(path)` |
 | `client.post(url, body)` | `client.post(path, body: data)` |
-| `createResilientWS(options)` | `CatcherWsClient(config)` |
-| `ws.addEventListener('message', fn)` | `ws.events.listen(fn)` |
+| `new SseStream(config, cb)` | ❌ (使用 `SseClient`) |
+| `new SseClient(config, cb)` | ❌ |
+| `new WsClient(config, cb)` | `CatcherWsClient(config)` |
+| `event.type === 'Message'` + `event.data_base64` | `event is WsMessageEvent` + `event.binary` |
 | `ws.send(data)` | `ws.sendText(data)` / `ws.sendBinary(data)` |
-| `pack(obj)` / `unpack(buf)` | `pack(obj)` / `unpack(buf)` |
-| `client.interceptors.request.use(fn)` | ❌ 不支持（dart:ffi 回调限制） |
 | `client.circuitBreakerState()` | `client.circuitBreakerState` |
-| `client.queueDepth()` | `client.queueDepth` |
+| `client.metrics()` | `client.queueDepth` |
+
+> napi 包现在提供类型安全的 TS wrapper（`HttpClient`、`WsClient`、`SseStream`、`SseClient`），
+> 配置支持对象或 JSON 字符串，事件回调直接返回强类型对象（无需 `JSON.parse`）。
+> 详见 [napi API 文档](./napi.md)。

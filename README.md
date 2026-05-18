@@ -10,11 +10,36 @@ Resilient network communication toolkit — Rust core, TypeScript wrappers, Flut
 
 > "Catcher" — catches network failures before they reach your business logic.
 
+## ⚠️ Breaking Changes (0.3.0)
+
+### napi packages (Node.js native)
+
+| Change | Before | After |
+|--------|--------|-------|
+| Entry point | `client.js` | `dist/client.js` |
+| Config | JSON string only | Typed object or JSON string |
+| Class names | `JsHttpClient`, `JsWsClient` | `HttpClient`, `WsClient` |
+| Callback events | JSON strings | Typed objects (auto-parsed) |
+| WS Message data | `event.data` | `event.data_base64` (base64) |
+
+### Rust crates
+
+| Change | Before | After |
+|--------|--------|-------|
+| `BackoffKind::default()` | `Exponential` | `Fixed` |
+| `RetryConfig::default().backoff` | `Exponential` | `Fixed` |
+| WS `deflate_threshold` | — | Renamed → `deflate_threshold_bytes` |
+| WS `max_message_size` | — | Renamed → `max_payload_bytes` |
+| WS `ping_timeout_ms` | — | Renamed → `pong_timeout_ms` |
+| All config structs | `snake_case` only | `snake_case` + `camelCase` via `#[serde(alias)]` |
+
+See package-specific READMEs for detailed migration instructions.
+
 ## Platform Coverage
 
 | Platform | Package | Status |
 |----------|---------|--------|
-| **Node.js (native)** | `@eric8810/catcher-napi-http` / `@eric8810/catcher-napi-ws` | ✅ Published |
+| **Node.js (native)** | `@eric8810/catcher-napi-http` / `@eric8810/catcher-napi-ws` | ✅ ⭐ 推荐 |
 | **Node.js (TS)** | `@eric8810/catcher-http` / `@eric8810/catcher-ws` | ✅ Published |
 | **Electron** | same as Node.js | ✅ |
 | **Web** | `@eric8810/catcher-web` | ✅ Published |
@@ -36,8 +61,9 @@ catcher  catcher              @eric8810  @eric8810
  │  │     │  │               (+SSE)
  │  └──napi-rs──┐   ┌──napi-rs──┘
  │              ▼   ▼
- │        @eric8810/catcher-napi-http
- │        @eric8810/catcher-napi-ws
+ │        @eric8810/catcher-napi-http  ⭐ Node.js 推荐
+ │        @eric8810/catcher-napi-ws    ⭐ Node.js 推荐
+ │        (typed TS wrappers + .node)
  │
  │   ┌─────────────────────────────────┐
  ├───┤ catcher-ffi (cdylib umbrella)   │
@@ -68,8 +94,8 @@ catcher  catcher              @eric8810  @eric8810
 | [`@eric8810/catcher-http`](https://www.npmjs.com/package/@eric8810/catcher-http) | [![npm](https://img.shields.io/npm/v/@eric8810/catcher-http.svg)](https://www.npmjs.com/package/@eric8810/catcher-http) | HTTP + SSE client — retry, CB, queue, interceptors |
 | [`@eric8810/catcher-ws`](https://www.npmjs.com/package/@eric8810/catcher-ws) | [![npm](https://img.shields.io/npm/v/@eric8810/catcher-ws.svg)](https://www.npmjs.com/package/@eric8810/catcher-ws) | WebSocket — reconnect, multi-endpoint, codec |
 | [`@eric8810/catcher-web`](https://www.npmjs.com/package/@eric8810/catcher-web) | [![npm](https://img.shields.io/npm/v/@eric8810/catcher-web.svg)](https://www.npmjs.com/package/@eric8810/catcher-web) | Browser HTTP + SSE client — fetch-based |
-| [`@eric8810/catcher-napi-http`](https://www.npmjs.com/package/@eric8810/catcher-napi-http) | [![npm](https://img.shields.io/npm/v/@eric8810/catcher-napi-http.svg)](https://www.npmjs.com/package/@eric8810/catcher-napi-http) | Rust native via napi-rs (HTTP + SSE, typed wrappers) |
-| [`@eric8810/catcher-napi-ws`](https://www.npmjs.com/package/@eric8810/catcher-napi-ws) | [![npm](https://img.shields.io/npm/v/@eric8810/catcher-napi-ws.svg)](https://www.npmjs.com/package/@eric8810/catcher-napi-ws) | Rust native via napi-rs (WS, typed wrappers) |
+| [`@eric8810/catcher-napi-http`](https://www.npmjs.com/package/@eric8810/catcher-napi-http) | [![npm](https://img.shields.io/npm/v/@eric8810/catcher-napi-http.svg)](https://www.npmjs.com/package/@eric8810/catcher-napi-http) | ⭐ Rust native HTTP + SSE (typed wrappers) |
+| [`@eric8810/catcher-napi-ws`](https://www.npmjs.com/package/@eric8810/catcher-napi-ws) | [![npm](https://img.shields.io/npm/v/@eric8810/catcher-napi-ws.svg)](https://www.npmjs.com/package/@eric8810/catcher-napi-ws) | ⭐ Rust native WS (typed wrappers) |
 
 ### pub.dev
 
@@ -89,13 +115,13 @@ catcher  catcher              @eric8810  @eric8810
 
 ## Quick Start
 
-### Node.js (native — Rust via napi-rs)
+### Node.js (native — Rust via napi-rs) ⭐ 推荐
 
 ```bash
 npm install @eric8810/catcher-napi-http @eric8810/catcher-napi-ws
 ```
 
-### Node.js (TS — full API)
+### Node.js (TS — pure TypeScript)
 
 ```bash
 npm install @eric8810/catcher-http @eric8810/catcher-ws
@@ -115,6 +141,47 @@ dependencies:
 ```
 
 ### Usage
+
+#### napi (Rust native) ⭐ 推荐
+
+```typescript
+// HTTP — Rust native performance + typed config
+import { HttpClient } from '@eric8810/catcher-napi-http'
+
+const client = new HttpClient({
+  base_url: 'https://api.example.com',       // camelCase 也可以: baseUrl
+  connect_timeout_ms: 10000,
+  retry: { max_attempts: 3, backoff: 'Fixed' },
+  circuit_breaker: { failure_threshold: 5, reset_timeout_ms: 30000 },
+})
+
+const resp = await client.get('/users/1')
+console.log(resp.status, resp.body.toString())
+
+// SSE — auto-reconnect
+import { SseClient } from '@eric8810/catcher-napi-http'
+
+const sse = new SseClient(
+  { url: 'https://stream.example.com/events',
+    reconnect: { max_retries: 10, initial_delay_ms: 1000 } },
+  (event) => { if (event.type === 'Line') console.log(event.data) },
+)
+
+// WebSocket — typed events
+import { WsClient } from '@eric8810/catcher-napi-ws'
+
+const ws = new WsClient(
+  { urls: ['wss://cn.example.com', 'wss://sg.example.com'],
+    reconnect: { initial_delay_ms: 500, max_delay_ms: 30000 } },
+  (event) => {
+    if (event.type === 'Message')
+      console.log(Buffer.from(event.data_base64, 'base64').toString())
+  },
+)
+ws.send('hello')
+```
+
+#### TypeScript (pure TS)
 
 ```typescript
 // HTTP — one line to replace axios.create()

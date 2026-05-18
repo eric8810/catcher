@@ -7,6 +7,29 @@
 
 Wraps `catcher-http`'s `HttpTransport` — reqwest + retry + circuit breaker, compiled to a native addon. Includes typed TypeScript wrappers with auto-generated `.d.ts`.
 
+## ⚠️ Breaking Changes (0.3.0)
+
+> **Migrate from 0.2.x → 0.3.x** — see [napi API docs](https://github.com/eric8810/catcher/blob/master/docs/user-manual/api/napi.md) for full details.
+
+| Change | Before | After |
+|--------|--------|-------|
+| Entry point | `client.js` / `client.d.ts` | `dist/client.js` / `dist/client.d.ts` |
+| Config format | `JSON.stringify(config)` only | Typed object **or** JSON string |
+| Class names | `JsHttpClient`, `JsSseStream`, `JsSseClient` | `HttpClient`, `SseStream`, `SseClient` |
+| Callback events | Raw JSON strings, need `JSON.parse()` | Typed objects, auto-parsed |
+| Default backoff | `Exponential` | `Fixed` |
+| Default `connect_timeout_ms` | `5000` | `10000` |
+| Default `min_backoff_ms` | `500` | `100` |
+| Default `max_backoff_ms` | `30000` | `10000` |
+| camelCase fields | Not supported | `#[serde(alias)]` — both `snake_case` and `camelCase` accepted |
+
+```diff
+- const client = require('@eric8810/catcher-napi-http').HttpClient
+- const c = new HttpClient(JSON.stringify({ base_url: '...' }))
++ import { HttpClient } from '@eric8810/catcher-napi-http'
++ const c = new HttpClient({ base_url: '...' })
+```
+
 ## Install
 
 ```bash
@@ -24,7 +47,7 @@ import type { HttpClientConfig, SseEvent } from '@eric8810/catcher-napi-http'
 // Config as typed object (recommended) or JSON string
 const client = new HttpClient({
   base_url: 'https://api.example.com',
-  connect_timeout_ms: 5000,
+  connect_timeout_ms: 10000,
   retry: { max_attempts: 3, backoff: 'Fixed' },
   circuit_breaker: { failure_threshold: 5, reset_timeout_ms: 30000 },
 })

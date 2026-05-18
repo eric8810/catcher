@@ -5,6 +5,8 @@
 
 Resilient HTTP client for the [catcher](https://github.com/eric8810/catcher) toolkit — built on **reqwest** with middleware for retry, circuit breaker, and priority scheduling.
 
+> **⚠️ Breaking Change (0.3.0)**: `RetryConfig::default().backoff` is now `Fixed` (was `Exponential`). `BackoffKind::default()` is `Fixed`. All config structs accept `camelCase` via `#[serde(alias)]`. `default_true()` is now a public export from `catcher-core`.
+
 ## Features
 
 - **HTTP transport** — reqwest + reqwest-middleware with HTTP/2, gzip, brotli, deflate
@@ -50,22 +52,43 @@ println!("Status: {}, Body: {} bytes", response.status, response.body.len());
 
 ```rust
 use catcher_http::sse::{SseClient, SseStream};
-use catcher_core::types::sse::SseClientConfig;
+use catcher_core::types::sse::{SseClientConfig, SseMethod, SseReconnectConfig};
+use tokio_stream::StreamExt;
 
+// One-shot stream
 let config = SseClientConfig {
     url: "https://api.example.com/events".into(),
     method: SseMethod::GET,
     headers: Default::default(),
     body: None,
-    reconnect: Default::default(),
+    reconnect: None,
+    timeout_ms: 30_000,
+    circuit_breaker: None,
 };
 
 let mut stream = SseStream::connect(config).await?;
-while let Some(line) = stream.next().await {
-    let line = line?;
+while let Some(result) = stream.next().await {
+    let line = result?;
     if let Some(payload) = line.strip_prefix("data: ") {
         println!("{}", payload);
     }
+}
+
+// Auto-reconnect client
+let config = SseClientConfig {
+    url: "https://api.example.com/events".into(),
+    reconnect: Some(SseReconnectConfig {
+        max_retries: 10,
+        initial_delay_ms: 1000,
+        max_delay_ms: 30_000,
+        backoff_multiplier: 2.0,
+    }),
+    ..Default::default()
+};
+let mut client = SseClient::connect(config).await?;
+while let Some(result) = client.next_line().await {
+    let line = result?;
+    println!("{}", line);
 }
 ```
 

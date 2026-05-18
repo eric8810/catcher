@@ -86,22 +86,24 @@ impl WsHandle {
 
 ### WsClientConfig
 
+所有配置字段均支持 `snake_case` 和 `camelCase` 两种命名（通过 `#[serde(alias)]`）。
+
 ```rust
 pub struct WsClientConfig {
     pub urls: Vec<String>,                        // 多端点 URL 列表
     pub protocols: Option<Vec<String>>,           // 子协议
-    pub per_message_deflate: bool,                // 默认 true
-    pub deflate_threshold: usize,                 // 默认 1024
-    pub handshake_timeout_ms: u64,                // 默认 10000
-    pub max_message_size: usize,                  // 默认 1048576
+    pub headers: HashMap<String, String>,         // 默认 {}
+    pub per_message_deflate: bool,                // 默认 false
+    pub deflate_threshold_bytes: u32,             // 默认 1024
+    pub handshake_timeout_ms: u64,                // 默认 15000
+    pub max_payload_bytes: u64,                   // 默认 67108864 (64MB)
     pub reconnect: Option<ReconnectConfig>,
     pub heartbeat: Option<HeartbeatConfig>,
-    pub headers: HashMap<String, String>,
-    pub reject_unauthorized: bool,                // 默认 true
+    pub race_count: u32,                          // 默认 1
 }
 
 pub struct ReconnectConfig {
-    pub initial_delay_ms: u64,      // 默认 1000
+    pub initial_delay_ms: u64,      // 默认 500
     pub max_delay_ms: u64,          // 默认 30000
     pub backoff_multiplier: f64,    // 默认 2.0
     pub max_attempts: u32,          // 默认 20
@@ -110,13 +112,18 @@ pub struct ReconnectConfig {
 pub struct HeartbeatConfig {
     pub interval_ms: u64,           // 默认 30000
     pub adaptive: bool,             // 默认 true — 基于 RTT 动态调整
-    pub ping_timeout_ms: u64,       // 默认 10000 — ping 无响应视为断线
+    pub pong_timeout_ms: u64,       // 默认 10000 — pong 无响应视为断线
+    pub max_missed_pongs: u32,      // 默认 3 — 连续丢失 pong 判定断线
 }
 ```
 
 ### WsEvent
 
+使用 `#[serde(tag = "type")]` 标签枚举序列化，JSON 输出含 `"type"` 字段。
+
 ```rust
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "type")]
 pub enum WsEvent {
     Connected { url: String, latency_ms: u64 },
     Disconnected { code: u16, reason: String },
@@ -126,6 +133,9 @@ pub enum WsEvent {
     HeartbeatRtt { rtt_ms: u64 },
 }
 ```
+
+> `WsEvent::Message` 在 FFI 层序列化时使用 `data_base64`（base64 编码）替代 `data`（`Vec<u8>`），
+> 避免二进制展开为 JSON 数字数组。
 
 ### 示例
 
@@ -139,7 +149,7 @@ let config = WsClientConfig {
         "wss://sg.example.com".into(),
     ],
     reconnect: Some(ReconnectConfig {
-        initial_delay_ms: 1000,
+        initial_delay_ms: 500,
         max_delay_ms: 30_000,
         max_attempts: 20,
         ..Default::default()
@@ -309,14 +319,16 @@ pub fn build_ws_config(config: &WsClientConfig) -> tokio_tungstenite::tungstenit
 
 | 参数 | 默认值 |
 |------|--------|
-| `handshake_timeout_ms` | `10000` |
-| `max_message_size` | `1048576` (1MB) |
-| `per_message_deflate` | `true` |
-| `deflate_threshold` | `1024` |
-| `reconnect.initial_delay_ms` | `1000` |
+| `per_message_deflate` | `false` |
+| `deflate_threshold_bytes` | `1024` |
+| `handshake_timeout_ms` | `15000` |
+| `max_payload_bytes` | `67108864` (64MB) |
+| `race_count` | `1` |
+| `reconnect.initial_delay_ms` | `500` |
 | `reconnect.max_delay_ms` | `30000` |
 | `reconnect.backoff_multiplier` | `2.0` |
 | `reconnect.max_attempts` | `20` |
 | `heartbeat.interval_ms` | `30000` |
 | `heartbeat.adaptive` | `true` |
-| `heartbeat.ping_timeout_ms` | `10000` |
+| `heartbeat.pong_timeout_ms` | `10000` |
+| `heartbeat.max_missed_pongs` | `3` |

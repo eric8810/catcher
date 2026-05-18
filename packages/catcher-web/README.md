@@ -7,6 +7,8 @@ Resilient HTTP + WebSocket + SSE client for **browsers** — built on **fetch** 
 
 API is intentionally identical to `@eric8810/catcher-http` (Node.js) so you can share the same config across environments.
 
+> **Note**: For Node.js, use [`@eric8810/catcher-napi-http`](https://www.npmjs.com/package/@eric8810/catcher-napi-http) (⭐ recommended, Rust native) or [`@eric8810/catcher-http`](https://www.npmjs.com/package/@eric8810/catcher-http) (pure TS).
+
 ## Install
 
 ```bash

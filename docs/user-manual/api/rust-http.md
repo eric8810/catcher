@@ -18,7 +18,7 @@ catcher-http
 ├── resilience   → CircuitBreaker, AdaptiveTimeout, retry_with_backoff, build_retry_policy
 ├── scheduler    → PriorityRequestQueue, concurrency_for_quality
 ├── observability → MetricsCollector, MetricsSnapshot, NetworkQualityEvaluator
-├── sse          → SseClient, SseStream
+├── sse          → SseClient (自动重连), SseStream (一次性)
 ├── ffi          → C ABI (内部使用)
 └── types        → 类型定义
 ```
@@ -89,27 +89,91 @@ impl HttpTransport {
 
 ### HttpClientConfig
 
+所有配置字段均支持 `snake_case` 和 `camelCase` 两种命名（通过 `#[serde(alias)]`），
+方便从 JSON 或 TypeScript 传入。
+
 ```rust
 pub struct HttpClientConfig {
-    pub base_url: String,
-    pub connect_timeout_ms: u64,      // 默认 5000
-    pub response_timeout_ms: u64,     // 默认 30000
+    pub base_url: String,                         // 默认 ""
+    pub connect_timeout_ms: u64,                  // 默认 10000
+    pub response_timeout_ms: u64,                 // 默认 30000
     pub pool: PoolConfig,
+    pub tls: TlsConfig,
+    pub dns: Option<DnsConfig>,
     pub retry: Option<RetryConfig>,
     pub circuit_breaker: Option<CircuitBreakerConfig>,
-    pub dns: Option<DnsConfig>,
+    pub max_concurrency: u32,                     // 默认 50
+    pub default_headers: HashMap<String, String>, // 默认 {}
+    pub hostname_override: Option<String>,
     pub proxy: Option<ProxyConfig>,
-    pub tls: TlsConfig,
-    pub adaptive_timeout: Option<AdaptiveTimeoutConfig>,
+    pub redirect: Option<RedirectConfig>,
+    pub auth: Option<ProxyAuth>,                  // Basic 认证
+    pub bearer_token: Option<String>,
 }
 
 pub struct PoolConfig {
-    pub keep_alive: bool,                    // 默认 true
     pub max_idle_per_host: usize,            // 默认 10
-    pub idle_timeout_secs: u64,              // 默认 60
-    pub keep_alive_interval_secs: u64,       // 默认 30
+    pub idle_timeout_secs: u64,              // 默认 30
+    pub keep_alive: bool,                    // 默认 true
+    pub keep_alive_interval_secs: u64,       // 默认 20
 }
 ```
+
+### TlsConfig
+
+```rust
+pub struct TlsConfig {
+    pub reject_unauthorized: bool,           // 默认 true
+    pub ca_cert_pem: Option<String>,
+    pub ca_cert_path: Option<String>,
+    pub client_cert_pem: Option<String>,
+    pub client_cert_path: Option<String>,
+    pub client_key_pem: Option<String>,
+    pub client_key_path: Option<String>,
+    pub client_identity_pfx: Option<Vec<u8>>,
+    pub client_identity_password: Option<String>,
+    pub tls_sni_override: Option<String>,
+    pub min_tls_version: Option<TlsVersion>,  // Tls1_0 | Tls1_1 | Tls1_2 | Tls1_3
+    pub max_tls_version: Option<TlsVersion>,
+    pub pin_sha256: Option<Vec<String>>,
+}
+```
+
+### DnsConfig
+
+```rust
+pub struct DnsConfig {
+    pub cache_ttl_secs: u32,                 // 默认 300
+    pub nameservers: Vec<String>,
+    pub host_mapping: HashMap<String, String>,
+}
+```
+
+### ProxyConfig
+
+```rust
+pub struct ProxyConfig {
+    pub url: String,                         // "http://host:port" | "socks5://host:port"
+    pub auth: Option<ProxyAuth>,
+    pub no_proxy: Vec<String>,
+}
+
+pub struct ProxyAuth {
+    pub username: String,
+    pub password: String,
+}
+```
+
+### RedirectConfig
+
+```rust
+pub struct RedirectConfig {
+    pub follow: bool,                        // 默认 true
+    pub max_redirects: u32,                  // 默认 5
+}
+```
+
+---
 
 ### HttpRequest / HttpResponse
 
@@ -139,7 +203,7 @@ use std::collections::HashMap;
 
 let config = HttpClientConfig {
     base_url: "https://api.example.com".into(),
-    connect_timeout_ms: 5000,
+    connect_timeout_ms: 10_000,
     response_timeout_ms: 30_000,
     pool: PoolConfig::default(),
     retry: Some(RetryConfig { max_attempts: 3, ..Default::default() }),
@@ -191,10 +255,10 @@ impl CircuitBreaker {
 
 ```rust
 pub struct CircuitBreakerConfig {
-    pub failure_threshold: u32,        // 连续失败 N 次 → OPEN
-    pub success_threshold: u32,        // HALF_OPEN 连续成功 N 次 → CLOSED
-    pub reset_timeout_ms: u64,         // OPEN → HALF_OPEN 等待时间
-    pub half_open_max_requests: u32,   // HALF_OPEN 允许的最大并发探测请求
+    pub failure_threshold: u32,        // 连续失败 N 次 → OPEN, 默认 5
+    pub success_threshold: u32,        // HALF_OPEN 连续成功 N 次 → CLOSED, 默认 2
+    pub reset_timeout_ms: u64,         // OPEN → HALF_OPEN 等待时间, 默认 30000
+    pub half_open_max_requests: u32,   // HALF_OPEN 允许的最大并发探测请求, 默认 5
 }
 ```
 
@@ -262,15 +326,17 @@ where
 
 ```rust
 pub struct RetryConfig {
-    pub max_attempts: u32,
-    pub backoff: BackoffKind,    // Fixed | Exponential | DecorrelatedJitter
-    pub min_backoff_ms: u64,     // 默认 500
-    pub max_backoff_ms: u64,     // 默认 30000
-    pub jitter: bool,
+    pub max_attempts: u32,                                    // 默认 3
+    pub backoff: BackoffKind,                                 // 默认 Fixed
+    pub min_backoff_ms: u64,                                  // 默认 100
+    pub max_backoff_ms: u64,                                  // 默认 10000
+    pub jitter: bool,                                         // 默认 true
 }
 
 pub enum BackoffKind { Fixed, Exponential, DecorrelatedJitter }
 ```
+
+> `BackoffKind` 默认值为 `Fixed`（通过 `#[default]` 标注）。
 
 ### 示例
 
@@ -373,10 +439,104 @@ pub struct MetricsSnapshot {
 ## SseClient / SseStream
 
 ```rust
-pub use catcher_http::sse::{SseClient, SseStream};
-
-// SseClientConfig 来自 catcher_core
+use catcher_http::sse::{SseClient, SseStream};
 use catcher_core::types::sse::{SseClientConfig, SseMethod, SseReconnectConfig};
+```
+
+### SseStream（一次性，无自动重连）
+
+```rust
+pub struct SseStream { /* implements Stream<Item = Result<String, CatcherError>> */ }
+
+impl SseStream {
+    /// 创建一次性 SSE 流
+    pub async fn connect(config: SseClientConfig) -> Result<Self, CatcherError>;
+}
+```
+
+### SseClient（自动重连）
+
+```rust
+pub struct SseClient { /* implements Stream<Item = Result<String, CatcherError>> */ }
+
+impl SseClient {
+    /// 创建自动重连 SSE 客户端
+    pub async fn connect(config: SseClientConfig) -> Result<Self, CatcherError>;
+
+    /// 读取下一行
+    pub async fn next_line(&mut self) -> Option<Result<String, CatcherError>>;
+
+    /// 关闭连接（停止重连）
+    pub fn close(&mut self);
+
+    /// 当前连接状态
+    pub fn ready_state(&self) -> SseReadyState;
+
+    /// 最后的 event ID（用于重连）
+    pub fn last_event_id(&self) -> String;
+}
+
+pub enum SseReadyState { Connecting, Open, Closed }
+```
+
+### SseClientConfig
+
+所有字段均支持 `snake_case` 和 `camelCase` 命名。
+
+```rust
+pub struct SseClientConfig {
+    pub url: String,                                   // 必填
+    pub method: SseMethod,                             // GET | POST, 默认 GET
+    pub headers: HashMap<String, String>,              // 默认 {}
+    pub body: Option<String>,                          // JSON 字符串
+    pub reconnect: Option<SseReconnectConfig>,
+    pub timeout_ms: u64,                               // 默认 30000
+    pub circuit_breaker: Option<CircuitBreakerConfig>,
+}
+
+pub struct SseReconnectConfig {
+    pub max_retries: u32,          // 默认 10
+    pub initial_delay_ms: u64,     // 默认 1000
+    pub max_delay_ms: u64,         // 默认 30000
+    pub backoff_multiplier: f64,   // 默认 2.0
+}
+```
+
+### 示例
+
+```rust
+use catcher_http::sse::{SseStream, SseClient};
+use catcher_core::types::sse::{SseClientConfig, SseReconnectConfig};
+use tokio_stream::StreamExt;
+
+// 一次性流
+let config = SseClientConfig {
+    url: "https://stream.example.com/events".into(),
+    ..Default::default()
+};
+let mut stream = SseStream::connect(config).await?;
+while let Some(result) = stream.next().await {
+    let line = result?;
+    if let Some(payload) = line.strip_prefix("data: ") {
+        println!("{}", payload);
+    }
+}
+
+// 自动重连
+let config = SseClientConfig {
+    url: "https://stream.example.com/events".into(),
+    reconnect: Some(SseReconnectConfig {
+        max_retries: 10,
+        initial_delay_ms: 1000,
+        ..Default::default()
+    }),
+    ..Default::default()
+};
+let mut client = SseClient::connect(config).await?;
+while let Some(result) = client.next_line().await {
+    let line = result?;
+    println!("{}", line);
+}
 ```
 
 ---
@@ -385,15 +545,24 @@ use catcher_core::types::sse::{SseClientConfig, SseMethod, SseReconnectConfig};
 
 | 参数 | 默认值 |
 |------|--------|
-| `connect_timeout_ms` | `5000` |
+| `connect_timeout_ms` | `10000` |
 | `response_timeout_ms` | `30000` |
-| `pool.keep_alive` | `true` |
 | `pool.max_idle_per_host` | `10` |
-| `pool.idle_timeout_secs` | `60` |
-| `retry.backoff` | `Exponential` |
-| `retry.min_backoff_ms` | `500` |
-| `retry.max_backoff_ms` | `30000` |
+| `pool.idle_timeout_secs` | `30` |
+| `pool.keep_alive` | `true` |
+| `pool.keep_alive_interval_secs` | `20` |
+| `retry.max_attempts` | `3` |
+| `retry.backoff` | `Fixed` |
+| `retry.min_backoff_ms` | `100` |
+| `retry.max_backoff_ms` | `10000` |
+| `retry.jitter` | `true` |
 | `circuit_breaker.failure_threshold` | `5` |
 | `circuit_breaker.success_threshold` | `2` |
 | `circuit_breaker.reset_timeout_ms` | `30000` |
 | `circuit_breaker.half_open_max_requests` | `5` |
+| `max_concurrency` | `50` |
+| `sse.timeout_ms` | `30000` |
+| `sse.reconnect.max_retries` | `10` |
+| `sse.reconnect.initial_delay_ms` | `1000` |
+| `sse.reconnect.max_delay_ms` | `30000` |
+| `sse.reconnect.backoff_multiplier` | `2.0` |

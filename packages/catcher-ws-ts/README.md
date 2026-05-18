@@ -7,6 +7,8 @@ Resilient WebSocket client for **Node.js** — auto-reconnect, multi-endpoint ra
 
 Built on the **ws** library (optional peer dep) with reconnect + endpoint racing + binary codec.
 
+> **💡 For maximum performance**, consider [`@eric8810/catcher-napi-ws`](https://www.npmjs.com/package/@eric8810/catcher-napi-ws) — Rust native via napi-rs, with typed TypeScript wrappers. Recommended for production Node.js workloads.
+
 ## Install
 
 ```bash

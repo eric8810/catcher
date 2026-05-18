@@ -7,6 +7,8 @@ UniFFI bindings for the [catcher](https://github.com/eric8810/catcher) toolkit �
 
 Uses UniFFI 0.28 proc-macro mode (no UDL file needed).
 
+> **⚠️ Breaking Change (0.3.0)**: JSON config now accepts `camelCase` field names via `#[serde(alias)]`. `BackoffKind` default changed to `Fixed`. WS config field renames: `deflate_threshold` → `deflate_threshold_bytes`, `max_message_size` → `max_payload_bytes`, `ping_timeout_ms` → `pong_timeout_ms`.
+
 ## Exposed API
 
 ### `HttpClient`
@@ -80,10 +82,10 @@ uniffi-bindgen generate --library ../target/release/libcatcher_uniffi.so --langu
 ```json
 {
   "base_url": "https://api.example.com",
-  "connect_timeout_ms": 5000,
+  "connect_timeout_ms": 10000,
   "response_timeout_ms": 30000,
   "pool": { "keep_alive": true, "max_idle_per_host": 10 },
-  "retry": { "max_attempts": 3, "backoff": "Exponential" },
+  "retry": { "max_attempts": 3, "backoff": "Fixed" },
   "circuit_breaker": { "failure_threshold": 5, "reset_timeout_ms": 30000 }
 }
 ```

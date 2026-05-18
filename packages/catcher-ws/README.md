@@ -5,6 +5,14 @@
 
 Resilient WebSocket client for the [catcher](https://github.com/eric8810/catcher) toolkit — built on **tokio-tungstenite** with automatic reconnection, heartbeat, and multi-endpoint racing.
 
+> **⚠️ Breaking Change (0.3.0)**:
+> - `WsClientConfig` field renames: `deflate_threshold` → `deflate_threshold_bytes`, `max_message_size` → `max_payload_bytes`
+> - `HeartbeatConfig`: `ping_timeout_ms` → `pong_timeout_ms`, added `max_missed_pongs` field
+> - `per_message_deflate` default changed from `true` to `false`
+> - `handshake_timeout_ms` default changed from `10000` to `15000`
+> - `initial_delay_ms` default changed from `1000` to `500`
+> - All config structs accept `camelCase` via `#[serde(alias)]`
+
 ## Features
 
 - **Auto-reconnect** — exponential backoff with jitter
@@ -80,7 +88,7 @@ let config = WsClientConfig {
         "wss://sg.example.com".into(),
         "wss://us.example.com".into(),
     ],
-    race_count: 2,  // race first 2 endpoints, use fastest
+    race_count: 2,  // race first 2 endpoints, use fastest (default: 1)
     ..Default::default()
 };
 ```

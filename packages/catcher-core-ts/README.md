@@ -7,6 +7,8 @@
 
 This package is consumed by `@eric8810/catcher-http`, `@eric8810/catcher-ws`, and `@eric8810/catcher-web`. You typically don't install it directly.
 
+> **💡 Node.js users**: For Rust-native performance, use [`@eric8810/catcher-napi-http`](https://www.npmjs.com/package/@eric8810/catcher-napi-http) and [`@eric8810/catcher-napi-ws`](https://www.npmjs.com/package/@eric8810/catcher-napi-ws) instead. They provide typed TS wrappers with the same config schema and much better throughput.
+
 ## Install
 
 ```bash

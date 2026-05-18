@@ -7,6 +7,8 @@ Resilient HTTP client for **Node.js** — retry, circuit breaker, priority queue
 
 Built on **axios** (optional peer dep) + **cockatiel** (circuit breaker) + **p-retry** + **p-queue**.
 
+> **💡 For maximum performance**, consider [`@eric8810/catcher-napi-http`](https://www.npmjs.com/package/@eric8810/catcher-napi-http) — Rust native via napi-rs, with typed TypeScript wrappers and the same config schema. Recommended for production Node.js workloads.
+
 ## Install
 
 ```bash

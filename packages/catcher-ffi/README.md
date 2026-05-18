@@ -7,6 +7,8 @@ Unified C ABI library for the [catcher](https://github.com/eric8810/catcher) too
 
 All `#[no_mangle] pub extern "C"` functions from the dependency FFI modules are automatically exported. This crate is the bridge used by **dart:ffi** (Flutter) bindings.
 
+> **⚠️ Breaking Change (0.3.0)**: JSON config fields now accept both `snake_case` and `camelCase` via `#[serde(alias)]`. `BackoffKind` default changed to `Fixed`. WS config field renames: `deflate_threshold` → `deflate_threshold_bytes`, `max_message_size` → `max_payload_bytes`, `ping_timeout_ms` → `pong_timeout_ms`.
+
 ## Exported Symbols
 
 ### HTTP Client

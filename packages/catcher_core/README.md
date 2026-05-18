@@ -35,7 +35,7 @@ void main() async {
     baseUrl: 'https://api.example.com',
     connectTimeoutMs: 5000,
     responseTimeoutMs: 30000,
-    retry: RetryConfig(maxAttempts: 3, backoff: 'Exponential'),
+    retry: RetryConfig(maxAttempts: 3, backoff: 'Fixed'),
     pool: PoolConfig(keepAlive: true, maxIdlePerHost: 10),
   ));
 
