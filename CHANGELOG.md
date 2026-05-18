@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file. See [release-please](https://github.com/googleapis/release-please) for automated management.
 
+## 0.3.6 (2026-07-20)
+
+### 🐛 Bug Fixes
+
+- **catcher-ws missing TLS 1.2 support**: `catcher-ws` used `default-features = false` for rustls but did not enable the `tls12` feature. This caused `HandshakeFailure` on servers that only support TLS 1.2 (e.g. `ws-gateway.fazhiplus.com`). Added `features = ["tls12"]` to the rustls dependency, bringing 6 TLS 1.2 cipher suites alongside the 3 TLS 1.3 suites.
+
 ## 0.3.5 (2026-07-20)
 
 ### 🐛 Bug Fixes
