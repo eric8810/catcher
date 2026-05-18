@@ -13,7 +13,7 @@ Flutter App (Dart)
       │ dart:ffi — 直接调用 C ABI
       ▼
 libcatcher_ffi.so / .dylib (catcher-ffi cdylib umbrella)
-      │ 16 C ABI symbols — HTTP + WS + pack/unpack
+      │ 25 C ABI symbols — HTTP + WS + pack/unpack
       ▼
 catcher-http + catcher-ws (Rust)
 ```

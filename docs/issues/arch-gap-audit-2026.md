@@ -388,7 +388,7 @@ keepAlive 池中坏连接
 - **19/19 FFI 符号在 DLL 中确认导出**（通过 PE 二进制字符串扫描）：
   `catcher_http_client_create`, `catcher_http_client_destroy`, `catcher_http_execute`, `catcher_http_execute_with_id`, `catcher_http_cancel_request`, `catcher_http_execute_stream`, `catcher_pack`, `catcher_unpack`, `catcher_free_result`, `catcher_free_data`, `catcher_ws_create`, `catcher_ws_send_text`, `catcher_ws_send_binary`, `catcher_ws_close`, `catcher_ws_destroy`, `catcher_http_client_cancel_all`, `catcher_http_circuit_breaker_state`, `catcher_http_metrics`, `catcher_http_adaptive_timeout_config`
 - **集成测试文件**: `packages/catcher_core/test/ffi_roundtrip_test.dart`
-  - FFI symbol resolution (16 个核心符号)
+  - FFI symbol resolution (25 个核心符号)
   - Codec pack ↔ unpack roundtrip（5 项：简单 map、嵌套结构、空 map、int list、1000 条大数据）
   - HTTP client lifecycle（create/query/dispose、double dispose safety）
   - HTTP GET/POST roundtrip（httpbin.org：GET /get、GET /status/404、POST /post echo、custom headers）

@@ -43,7 +43,7 @@ Wraps `catcher-ws`'s `WsTransport` — tokio-tungstenite + auto-reconnect + hear
 npm install @eric8810/catcher-napi-ws
 ```
 
-Pre-built binaries available for Linux (x64 gnu/musl), macOS (x64/arm64), and Windows (x64).
+Pre-built binaries available for Linux (x64/arm64 gnu/musl), macOS (x64/arm64), and Windows (x64/arm64). Installed automatically via platform-specific `optionalDependencies`.
 
 **TLS**: `wss://` connections supported out of the box via rustls (bundled, no system TLS dependency).
 
