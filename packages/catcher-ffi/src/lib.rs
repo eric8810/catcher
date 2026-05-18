@@ -6,6 +6,7 @@
 //! All `#[no_mangle] pub extern "C"` functions from the dependencies are
 //! automatically exported. The `use` statements below ensure the linker
 //! does not strip them.
+#![allow(clippy::missing_safety_doc)]
 
 // Force-link all FFI modules from dependencies
 #[allow(unused_imports)]

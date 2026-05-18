@@ -223,6 +223,7 @@ mod tests {
 
     /// Verify close params — default and custom
     #[test]
+    #[allow(clippy::unnecessary_literal_unwrap)]
     fn close_params_default_and_custom() {
         // Test that the param extraction logic is correct
         let code: Option<u16> = None;

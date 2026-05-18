@@ -2,6 +2,7 @@
 //!
 //! Maintains a persistent NetworkQualityEvaluator with a sliding window
 //! so history data accumulates across calls.
+#![allow(clippy::missing_safety_doc)]
 
 use std::ffi::{c_char, c_void, CString};
 use std::sync::Arc;

@@ -1,4 +1,5 @@
 //! HTTP C ABI — create / get / post / execute / destroy / cancel (N-03)
+#![allow(clippy::missing_safety_doc)]
 
 use std::collections::HashMap;
 use std::ffi::{c_char, c_void, CStr, CString};

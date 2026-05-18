@@ -23,10 +23,12 @@ extern "C" fn capture_callback(
     let bytes = unsafe { std::slice::from_raw_parts(event_data, event_data_len) };
     let json = String::from_utf8_lossy(bytes).to_string();
     // Free the CStrings Rust allocated
-    catcher_core::ffi_types::catcher_free_event_data(
-        _event_type as *mut c_char,
-        event_data as *mut u8,
-    );
+    unsafe {
+        catcher_core::ffi_types::catcher_free_event_data(
+            _event_type as *mut c_char,
+            event_data as *mut u8,
+        );
+    }
     *LAST_RESULT.lock().unwrap() = Some(json);
 }
 
@@ -235,7 +237,7 @@ extern "C" fn capture_to_result(
 ) {
     let bytes = unsafe { std::slice::from_raw_parts(event_data, event_data_len) };
     let json = String::from_utf8_lossy(bytes).to_string();
-    catcher_core::ffi_types::catcher_free_event_data(_event_type as *mut c_char, event_data as *mut u8);
+    unsafe { catcher_core::ffi_types::catcher_free_event_data(_event_type as *mut c_char, event_data as *mut u8); }
     let result: &Mutex<Option<String>> = unsafe { &*(user_data as *const Mutex<Option<String>>) };
     *result.lock().unwrap() = Some(json);
 }
@@ -461,11 +463,12 @@ extern "C" fn capture_stream_events(
     };
     let bytes = unsafe { std::slice::from_raw_parts(event_data, event_data_len) };
     let data = String::from_utf8_lossy(bytes).to_string();
-    catcher_core::ffi_types::catcher_free_event_data(event_type as *mut c_char, event_data as *mut u8);
+    unsafe { catcher_core::ffi_types::catcher_free_event_data(event_type as *mut c_char, event_data as *mut u8); }
     let events: &Mutex<Vec<(String, String)>> = unsafe { &*(user_data as *const Mutex<Vec<(String, String)>>) };
     events.lock().unwrap().push((et, data));
 }
 
+#[allow(clippy::type_complexity)]
 fn make_events_cell() -> (Arc<Mutex<Vec<(String, String)>>>, *mut c_void) {
     let cell = Arc::new(Mutex::new(Vec::<(String, String)>::new()));
     let ptr = Arc::as_ptr(&cell) as *mut c_void;
@@ -506,7 +509,7 @@ async fn h15_execute_stream_cancel() {
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     let evts = events.lock().unwrap();
     // Should have at least headers and possibly a cancel error
-    assert!(evts.len() >= 1, "should have at least 1 stream event");
+    assert!(!evts.is_empty(), "should have at least 1 stream event");
     let has_error = evts.iter().any(|(et, _)| et == "stream_error");
     assert!(has_error, "should have a stream_error event after cancel");
 

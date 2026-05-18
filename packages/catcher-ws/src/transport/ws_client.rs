@@ -416,12 +416,7 @@ async fn connection_manager(
         if let Some(ref mut mgr) = reconnect_mgr {
             let mut reconnected = false;
 
-            loop {
-                let delay = match mgr.on_disconnect() {
-                    Some(d) => d,
-                    None => break, // 重试耗尽
-                };
-
+            while let Some(delay) = mgr.on_disconnect() {
                 let attempt = mgr.attempt();
                 let _ = event_tx.send(WsEvent::Reconnecting { attempt, delay_ms: delay });
 

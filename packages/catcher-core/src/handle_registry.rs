@@ -19,6 +19,12 @@ pub struct HandleRegistry<T> {
     next_id: AtomicUsize,
 }
 
+impl<T> Default for HandleRegistry<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T> HandleRegistry<T> {
     /// 创建空注册表。
     pub const fn new() -> Self {

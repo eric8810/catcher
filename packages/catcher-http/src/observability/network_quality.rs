@@ -166,10 +166,10 @@ impl QualitySubscription {
             loop {
                 tokio::select! {
                     _ = interval.tick() => {
-                        if let Ok(_) = evaluator.measure_http_rtt(&host_clone, "/").await {
+                        if evaluator.measure_http_rtt(&host_clone, "/").await.is_ok() {
                             let result = evaluator.evaluate();
                             let level = result.level;
-                            if previous_level.map_or(true, |prev| prev != level) {
+                            if previous_level != Some(level) {
                                 let trend = match previous_level {
                                     None => "unknown",
                                     Some(prev) => {

@@ -113,7 +113,7 @@ mod tests {
     fn pin1_decode_base64_pins() {
         let hash = sha2::Sha256::digest(b"hello world");
         let b64 = base64::engine::general_purpose::STANDARD.encode(hash);
-        let v = PinningVerifier::new(make_mock_verifier(), &[b64.clone()]);
+        let v = PinningVerifier::new(make_mock_verifier(), std::slice::from_ref(&b64));
         assert_eq!(v.pins.len(), 1);
         assert_eq!(v.pins[0], hash.as_slice());
     }

@@ -30,7 +30,7 @@ extern "C" fn capture_quality_callback(
     if user_data.is_null() { return; }
     let bytes = unsafe { std::slice::from_raw_parts(event_data, event_data_len) };
     let json = String::from_utf8_lossy(bytes).to_string();
-    catcher_core::ffi_types::catcher_free_event_data(_event_type as *mut c_char, event_data as *mut u8);
+    unsafe { catcher_core::ffi_types::catcher_free_event_data(_event_type as *mut c_char, event_data as *mut u8); }
     let state: &Mutex<CallbackState> = unsafe { &*(user_data as *const Mutex<CallbackState>) };
     let mut s = state.lock().unwrap();
     s.count += 1;

@@ -116,18 +116,22 @@ pub extern "C" fn catcher_free_result(result: FfiResult) {
 /// Note: `event_data` type is `*mut u8` (matching EventCallback's `*const u8`).
 /// The const-to-mut cast is safe because into_raw() returns a mutable pointer
 /// that was originally passed as const through the callback.
+///
+/// # Safety
+///
+/// - `event_type` must be a valid pointer returned by `CString::into_raw()`, or null.
+/// - `event_data` must be a valid pointer returned by `CString::into_raw()`, or null.
+/// - Both pointers must not have been freed already (no double-free).
 #[no_mangle]
-pub extern "C" fn catcher_free_event_data(
+pub unsafe extern "C" fn catcher_free_event_data(
     event_type: *mut c_char,
     event_data: *mut u8,
 ) {
-    unsafe {
-        if !event_type.is_null() {
-            let _ = std::ffi::CString::from_raw(event_type);
-        }
-        if !event_data.is_null() {
-            let _ = std::ffi::CString::from_raw(event_data as *mut c_char);
-        }
+    if !event_type.is_null() {
+        let _ = std::ffi::CString::from_raw(event_type);
+    }
+    if !event_data.is_null() {
+        let _ = std::ffi::CString::from_raw(event_data as *mut c_char);
     }
 }
 

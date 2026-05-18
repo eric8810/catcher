@@ -1,6 +1,6 @@
 [package]
 name = "catcher_core_ffi"
-version = "0.2.2"
+version = "0.3.0"
 edition = "2021"
 
 [lib]

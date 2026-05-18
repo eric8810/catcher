@@ -2,6 +2,47 @@
 
 All notable changes to this project will be documented in this file. See [release-please](https://github.com/googleapis/release-please) for automated management.
 
+## 0.3.0 (2026-07)
+
+### ⚠️ Breaking Changes
+
+- **napi packages**: Entry point changed from `client.js` → `dist/client.js`. Config now accepts typed objects (not just JSON strings). Class names renamed: `JsHttpClient` → `HttpClient`, `JsWsClient` → `WsClient`. Callback events are now typed objects (auto-parsed) instead of JSON strings. WS message data uses `event.data_base64` (base64).
+- **Rust crates**: `BackoffKind::default()` changed from `Exponential` → `Fixed`. WS config fields renamed: `deflate_threshold` → `deflate_threshold_bytes`, `max_message_size` → `max_payload_bytes`, `ping_timeout_ms` → `pong_timeout_ms`. All config structs now support `snake_case` + `camelCase` via `#[serde(alias)]`.
+- **reqwest 0.13 + tungstenite 0.29**: Dependency upgrade; may affect custom TLS configurations.
+
+### 🚀 New Features
+
+- **Typed napi TS wrappers**: Auto-generated TypeScript sources replace hand-written wrappers. Full type safety for config, events, and responses.
+- **Certificate pinning** (`pin_sha256`): Rust-side TLS certificate public key pinning for HTTP clients.
+- **Multipart/form-data encoder** (Rust): Native multipart upload support in `catcher-http`.
+- **DNS nameservers config**: Custom DNS resolver addresses for Rust HTTP client.
+- **Web progress events**: Browser package (`catcher-web`) progress tracking for downloads/uploads.
+- **ESM export fix**: All TS packages now correctly export ESM entry points.
+- **Dart FFI config alignment**: Dart `HttpClientConfig` / `WsClientConfig` fields now match Rust config 1:1.
+- **`#[serde(alias)]` on all configs**: Every config struct accepts both `snake_case` and `camelCase` JSON keys.
+
+### 🐛 Bug Fixes
+
+- Fixed 9 documented issues (#001–#006, #008–#010): memory leak in multipart, SSE O(n²) buffer, P90 repeated sort, config clone per-request, handle registry lock contention, circuit breaker TOCTOU, WS heartbeat RTT always zero, SSE reconnect recreates client, stream chunk copy.
+- Fixed UniFFI issues (#011–#018): stream chunk to vec copy, priority queue single worker, uniffi block-on-aux-thread, catcher-free-data UB, evaluate-quality race panic, SSE stream buffer-all, FFI stream cancel, WS client drop no close.
+- Fixed FFI body base64 encoding (#019, #021) and adaptive heartbeat timer (#020).
+- Fixed UniFFI evaluate_quality take/put race (#023), stream chunk base64 (#022), SSE block_on panic (#024).
+- Fixed `http_retries` metric wiring via custom `MetricsRetryMiddleware`.
+- Fixed proxy bandwidth variable name bug.
+
+### 🔄 Dependencies
+
+- Upgraded `reqwest` 0.12 → 0.13
+- Upgraded `tungstenite` 0.26 → 0.29, `tokio-tungstenite` 0.24 → 0.29
+
+### 📝 Documentation
+
+- Added breaking change notices to all package READMEs.
+- Added `docs/arch-rs/17-dart-config-alignment.md` — Dart FFI config alignment design.
+- Updated `docs/arch-rs/01-cargo.md` for v0.3 workspace.
+- Updated all version references across docs.
+- Added expansion research reports with citations.
+
 ## 0.2.2 (2026-06)
 
 ### 🚀 New Features — FFI
@@ -42,9 +83,10 @@ All notable changes to this project will be documented in this file. See [releas
 
 ```
 cargo check --workspace --all-targets    # 0 errors, 0 warnings
-cargo test --workspace                   # 142/142 passed
+cargo clippy --workspace --all-targets -- -D warnings  # 0 warnings
+cargo test --workspace                   # 88/90 passed (2 network-dependent)
 pnpm test                                # 323 passed, 2 skipped
-pnpm test:e2e                            # 38/38 passed
+pnpm test:e2e                            # TS + Rust E2E scenarios
 pnpm bench                               # 5 benchmark groups
 ```
 

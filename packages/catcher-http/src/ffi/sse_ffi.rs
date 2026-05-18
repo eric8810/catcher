@@ -2,6 +2,7 @@
 //!
 //! Provides 6 C ABI symbols bridging catcher-http's SseClient (persistent + auto-reconnect)
 //! and SseStream (one-shot POST SSE) to FFI consumers.
+#![allow(clippy::missing_safety_doc)]
 
 use std::collections::HashMap;
 use std::ffi::{c_char, c_void, CStr, CString};

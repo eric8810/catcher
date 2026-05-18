@@ -99,7 +99,7 @@ mod tests {
             let d = delay_ms(&policy, start, attempt)
                 .expect("expected Retry decision");
             assert!(
-                d >= 0.0 && d <= 10_002.0,
+                (0.0..=10_002.0).contains(&d),
                 "attempt {attempt}: delay {d:.3}ms out of [0ms, 10000ms] range"
             );
         }

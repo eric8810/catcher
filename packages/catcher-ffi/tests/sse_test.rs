@@ -34,10 +34,12 @@ extern "C" fn sse_callback(
 ) {
     let bytes = unsafe { std::slice::from_raw_parts(event_data, event_data_len) };
     let json = String::from_utf8_lossy(bytes).to_string();
-    catcher_core::ffi_types::catcher_free_event_data(
-        _event_type as *mut c_char,
-        event_data as *mut u8,
-    );
+    unsafe {
+        catcher_core::ffi_types::catcher_free_event_data(
+            _event_type as *mut c_char,
+            event_data as *mut u8,
+        );
+    }
     LAST_SSE_EVENT.lock().unwrap().push(json);
 }
 

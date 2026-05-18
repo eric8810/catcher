@@ -71,7 +71,7 @@ impl HttpTransport {
             build_dns_resolver(dns)?;
             if !dns.nameservers.is_empty() {
                 let resolver = crate::transport::dns::build_custom_resolver(&dns.nameservers)
-                    .map_err(|e| CatcherError::InvalidConfig(e))?;
+                    .map_err(CatcherError::InvalidConfig)?;
                 reqwest_builder = reqwest_builder.dns_resolver(resolver);
             }
         }
@@ -379,7 +379,6 @@ impl HttpTransport {
     }
 
     /// 使用预分配的 token 执行请求（N-03，供 FFI 层使用）。
-
     async fn do_execute(&self, request: HttpRequest) -> Result<HttpResponse, CatcherError> {
         execute_http_request(self.client.clone(), self.config.clone(), request).await
     }
@@ -430,7 +429,7 @@ impl HttpTransport {
         };
 
         let response = tokio::select! {
-            r = req.send() => r.map_err(|e| map_middleware_error_standalone(e, &*self.config))?,
+            r = req.send() => r.map_err(|e| map_middleware_error_standalone(e, &self.config))?,
             _ = per_request_token.cancelled() => {
                 chunk_callback(StreamEvent::Error("request cancelled".into()));
                 return Err(CatcherError::Internal("request cancelled".into()));
@@ -521,11 +520,11 @@ impl HttpTransport {
         if let Some(ref queue) = self.priority_queue {
             let max = self.config.max_concurrency as usize;
             let available = queue.available_permits();
-            if available >= max { 0 } else { max - available }
+            max.saturating_sub(available)
         } else if let Some(ref sem) = self.concurrency_semaphore {
             let max = self.config.max_concurrency as usize;
             let available = sem.available_permits();
-            if available >= max { 0 } else { max - available }
+            max.saturating_sub(available)
         } else {
             0
         }
@@ -583,7 +582,7 @@ async fn execute_http_request(
     let mut host_header_override: Option<String> = None;
     if let Some(ref dns) = config.dns {
         if let Some(after_scheme) = url.strip_prefix("http://").or_else(|| url.strip_prefix("https://")) {
-            let host_end = after_scheme.find(|c: char| c == '/' || c == '?' || c == '#').unwrap_or(after_scheme.len());
+            let host_end = after_scheme.find(['/', '?', '#']).unwrap_or(after_scheme.len());
             let host_port = &after_scheme[..host_end];
             let hostname = host_port.split(':').next().unwrap_or(host_port);
             if let Some(mapped_ip) = crate::transport::dns::resolve_host_mapping(dns, hostname) {
@@ -631,7 +630,7 @@ async fn execute_http_request(
     let response = req
         .send()
         .await
-        .map_err(|e| map_middleware_error_standalone(e, &*config))?;
+        .map_err(|e| map_middleware_error_standalone(e, &config))?;
 
     let status = response.status().as_u16();
     let headers: HashMap<String, String> = response
@@ -677,7 +676,7 @@ fn base64_encode(input: &str) -> String {
     use std::fmt::Write;
     const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let bytes = input.as_bytes();
-    let mut result = String::with_capacity((bytes.len() + 2) / 3 * 4);
+    let mut result = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
         let mut n = 0u32;
         for (i, &byte) in chunk.iter().enumerate() {

@@ -1,4 +1,5 @@
 //! WebSocket C ABI — create / send / close / destroy
+#![allow(clippy::missing_safety_doc)]
 
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::sync::Arc;

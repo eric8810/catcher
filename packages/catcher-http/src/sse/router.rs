@@ -75,7 +75,7 @@ mod tests {
 
     #[test]
     fn test_08_id_empty() {
-        assert!(matches!(route_line("id:"), RouteAction::SetLastEventId(id) if id == ""));
+        assert!(matches!(route_line("id:"), RouteAction::SetLastEventId(id) if id.is_empty()));
     }
 
     #[test]
