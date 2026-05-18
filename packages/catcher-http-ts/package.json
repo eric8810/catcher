@@ -1,6 +1,6 @@
 {
   "name": "@eric8810/catcher-http",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "description": "Catcher HTTP client — resilient transport with retry, circuit breaker, priority scheduling",
   "type": "module",
   "main": "./dist/index.js",

@@ -11,3 +11,8 @@ members = [
 ]
 
 # Planned: "catcher-tus",  (TUS client, to be created)
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = "symbols"

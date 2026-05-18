@@ -1,6 +1,6 @@
 [package]
 name = "catcher-uniffi"
-version = "0.3.6"
+version = "0.3.7"
 edition = "2021"
 description = "UniFFI bindings for catcher — auto-generates Swift + Kotlin from Rust API"
 license = "MIT"
@@ -11,9 +11,9 @@ crate-type = ["cdylib", "staticlib"]
 name = "catcher_uniffi"
 
 [dependencies]
-catcher-core = { path = "../catcher-core", version = "0.3.6" }
-catcher-http = { path = "../catcher-http", version = "0.3.6" }
-catcher-ws = { path = "../catcher-ws", version = "0.3.6" }
+catcher-core = { path = "../catcher-core", version = "0.3.7" }
+catcher-http = { path = "../catcher-http", version = "0.3.7" }
+catcher-ws = { path = "../catcher-ws", version = "0.3.7" }
 uniffi = { version = "0.28", features = ["cli"] }
 serde_json = "1"
 thiserror = "1"

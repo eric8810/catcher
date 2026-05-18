@@ -92,9 +92,9 @@ catcher-core → catcher-http / catcher-ws → catcher-ffi / catcher-uniffi / ca
 | Job | 发布目标 | 说明 |
 |-----|---------|------|
 | `publish-npm-ts` | npm (4 个 TS 包) | `pnpm publish --access public` |
-| `publish-napi-http` | npm (napi-http 跨平台) | 5 个 target 构建 `.node` 文件 |
-| `publish-napi-ws` | npm (napi-ws 跨平台) | 5 个 target 构建 `.node` 文件 |
-| `publish-napi-assemble` | npm (napi 组装发布) | 汇总 artifacts + `napi prepublish` + `npm publish` |
+| `publish-napi-http` | npm (napi-http 跨平台) | 8 个 target 构建 `.node` 文件 + 子包分发 |
+| `publish-napi-ws` | npm (napi-ws 跨平台) | 8 个 target 构建 `.node` 文件 + 子包分发 |
+| `publish-napi-assemble` | npm (napi 组装发布) | `napi create-npm-dir` + `napi prepublish`（发布子包）+ `npm publish`（主包） |
 | `publish-rust` | crates.io (5 个 Rust crate) | 按依赖顺序 `cargo publish` |
 
 #### 通道 B：`catcher_core-v*` tag → pub.dev
@@ -251,7 +251,7 @@ chore: 杂项           → 不 bump
 **A**: 检查 commit message 是否符合 Conventional Commits 格式。`chore:` 类型的 commit 不会触发版本 bump。
 
 ### Q: napi 构建失败
-**A**: napi 包需要 Rust toolchain + 目标平台 target。检查 `Cargo.toml` 中的 `crate-type = ["cdylib"]` 配置。跨平台构建矩阵：linux-gnu / linux-musl / macos-arm64 / macos-x64 / windows-msvc。
+**A**: napi 包需要 Rust toolchain + 目标平台 target。检查 `Cargo.toml` 中的 `crate-type = ["cdylib"]` 配置。跨平台构建矩阵（8 个）：linux-x64-gnu / linux-x64-musl / linux-arm64-gnu / linux-arm64-musl / darwin-x64 / darwin-arm64 / win32-x64-msvc / win32-arm64-msvc。ARM64 Linux 使用 zig 交叉编译。
 
 ### Q: Cargo.lock 冲突
 **A**: 版本 bump 后需在 `packages/` 目录下运行 `cargo check` 或 `cargo generate-lockfile` 更新 Cargo.lock，然后提交。

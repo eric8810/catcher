@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file. See [release-please](https://github.com/googleapis/release-please) for automated management.
 
+## 0.3.7 (2026-05-18)
+
+### 🐛 Bug Fixes
+
+- **Windows native addon loading**: `native.ts` ABI suffix detection returned empty string on Windows, causing file lookup for `catcher-napi-http.win32-x64.node` instead of the correct `catcher-napi-http.win32-x64-msvc.node`. Added proper ABI detection: `msvc` for Windows, `gnu`/`musl` for Linux.
+
+### ✨ Features
+
+- **8-platform native addon support**: Expanded from 5 to 8 build targets — added `linux-arm64-gnu`, `linux-arm64-musl`, `win32-arm64-msvc`. ARM64 Linux targets use zig cross-compilation.
+- **Platform sub-package distribution**: Native addons now publish as separate per-platform `optionalDependencies` packages (e.g., `@eric8810/catcher-napi-http-win32-x64-msvc`). Main package no longer bundles all `.node` files, reducing install size from ~56MB to ~10MB per platform.
+- **Release binary size optimization**: Added `[profile.release]` with `lto = true`, `codegen-units = 1`, `strip = "symbols"` to reduce `.node` file sizes.
+
 ## 0.3.6 (2026-07-20)
 
 ### 🐛 Bug Fixes
