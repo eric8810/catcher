@@ -104,7 +104,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: napi-http-${{ matrix.settings.target }}
-          path: packages/catcher-napi-http/*.node
+          path: |
+            packages/catcher-napi-http/*.node
+            packages/catcher-napi-http/index.d.ts
           retention-days: 1
 
   publish-napi-ws:
@@ -200,8 +202,10 @@ jobs:
           for dir in napi-artifacts/napi-http-*; do
             [ -d "$dir" ] || continue
             cp "$dir"/*.node packages/catcher-napi-http/ || true
+            cp "$dir"/index.d.ts packages/catcher-napi-http/ || true
           done
           ls packages/catcher-napi-http/*.node || true
+          ls packages/catcher-napi-http/index.d.ts || true
           cd packages/catcher-napi-http
           pnpm exec napi prepublish -t npm --skip-gh-release
           npm publish --access public --ignore-scripts
