@@ -1,3 +1,9 @@
+## 0.3.1
+
+- Package `catcher_core` as a Flutter FFI plugin with platform native bundle metadata.
+- Bundle prebuilt Android, iOS, macOS, Linux, and Windows native libraries during pub.dev release.
+- Load Apple builds from `catcher_ffi.framework/catcher_ffi` and desktop/mobile dynamic libraries from app bundle search paths.
+
 ## 0.2.2
 
 - SSE client: `CatcherSseClient` (persistent + auto-reconnect) and `sseStream()` (one-shot).

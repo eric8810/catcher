@@ -255,16 +255,294 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
   # ──────────────────────────────────────────────
-  # 4. Flutter (pub.dev) — OIDC auto-publish
+  # 4. Flutter catcher_core — build native binaries
   # ──────────────────────────────────────────────
-  publish-flutter:
+  build-native-android:
     if: startsWith(github.ref, 'refs/tags/catcher_core-v')
     runs-on: ubuntu-latest
+    env:
+      ANDROID_NDK_VERSION: "27.0.12077973"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "packages -> target"
+      - name: Install Android NDK
+        run: sdkmanager "ndk;$ANDROID_NDK_VERSION"
+      - name: Build for all Android ABIs
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.ANDROID_NDK_VERSION }}
+        run: |
+          TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$TOOLCHAIN/aarch64-linux-android24-clang"
+          export CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER="$TOOLCHAIN/armv7a-linux-androideabi24-clang"
+          export CARGO_TARGET_I686_LINUX_ANDROID_LINKER="$TOOLCHAIN/i686-linux-android24-clang"
+          export CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER="$TOOLCHAIN/x86_64-linux-android24-clang"
+          rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
+          cd packages
+          cargo build --release -p catcher-ffi --target aarch64-linux-android
+          cargo build --release -p catcher-ffi --target armv7-linux-androideabi
+          cargo build --release -p catcher-ffi --target i686-linux-android
+          cargo build --release -p catcher-ffi --target x86_64-linux-android
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-native
+          path: |
+            packages/target/aarch64-linux-android/release/libcatcher_ffi.so
+            packages/target/armv7-linux-androideabi/release/libcatcher_ffi.so
+            packages/target/i686-linux-android/release/libcatcher_ffi.so
+            packages/target/x86_64-linux-android/release/libcatcher_ffi.so
+          retention-days: 1
+
+  build-native-ios:
+    if: startsWith(github.ref, 'refs/tags/catcher_core-v')
+    runs-on: macos-latest
+    env:
+      IPHONEOS_DEPLOYMENT_TARGET: "13.0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "packages -> target"
+      - name: Build for iOS device
+        run: |
+          rustup target add aarch64-apple-ios
+          cd packages
+          cargo build --release -p catcher-ffi --target aarch64-apple-ios
+      - name: Build for iOS simulator
+        run: |
+          rustup target add aarch64-apple-ios-sim x86_64-apple-ios
+          cd packages
+          cargo build --release -p catcher-ffi --target aarch64-apple-ios-sim
+          cargo build --release -p catcher-ffi --target x86_64-apple-ios
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-native
+          path: |
+            packages/target/aarch64-apple-ios/release/libcatcher_ffi.dylib
+            packages/target/aarch64-apple-ios-sim/release/libcatcher_ffi.dylib
+            packages/target/x86_64-apple-ios/release/libcatcher_ffi.dylib
+          retention-days: 1
+
+  build-native-macos:
+    if: startsWith(github.ref, 'refs/tags/catcher_core-v')
+    runs-on: macos-latest
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "10.15"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "packages -> target"
+      - name: Build for macOS
+        run: |
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          cd packages
+          cargo build --release -p catcher-ffi --target aarch64-apple-darwin
+          cargo build --release -p catcher-ffi --target x86_64-apple-darwin
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-native
+          path: |
+            packages/target/aarch64-apple-darwin/release/libcatcher_ffi.dylib
+            packages/target/x86_64-apple-darwin/release/libcatcher_ffi.dylib
+          retention-days: 1
+
+  build-native-windows:
+    if: startsWith(github.ref, 'refs/tags/catcher_core-v')
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "packages -> target"
+      - name: Build for Windows
+        run: |
+          cd packages && cargo build --release -p catcher-ffi --target x86_64-pc-windows-msvc
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-native
+          path: packages/target/x86_64-pc-windows-msvc/release/catcher_ffi.dll
+          retention-days: 1
+
+  build-native-linux:
+    if: startsWith(github.ref, 'refs/tags/catcher_core-v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "packages -> target"
+      - name: Install Linux cross linker
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+      - name: Build for Linux
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: |
+          rustup target add x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu
+          cd packages
+          cargo build --release -p catcher-ffi --target x86_64-unknown-linux-gnu
+          cargo build --release -p catcher-ffi --target aarch64-unknown-linux-gnu
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-native
+          path: |
+            packages/target/x86_64-unknown-linux-gnu/release/libcatcher_ffi.so
+            packages/target/aarch64-unknown-linux-gnu/release/libcatcher_ffi.so
+          retention-days: 1
+
+  # ──────────────────────────────────────────────
+  # 5. Flutter (pub.dev) — assemble + publish
+  # ──────────────────────────────────────────────
+  publish-flutter:
+    needs: [build-native-android, build-native-ios, build-native-macos, build-native-windows, build-native-linux]
+    if: startsWith(github.ref, 'refs/tags/catcher_core-v')
+    runs-on: macos-latest
     permissions:
       id-token: write
     steps:
       - uses: actions/checkout@v4
-      - uses: dart-lang/setup-dart@v1
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Download all native artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: native-artifacts
+
+      - name: Create platform bundle directories
+        run: |
+          mkdir -p packages/catcher_core/android/src/main/jniLibs/arm64-v8a
+          mkdir -p packages/catcher_core/android/src/main/jniLibs/armeabi-v7a
+          mkdir -p packages/catcher_core/android/src/main/jniLibs/x86
+          mkdir -p packages/catcher_core/android/src/main/jniLibs/x86_64
+          mkdir -p packages/catcher_core/ios/Frameworks
+          mkdir -p packages/catcher_core/macos/Frameworks
+          mkdir -p packages/catcher_core/linux/lib/arm64
+          mkdir -p packages/catcher_core/linux/lib/x64
+          mkdir -p packages/catcher_core/windows/lib/x64
+
+      - name: Copy Android binaries
+        run: |
+          copy_one() {
+            local pattern="$1"
+            local dest="$2"
+            local src
+            src=$(find native-artifacts -path "$pattern" -type f | head -n 1)
+            test -n "$src"
+            cp "$src" "$dest"
+          }
+
+          copy_one "*/aarch64-linux-android/release/libcatcher_ffi.so" packages/catcher_core/android/src/main/jniLibs/arm64-v8a/libcatcher_ffi.so
+          copy_one "*/armv7-linux-androideabi/release/libcatcher_ffi.so" packages/catcher_core/android/src/main/jniLibs/armeabi-v7a/libcatcher_ffi.so
+          copy_one "*/i686-linux-android/release/libcatcher_ffi.so" packages/catcher_core/android/src/main/jniLibs/x86/libcatcher_ffi.so
+          copy_one "*/x86_64-linux-android/release/libcatcher_ffi.so" packages/catcher_core/android/src/main/jniLibs/x86_64/libcatcher_ffi.so
+
+      - name: Assemble Apple XCFrameworks
+        run: |
+          find_one() {
+            local pattern="$1"
+            local src
+            src=$(find native-artifacts -path "$pattern" -type f | head -n 1)
+            test -n "$src"
+            echo "$src"
+          }
+
+          make_framework() {
+            local src="$1"
+            local dst="$2"
+            local bundle_id="$3"
+            rm -rf "$dst"
+            mkdir -p "$dst"
+            cp "$src" "$dst/catcher_ffi"
+            install_name_tool -id "@rpath/catcher_ffi.framework/catcher_ffi" "$dst/catcher_ffi"
+            cat > "$dst/Info.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleDevelopmentRegion</key>
+            <string>en</string>
+            <key>CFBundleExecutable</key>
+            <string>catcher_ffi</string>
+            <key>CFBundleIdentifier</key>
+            <string>${bundle_id}</string>
+            <key>CFBundleInfoDictionaryVersion</key>
+            <string>6.0</string>
+            <key>CFBundleName</key>
+            <string>catcher_ffi</string>
+            <key>CFBundlePackageType</key>
+            <string>FMWK</string>
+            <key>CFBundleShortVersionString</key>
+            <string>1.0</string>
+            <key>CFBundleVersion</key>
+            <string>1</string>
+          </dict>
+          </plist>
+          PLIST
+          }
+
+          IOS_DEVICE=$(find_one "*/aarch64-apple-ios/release/libcatcher_ffi.dylib")
+          IOS_SIM_ARM64=$(find_one "*/aarch64-apple-ios-sim/release/libcatcher_ffi.dylib")
+          IOS_SIM_X64=$(find_one "*/x86_64-apple-ios/release/libcatcher_ffi.dylib")
+          lipo -create "$IOS_SIM_ARM64" "$IOS_SIM_X64" -output "$RUNNER_TEMP/libcatcher_ffi_ios_sim.dylib"
+          make_framework "$IOS_DEVICE" "$RUNNER_TEMP/ios-device/catcher_ffi.framework" "com.eric8810.catcher.ffi.ios"
+          make_framework "$RUNNER_TEMP/libcatcher_ffi_ios_sim.dylib" "$RUNNER_TEMP/ios-simulator/catcher_ffi.framework" "com.eric8810.catcher.ffi.ios-simulator"
+          xcodebuild -create-xcframework \
+            -framework "$RUNNER_TEMP/ios-device/catcher_ffi.framework" \
+            -framework "$RUNNER_TEMP/ios-simulator/catcher_ffi.framework" \
+            -output packages/catcher_core/ios/Frameworks/catcher_ffi.xcframework
+
+          MACOS_ARM64=$(find_one "*/aarch64-apple-darwin/release/libcatcher_ffi.dylib")
+          MACOS_X64=$(find_one "*/x86_64-apple-darwin/release/libcatcher_ffi.dylib")
+          lipo -create "$MACOS_ARM64" "$MACOS_X64" -output "$RUNNER_TEMP/libcatcher_ffi_macos.dylib"
+          make_framework "$RUNNER_TEMP/libcatcher_ffi_macos.dylib" "$RUNNER_TEMP/macos/catcher_ffi.framework" "com.eric8810.catcher.ffi.macos"
+          xcodebuild -create-xcframework \
+            -framework "$RUNNER_TEMP/macos/catcher_ffi.framework" \
+            -output packages/catcher_core/macos/Frameworks/catcher_ffi.xcframework
+
+      - name: Copy Windows binaries
+        run: |
+          cp native-artifacts/windows-native/catcher_ffi.dll packages/catcher_core/windows/lib/x64/catcher_ffi.dll
+
+      - name: Copy Linux binaries
+        run: |
+          copy_one() {
+            local pattern="$1"
+            local dest="$2"
+            local src
+            src=$(find native-artifacts -path "$pattern" -type f | head -n 1)
+            test -n "$src"
+            cp "$src" "$dest"
+          }
+
+          copy_one "*/x86_64-unknown-linux-gnu/release/libcatcher_ffi.so" packages/catcher_core/linux/lib/x64/libcatcher_ffi.so
+          copy_one "*/aarch64-unknown-linux-gnu/release/libcatcher_ffi.so" packages/catcher_core/linux/lib/arm64/libcatcher_ffi.so
+
+      - name: Verify platform bundles
+        run: |
+          find packages/catcher_core/android/src/main/jniLibs -type f | sort
+          find packages/catcher_core/ios/Frameworks -type f | sort
+          find packages/catcher_core/macos/Frameworks -type f | sort
+          find packages/catcher_core/linux/lib -type f | sort
+          find packages/catcher_core/windows/lib -type f | sort
+
       - name: Publish catcher_core
         working-directory: packages/catcher_core
-        run: dart pub publish --force
+        run: flutter pub publish --force

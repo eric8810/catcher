@@ -522,9 +522,8 @@ class CatcherHttpClient {
       }
     }
 
-    int requestId;
     try {
-      requestId = fn(
+      final requestId = fn(
         _handle!,
         methodFfi.ref,
         urlFfi.ref,
@@ -536,6 +535,9 @@ class CatcherHttpClient {
         nativeCallback.nativeFunction,
         nullptr,
       );
+      if (requestId == 0) {
+        throw CatcherHttpError('Failed to start HTTP request');
+      }
     } catch (e) {
       if (!cleanedUp) {
         cleanedUp = true;
