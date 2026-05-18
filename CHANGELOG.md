@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [release-please](https://github.com/googleapis/release-please) for automated management.
 
+## 0.3.5 (2026-07-20)
+
+### 🐛 Bug Fixes
+
+- **rustls CryptoProvider panic on wss:// (critical)**: `catcher-ws` enabled `tokio-tungstenite/rustls-tls` but never installed a `CryptoProvider`. Since rustls 0.23, this must be done explicitly. Added `ensure_tls_provider()` with `OnceLock`-guarded `ring::default_provider()` initialization in `connect_stream()`. Fixes runtime panic when connecting to any `wss://` endpoint.
+- **catcher-http tls_pinning test failure**: `make_mock_verifier()` called `WebPkiServerVerifier::builder().build()` without a `CryptoProvider` installed. Added `OnceLock`-guarded `aws_lc_rs::default_provider()` initialization in the test module.
+
 ## 0.3.3 (2026-07-20)
 
 ### 🐛 Bug Fixes

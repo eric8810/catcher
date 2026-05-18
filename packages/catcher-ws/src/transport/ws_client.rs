@@ -3,6 +3,7 @@
 //! 使用 tokio-tungstenite 建立连接，通过 mpsc channel 推送 WsEvent。
 //! 集成：headers/protocols 握手、多端点竞速、自动重连、心跳采样、压缩配置。
 
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use futures_util::{SinkExt, StreamExt};
@@ -18,6 +19,23 @@ use crate::ws::{build_ws_config, EndpointRacer, HeartbeatManager, ReconnectManag
 pub(crate) type WsStream = tokio_tungstenite::WebSocketStream<
     tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
 >;
+
+// ── TLS 初始化 ──
+
+/// 确保 rustls CryptoProvider 已安装（仅需执行一次）。
+/// rustls 0.23+ 不再内置默认 crypto backend，必须显式安装。
+#[cfg(feature = "rustls-tls")]
+static TLS_PROVIDER_INSTALLED: OnceLock<()> = OnceLock::new();
+
+#[cfg(feature = "rustls-tls")]
+fn ensure_tls_provider() {
+    TLS_PROVIDER_INSTALLED.get_or_init(|| {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
+}
+
+#[cfg(not(feature = "rustls-tls"))]
+fn ensure_tls_provider() {}
 
 // ── 命令（WsHandle → 内部任务）──
 
@@ -138,6 +156,8 @@ pub(crate) async fn connect_stream(
     url: &str,
     config: &WsClientConfig,
 ) -> Result<(WsStream, u64), CatcherError> {
+    ensure_tls_provider();
+
     let request = build_request(url, config)?;
     let ws_config = build_ws_config(config);
 
