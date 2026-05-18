@@ -10,7 +10,7 @@ Resilient network communication toolkit — Rust core, TypeScript wrappers, Flut
 
 > "Catcher" — catches network failures before they reach your business logic.
 
-## ⚠️ Breaking Changes (0.3.1)
+## ⚠️ Breaking Changes (0.3.0+)
 
 ### napi packages (Node.js native)
 
@@ -21,6 +21,8 @@ Resilient network communication toolkit — Rust core, TypeScript wrappers, Flut
 | Class names | `JsHttpClient`, `JsWsClient` | `HttpClient`, `WsClient` |
 | Callback events | JSON strings | Typed objects (auto-parsed) |
 | WS Message data | `event.data` | `event.data_base64` (base64) |
+| NAPI-RS types | — | camelCase fields (`elapsedMs`, `timeoutMs`, etc.) |
+| TLS (wss://) | ❌ napi-ws broken | ✅ rustls built-in (v0.3.2) |
 
 ### Rust crates
 
@@ -137,7 +139,7 @@ npm install @eric8810/catcher-web
 
 ```yaml
 dependencies:
-  catcher_core: ^0.3.1
+  catcher_core: ^0.3.3
 ```
 
 ### Usage

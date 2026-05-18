@@ -313,7 +313,7 @@ dependencies = [
 
 [[package]]
 name = "catcher-core"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -322,7 +322,7 @@ dependencies = [
 
 [[package]]
 name = "catcher-ffi"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "catcher-core",
  "catcher-http",
@@ -335,7 +335,7 @@ dependencies = [
 
 [[package]]
 name = "catcher-http"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "async-trait",
  "backon",
@@ -367,7 +367,7 @@ dependencies = [
 
 [[package]]
 name = "catcher-napi-http"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "base64",
  "bytes",
@@ -385,7 +385,7 @@ dependencies = [
 
 [[package]]
 name = "catcher-napi-ws"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "catcher-ws",
  "napi",
@@ -397,7 +397,7 @@ dependencies = [
 
 [[package]]
 name = "catcher-uniffi"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "catcher-core",
  "catcher-http",
@@ -411,7 +411,7 @@ dependencies = [
 
 [[package]]
 name = "catcher-ws"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "backon",
  "base64",
@@ -2661,8 +2661,14 @@ checksum = "8f72a05e828585856dacd553fba484c242c46e391fb0e58917c942ee9202915c"
 dependencies = [
  "futures-util",
  "log",
+ "native-tls",
+ "rustls",
+ "rustls-pki-types",
  "tokio",
+ "tokio-native-tls",
+ "tokio-rustls",
  "tungstenite",
+ "webpki-roots 0.26.11",
 ]
 
 [[package]]
@@ -2785,7 +2791,10 @@ dependencies = [
  "http",
  "httparse",
  "log",
+ "native-tls",
  "rand 0.9.4",
+ "rustls",
+ "rustls-pki-types",
  "sha1",
  "thiserror 2.0.18",
 ]

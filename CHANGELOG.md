@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file. See [release-please](https://github.com/googleapis/release-please) for automated management.
 
+## 0.3.3 (2026-07-20)
+
+### 🐛 Bug Fixes
+
+- **Linux native addon loading (critical)**: `native.ts` used `platform-arch` format (e.g., `linux-x64`) but napi prepublish generates files with full triple names (e.g., `linux-x64-gnu`). This caused all Linux users to get "native addon not found" errors. Fixed by adding libc suffix detection and multiple fallback path patterns.
+
+## 0.3.2 (2026-07-20)
+
+### 🐛 Bug Fixes
+
+- **napi-http TS types (GitHub #3)**: Hand-written TypeScript types used `snake_case` but NAPI-RS auto-generates `camelCase`. Replaced hand-written types with re-exports from auto-generated `index.d.ts`. JSON config types (serde-based) correctly retain `snake_case` with `camelCase` alias support.
+- **napi-ws TLS missing (GitHub #4)**: `catcher-ws` did not enable any TLS feature for `tokio-tungstenite`, causing all `wss://` connections to fail immediately. Added `rustls-tls` (webpki-roots) as default feature, consistent with `catcher-http`.
+- **`catcher_core/rust` workspace isolation**: Added empty `[workspace]` table to `catcher_core/rust/Cargo.toml` to prevent it from incorrectly inheriting the monorepo workspace.
+- **`normalizeOptions` cleanup**: Rewritten to build clean option objects instead of spreading raw input (which leaked stale snake_case properties).
+
 ## 0.3.1 (2026-05-18)
 
 ### 🐛 Bug Fixes

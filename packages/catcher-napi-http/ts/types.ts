@@ -1,6 +1,17 @@
 // ── napi-http 配置 + 事件类型 ──
-// 所有字段与 Rust HttpClientConfig 一一对应
-// 可选字段标注默认值，参考 docs/user-manual/api/napi.md
+//
+// #[napi(object)] 类型从自动生成的 index.d.ts re-export，不手写。
+// JSON 配置类型仍需手写（serde 反序列化，NAPI-RS 不管）。
+
+// ── NAPI-RS 自动生成的对象类型（re-export） ──
+// index.d.ts 由 NAPI-RS 生成，字段名已是正确 camelCase。
+export type {
+  RequestOptions,
+  JsHttpResponse as HttpResponse,
+  JsMetrics as Metrics,
+} from '../index.d'
+
+// ── JSON 配置类型（通过 JSON.stringify 传给构造函数，serde 反序列化） ──
 
 /** 连接池配置 — 对应 Rust PoolConfig */
 export interface PoolConfig {
@@ -115,7 +126,7 @@ export interface RedirectConfig {
  * HTTP 客户端配置 — 对应 Rust HttpClientConfig
  *
  * 所有可选字段有合理默认值，只需传入需要覆盖的字段。
- * 字段名使用 snake_case（与 Rust 一致）。
+ * 字段名使用 snake_case（与 Rust 一致，通过 serde alias 兼容 camelCase）。
  */
 export interface HttpClientConfig {
   /** 基础 URL，会与请求路径拼接 */
@@ -175,35 +186,6 @@ export interface SseClientConfig {
   }
   /** 熔断器配置 — 复用 CircuitBreakerConfig */
   circuit_breaker?: CircuitBreakerConfig
-}
-
-/** HTTP 响应 — 对应 Rust JsHttpResponse */
-export interface HttpResponse {
-  status: number
-  headers: Record<string, string>
-  body: Buffer
-  elapsed_ms: number
-}
-
-/** 运行时指标 — 对应 Rust JsMetrics */
-export interface Metrics {
-  http_requests: number
-  http_success_rate: number
-  http_avg_latency_us: number
-  http_retries: number
-  ws_connect_success_rate: number
-  ws_disconnects: number
-  ws_messages_sent: number
-  ws_messages_received: number
-  cb_open_count: number
-  queue_timeouts: number
-}
-
-/** 每请求选项 — 对应 Rust RequestOptions */
-export interface RequestOptions {
-  headers?: Record<string, string>
-  timeout_ms?: number
-  content_type?: string
 }
 
 /** 流式下载事件 — executeStream 回调参数 */

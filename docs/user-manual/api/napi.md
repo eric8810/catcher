@@ -24,7 +24,9 @@ napi 包将 Rust 核心编译为原生 `.node` 附加模块。TypeScript wrapper
 
 - **类型安全配置**：传对象或 JSON 字符串，IDE 自动补全
 - **类型安全事件**：回调直接收到解析后的强类型对象（无需手动 `JSON.parse`）
-- **camelCase 兼容**：`base_url` 和 `baseUrl` 均可使用
+- **camelCase 兼容**：`base_url` 和 `baseUrl` 均可使用（JSON 配置通过 serde alias）
+- **NAPI-RS 自动类型**：`HttpResponse`、`RequestOptions`、`Metrics` 由 NAPI-RS 生成，字段名为 camelCase（如 `elapsedMs`、`timeoutMs`）
+- **TLS 内置**：`wss://` 开箱即用（rustls，无系统 TLS 依赖）
 - **SSE 支持**：`SseStream`（一次性）和 `SseClient`（自动重连）
 
 ---
@@ -146,20 +148,41 @@ const sse = new SseClient(
 
 ### RequestOptions
 
+> NAPI-RS auto-generated type — camelCase fields.
+
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `headers` | `Record<string, string>` | 请求头 |
-| `timeout_ms` | `number` | per-request 超时覆盖 |
-| `content_type` | `string` | Content-Type |
+| `timeoutMs` | `number` | per-request 超时覆盖 |
+| `contentType` | `string` | Content-Type |
 
 ### HttpResponse
+
+> NAPI-RS auto-generated type — camelCase fields.
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `status` | `number` | HTTP 状态码 |
 | `headers` | `Record<string, string>` | 响应头 |
 | `body` | `Buffer` | 响应体（二进制） |
-| `elapsed_ms` | `number` | 耗时（ms） |
+| `elapsedMs` | `number` | 耗时（ms） |
+
+### Metrics
+
+> NAPI-RS auto-generated type — camelCase fields.
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `httpRequests` | `number` | HTTP 请求数 |
+| `httpSuccessRate` | `number` | HTTP 成功率 |
+| `httpAvgLatencyUs` | `number` | HTTP 平均延迟（μs） |
+| `httpRetries` | `number` | HTTP 重试次数 |
+| `wsConnectSuccessRate` | `number` | WS 连接成功率 |
+| `wsDisconnects` | `number` | WS 断连次数 |
+| `wsMessagesSent` | `number` | WS 发送消息数 |
+| `wsMessagesReceived` | `number` | WS 接收消息数 |
+| `cbOpenCount` | `number` | 熔断器打开次数 |
+| `queueTimeouts` | `number` | 队列超时次数 |
 
 ### StreamEvent
 
@@ -196,12 +219,12 @@ const resp = await client.get('/users/1')
 console.log(resp.status, resp.body.toString())
 
 // POST with body
-await client.post('/messages', Buffer.from('hello'), { content_type: 'text/plain' })
+await client.post('/messages', Buffer.from('hello'), { contentType: 'text/plain' })
 
 // POST with headers
 await client.post('/messages', Buffer.from(JSON.stringify({ text: 'hi' })), {
   headers: { Authorization: 'Bearer xxx' },
-  content_type: 'application/json',
+  contentType: 'application/json',
 })
 
 // Circuit breaker state
