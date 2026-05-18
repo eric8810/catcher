@@ -7,8 +7,12 @@
     "esModuleInterop": true,
     "declaration": true,
     "outDir": "dist",
-    "rootDir": "ts",
-    "skipLibCheck": true
+    "rootDir": "..",
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": {
+      "@napi-types": ["../index.d.ts"]
+    }
   },
-  "include": ["ts"]
+  "include": ["ts", "../index.d.ts"]
 }
