@@ -187,23 +187,30 @@ jobs:
           cache: pnpm
           registry-url: https://registry.npmjs.org
       - run: pnpm install
-      - name: Build TS wrappers for napi packages
-        run: |
-          pnpm --filter @eric8810/catcher-napi-http build:ts
-          pnpm --filter @eric8810/catcher-napi-ws build:ts
       - name: Download all napi artifacts
         uses: actions/download-artifact@v4
         with:
           path: napi-artifacts
           merge-multiple: false
-      - name: Assemble and publish catcher-napi-http
+      - name: Place napi-http artifacts (index.d.ts + *.node)
         run: |
-          ls napi-artifacts/ || true
           for dir in napi-artifacts/napi-http-*; do
             [ -d "$dir" ] || continue
             cp "$dir"/*.node packages/catcher-napi-http/ || true
             cp "$dir"/index.d.ts packages/catcher-napi-http/ || true
           done
+      - name: Place napi-ws artifacts (*.node)
+        run: |
+          for dir in napi-artifacts/napi-ws-*; do
+            [ -d "$dir" ] || continue
+            cp "$dir"/*.node packages/catcher-napi-ws/ || true
+          done
+      - name: Build TS wrappers for napi packages
+        run: |
+          pnpm --filter @eric8810/catcher-napi-http build:ts
+          pnpm --filter @eric8810/catcher-napi-ws build:ts
+      - name: Assemble and publish catcher-napi-http
+        run: |
           ls packages/catcher-napi-http/*.node || true
           ls packages/catcher-napi-http/index.d.ts || true
           cd packages/catcher-napi-http
@@ -213,10 +220,6 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Assemble and publish catcher-napi-ws
         run: |
-          for dir in napi-artifacts/napi-ws-*; do
-            [ -d "$dir" ] || continue
-            cp "$dir"/*.node packages/catcher-napi-ws/ || true
-          done
           ls packages/catcher-napi-ws/*.node || true
           cd packages/catcher-napi-ws
           pnpm exec napi prepublish -t npm --skip-gh-release
