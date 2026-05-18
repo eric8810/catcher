@@ -10,6 +10,7 @@
 | 网络层 | reqwest (Rust) | axios → node:http |
 | 韧性层 | catcher-rs (Rust) | p-retry + cockatiel (TS) |
 | 拦截器 | ❌ 待暴露 | ✅ 完整 |
+| TLS | ✅ rustls 内置 | ✅ Node.js 内置 |
 | 状态 | ✅ 已编译 | ✅ 功能最全 |
 
 ---
@@ -22,41 +23,48 @@ npm install @eric8810/catcher-napi-http @eric8810/catcher-napi-ws
 
 ### HTTP
 
-```javascript
-const { HttpClient } = require('@eric8810/catcher-napi-http')
+```typescript
+import { HttpClient } from '@eric8810/catcher-napi-http'
 
-const client = new HttpClient(JSON.stringify({
+const client = new HttpClient({
   base_url: 'https://api.example.com',
   connect_timeout_ms: 5000,
   response_timeout_ms: 30000,
-  keep_alive: true,
-  retry: { max_attempts: 3, backoff: 'exponential' },
+  retry: { max_attempts: 3, backoff: 'Fixed' },
   circuit_breaker: { failure_threshold: 5, reset_timeout_ms: 30000 },
-}))
+})
 
 const resp = await client.get('/users/1')
 console.log(resp.status, resp.body.toString())
+console.log('Elapsed:', resp.elapsedMs, 'ms')
 
-await client.post('/messages', Buffer.from('hello'), 'text/plain')
+await client.post('/messages', Buffer.from('hello'), { contentType: 'text/plain' })
 ```
 
 ### WebSocket
 
-```javascript
-const { WsClient } = require('@eric8810/catcher-napi-ws')
+```typescript
+import { WsClient } from '@eric8810/catcher-napi-ws'
+import type { WsEvent } from '@eric8810/catcher-napi-ws'
 
-const ws = new WsClient(JSON.stringify({
-  urls: ['wss://cn.example.com', 'wss://sg.example.com'],
-  per_message_deflate: true,
-  reconnect: { initial_delay_ms: 1000, max_delay_ms: 30000, max_attempts: 20 },
-}), (eventJson) => {
-  const event = JSON.parse(eventJson)
-  console.log(event.type, event)
-})
+const ws = new WsClient(
+  {
+    urls: ['wss://cn.example.com', 'wss://sg.example.com'],
+    reconnect: { initial_delay_ms: 1000, max_delay_ms: 30000, max_attempts: 20 },
+  },
+  (event: WsEvent) => {
+    // event 已经是解析后的强类型对象，无需 JSON.parse
+    if (event.type === 'Message') {
+      console.log(Buffer.from(event.data_base64, 'base64').toString())
+    }
+  },
+)
 
 ws.send('hello')
 ws.close()
 ```
+
+> **TLS**: `wss://` connections work out of the box (rustls bundled, no system TLS dependency).
 
 ---
 

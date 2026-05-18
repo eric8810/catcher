@@ -7,9 +7,11 @@
 
 Wraps `catcher-ws`'s `WsTransport` — tokio-tungstenite + auto-reconnect + heartbeat, compiled to a native addon. Includes typed TypeScript wrappers with auto-generated `.d.ts`.
 
-## ⚠️ Breaking Changes (0.3.0)
+## ⚠️ Breaking Changes (0.3.0+)
 
 > **Migrate from 0.2.x → 0.3.x** — see [napi API docs](https://github.com/eric8810/catcher/blob/master/docs/user-manual/api/napi.md) for full details.
+>
+> **v0.3.2**: `wss://` connections now work correctly (TLS via rustls enabled by default).
 
 | Change | Before | After |
 |--------|--------|-------|
@@ -42,6 +44,8 @@ npm install @eric8810/catcher-napi-ws
 ```
 
 Pre-built binaries available for Linux (x64 gnu/musl), macOS (x64/arm64), and Windows (x64).
+
+**TLS**: `wss://` connections supported out of the box via rustls (bundled, no system TLS dependency).
 
 ## Usage
 
