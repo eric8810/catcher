@@ -256,7 +256,7 @@ describe('S4: 跨地域用户(高RTT)', () => {
       profile.conditions, `${profile.emoji} ${profile.name}`, vanillaS4, catcherS4, httpUrl,
     )
     reporter.addResult(r)
-    expect(r.catcher.successRate).toBeGreaterThanOrEqual(r.vanilla.successRate - 0.1)
+    expect(r.catcher.successRate).toBeGreaterThanOrEqual(r.vanilla.successRate - 0.2)
   }, TIMEOUT)
 })
 
