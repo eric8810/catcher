@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file. See [release-please](https://github.com/googleapis/release-please) for automated management.
 
+## 0.3.1 (2026-05-18)
+
+### 🐛 Bug Fixes
+
+- Republish all packages from correct commit (v0.3.0 napi/crates.io packages were from stale tag).
+- Clippy: ~40 fixes including redundant closures, auto-deref, saturating_sub, div_ceil, slice::from_ref, etc.
+- FFI: `catcher_free_event_data` made `pub unsafe extern "C"` for correct visibility.
+- FFI: Added safety documentation comments to all unsafe functions.
+- `catcher_core/rust/Cargo.toml` version sync (was stuck at 0.2.2).
+- Test files: wrapped unsafe FFI calls in `unsafe {}` blocks.
+
 ## 0.3.0 (2026-07)
 
 ### ⚠️ Breaking Changes
