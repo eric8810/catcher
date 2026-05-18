@@ -137,7 +137,7 @@ npm install @eric8810/catcher-web
 
 ```yaml
 dependencies:
-  catcher_core: ^0.2.2
+  catcher_core: ^0.3.0
 ```
 
 ### Usage
