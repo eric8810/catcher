@@ -10,7 +10,7 @@ Resilient network communication toolkit — Rust core, TypeScript wrappers, Flut
 
 > "Catcher" — catches network failures before they reach your business logic.
 
-## ⚠️ Breaking Changes (0.3.0)
+## ⚠️ Breaking Changes (0.3.1)
 
 ### napi packages (Node.js native)
 
@@ -137,7 +137,7 @@ npm install @eric8810/catcher-web
 
 ```yaml
 dependencies:
-  catcher_core: ^0.3.0
+  catcher_core: ^0.3.1
 ```
 
 ### Usage

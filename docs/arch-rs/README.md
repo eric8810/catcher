@@ -1,6 +1,6 @@
 # catcher 架构文档总索引
 
-> v0.3.0 — 按协议分层，Rust / TS / napi-rs / Dart 四层统一拆分
+> v0.3.1 — 按协议分层，Rust / TS / napi-rs / Dart 四层统一拆分
 > 代码位置：`packages/`
 
 ---
