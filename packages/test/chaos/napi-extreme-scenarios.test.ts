@@ -120,7 +120,7 @@ describe('S9 — GPRS extreme weak network', () => {
 
     // catcher should not be worse than vanilla
     expect(cSuccess / ITERATIONS).toBeGreaterThanOrEqual(vSuccess / ITERATIONS - 0.05)
-  }, TIMEOUT)
+  }, 600_000) // GPRS is extremely slow — needs 10min for 30 iterations
 })
 
 // ═══════════════════════════════════════════════════════════════
