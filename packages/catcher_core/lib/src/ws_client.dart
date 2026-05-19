@@ -338,6 +338,32 @@ class WsHeartbeatConfig {
       };
 }
 
+enum WsApplicationCompressionAlgorithm {
+  gzip('gzip'),
+  zstd('zstd');
+
+  final String wireName;
+  const WsApplicationCompressionAlgorithm(this.wireName);
+}
+
+class WsApplicationCompressionConfig {
+  final bool enabled;
+  final WsApplicationCompressionAlgorithm algorithm;
+  final int thresholdBytes;
+
+  const WsApplicationCompressionConfig({
+    this.enabled = true,
+    this.algorithm = WsApplicationCompressionAlgorithm.gzip,
+    this.thresholdBytes = 1024,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'enabled': enabled,
+        'algorithm': algorithm.wireName,
+        'threshold_bytes': thresholdBytes,
+      };
+}
+
 class WsClientConfig {
   final List<String> urls;
   final bool perMessageDeflate;
@@ -349,10 +375,11 @@ class WsClientConfig {
   final Map<String, String> headers;
   final List<String> protocols;
   final int deflateThresholdBytes;
+  final WsApplicationCompressionConfig? applicationCompression;
 
   const WsClientConfig({
     required this.urls,
-    this.perMessageDeflate = false,
+    this.perMessageDeflate = true,
     this.handshakeTimeoutMs = 15000,
     this.maxPayloadBytes = 67108864, // 64MB
     this.reconnect,
@@ -360,7 +387,8 @@ class WsClientConfig {
     this.raceCount = 1,
     this.headers = const {},
     this.protocols = const [],
-    this.deflateThresholdBytes = 256,
+    this.deflateThresholdBytes = 1024,
+    this.applicationCompression,
   });
 
   Map<String, dynamic> toJson() => {
@@ -374,6 +402,8 @@ class WsClientConfig {
         'headers': headers,
         'protocols': protocols,
         'deflate_threshold_bytes': deflateThresholdBytes,
+        if (applicationCompression != null)
+          'application_compression': applicationCompression!.toJson(),
       };
 }
 

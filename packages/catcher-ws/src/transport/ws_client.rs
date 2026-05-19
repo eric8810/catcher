@@ -1,41 +1,25 @@
 //! WebSocket 传输层 — 完整集成
 //!
-//! 使用 tokio-tungstenite 建立连接，通过 mpsc channel 推送 WsEvent。
+//! 使用 yawc 建立连接，通过 mpsc channel 推送 WsEvent。
 //! 集成：headers/protocols 握手、多端点竞速、自动重连、心跳采样、压缩配置。
 
-use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::mpsc;
+use yawc::frame::{Frame, OpCode};
 
-use catcher_core::CatcherError;
 use crate::types::ws::*;
-use crate::ws::{build_ws_config, EndpointRacer, HeartbeatManager, ReconnectManager};
+use crate::ws::{
+    build_ws_options, decode_application_compression_frame, encode_application_compression_frame,
+    EndpointRacer, HeartbeatManager, ReconnectManager, APPLICATION_COMPRESSION_MAGIC,
+};
+use catcher_core::CatcherError;
 
 // ── 类型别名 ──
 
 /// 底层 WebSocket 流类型
-pub(crate) type WsStream = tokio_tungstenite::WebSocketStream<
-    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
->;
-
-// ── TLS 初始化 ──
-
-/// 确保 rustls CryptoProvider 已安装（仅需执行一次）。
-/// rustls 0.23+ 不再内置默认 crypto backend，必须显式安装。
-#[cfg(feature = "rustls-tls")]
-static TLS_PROVIDER_INSTALLED: OnceLock<()> = OnceLock::new();
-
-#[cfg(feature = "rustls-tls")]
-fn ensure_tls_provider() {
-    TLS_PROVIDER_INSTALLED.get_or_init(|| {
-        let _ = rustls::crypto::ring::default_provider().install_default();
-    });
-}
-
-#[cfg(not(feature = "rustls-tls"))]
-fn ensure_tls_provider() {}
+pub(crate) type WsStream = yawc::TcpWebSocket;
 
 // ── 命令（WsHandle → 内部任务）──
 
@@ -111,43 +95,78 @@ enum LoopOutcome {
     HeartbeatTimeout,
 }
 
+fn application_compression_algorithm_name(
+    algorithm: ApplicationCompressionAlgorithm,
+) -> &'static str {
+    match algorithm {
+        ApplicationCompressionAlgorithm::Gzip => "gzip",
+        ApplicationCompressionAlgorithm::Zstd => "zstd",
+    }
+}
+
+fn encode_text_message(text: &str, config: &WsClientConfig) -> Result<Frame, CatcherError> {
+    if !config.per_message_deflate {
+        if let Some(ref compression) = config.application_compression {
+            if let Some(frame) =
+                encode_application_compression_frame(text.as_bytes(), false, compression)?
+            {
+                return Ok(Frame::binary(frame));
+            }
+        }
+    }
+    Ok(Frame::text(text.to_string()))
+}
+
+fn encode_binary_message(data: &[u8], config: &WsClientConfig) -> Result<Frame, CatcherError> {
+    if !config.per_message_deflate {
+        if let Some(ref compression) = config.application_compression {
+            if let Some(frame) = encode_application_compression_frame(data, true, compression)? {
+                return Ok(Frame::binary(frame));
+            }
+        }
+    }
+    Ok(Frame::binary(data.to_vec()))
+}
+
 // ── 底层连接 ──
 
-/// 构建带 headers 和 protocols 的 tungstenite Request
-fn build_request(
-    url: &str,
-    config: &WsClientConfig,
-) -> Result<tokio_tungstenite::tungstenite::handshake::client::Request, CatcherError> {
-    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+/// 构建带 headers 和 protocols 的 yawc HTTP request builder。
+fn build_request(config: &WsClientConfig) -> Result<yawc::HttpRequestBuilder, CatcherError> {
+    let mut builder = yawc::HttpRequest::builder();
 
-    let mut request = url
-        .into_client_request()
-        .map_err(|e| CatcherError::Internal(format!("invalid WS URL: {e}")))?;
-
-    let headers = request.headers_mut();
-
-    // 自定义 headers
     for (k, v) in &config.headers {
-        let name = tokio_tungstenite::tungstenite::http::HeaderName::from_bytes(k.as_bytes())
+        let name = http::HeaderName::from_bytes(k.as_bytes())
             .map_err(|e| CatcherError::Internal(format!("invalid header name '{k}': {e}")))?;
-        let value = tokio_tungstenite::tungstenite::http::HeaderValue::from_str(v)
+        let value = http::HeaderValue::from_str(v)
             .map_err(|e| CatcherError::Internal(format!("invalid header value for '{k}': {e}")))?;
-        headers.append(name, value);
+        builder = builder.header(name, value);
+    }
+
+    if !config.per_message_deflate {
+        if let Some(ref compression) = config.application_compression {
+            if compression.enabled {
+                let algorithm = application_compression_algorithm_name(compression.algorithm);
+                builder = builder.header("X-Catcher-Application-Compression", algorithm);
+                let format = std::str::from_utf8(APPLICATION_COMPRESSION_MAGIC).map_err(|e| {
+                    CatcherError::Internal(format!("invalid compression magic: {e}"))
+                })?;
+                builder = builder.header("X-Catcher-Application-Compression-Format", format);
+                builder = builder.header(
+                    "X-Catcher-Application-Compression-Threshold",
+                    compression.threshold_bytes.to_string(),
+                );
+            }
+        }
     }
 
     // WebSocket 子协议
     if !config.protocols.is_empty() {
-        let value = tokio_tungstenite::tungstenite::http::HeaderValue::from_str(
-            &config.protocols.join(", "),
-        )
-        .map_err(|e| CatcherError::Internal(format!("invalid protocols: {e}")))?;
-        headers.insert(
-            tokio_tungstenite::tungstenite::http::header::SEC_WEBSOCKET_PROTOCOL,
-            value,
-        );
+        let value = http::HeaderValue::from_str(&config.protocols.join(", "))
+            .map_err(|e| CatcherError::Internal(format!("invalid protocols: {e}")))?;
+        builder = builder.header(http::header::SEC_WEBSOCKET_PROTOCOL, value);
     }
 
-    Ok(request)
+    Ok(builder)
 }
 
 /// 底层 WebSocket 连接 — 处理 headers/protocols/handshake_timeout/deflate。
@@ -156,25 +175,25 @@ pub(crate) async fn connect_stream(
     url: &str,
     config: &WsClientConfig,
 ) -> Result<(WsStream, u64), CatcherError> {
-    ensure_tls_provider();
-
-    let request = build_request(url, config)?;
-    let ws_config = build_ws_config(config);
+    let parsed_url = url
+        .parse()
+        .map_err(|e| CatcherError::Internal(format!("invalid WS URL: {e}")))?;
+    let request = build_request(config)?;
+    let ws_options = build_ws_options(config);
 
     let start = Instant::now();
+    let connect = yawc::WebSocket::connect(parsed_url)
+        .with_options(ws_options)
+        .with_request(request);
     let result = if config.handshake_timeout_ms > 0 {
-        tokio::time::timeout(
-            Duration::from_millis(config.handshake_timeout_ms),
-            tokio_tungstenite::connect_async_with_config(request, Some(ws_config), true),
-        )
-        .await
-        .map_err(|_| CatcherError::ConnectionTimeout(config.handshake_timeout_ms))?
+        tokio::time::timeout(Duration::from_millis(config.handshake_timeout_ms), connect)
+            .await
+            .map_err(|_| CatcherError::ConnectionTimeout(config.handshake_timeout_ms))?
     } else {
-        tokio_tungstenite::connect_async_with_config(request, Some(ws_config), true).await
+        connect.await
     };
 
-    let (stream, _response) = result
-        .map_err(|e| CatcherError::Internal(format!("ws connect failed: {e}")))?;
+    let stream = result.map_err(|e| CatcherError::Internal(format!("ws connect failed: {e}")))?;
 
     let latency_ms = start.elapsed().as_millis() as u64;
     Ok((stream, latency_ms))
@@ -188,7 +207,7 @@ impl WsTransport {
     /// - `urls` + `race_count`: 多端点竞速
     /// - `headers`: 自定义握手 headers
     /// - `protocols`: WebSocket 子协议
-    /// - `per_message_deflate`: 压缩（受 tungstenite 0.24 限制）
+    /// - `per_message_deflate`: RFC 7692 permessage-deflate 压缩
     /// - `handshake_timeout_ms`: 握手超时
     /// - `reconnect`: 自动重连 + 指数退避
     /// - `heartbeat`: 定时 ping + 超时检测
@@ -202,9 +221,7 @@ impl WsTransport {
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel::<WsCommand>();
 
         if config.urls.is_empty() {
-            return Err(CatcherError::InvalidConfig(
-                "no WS URLs configured".into(),
-            ));
+            return Err(CatcherError::InvalidConfig("no WS URLs configured".into()));
         }
 
         // 初始连接 — 多端点竞速或单 URL
@@ -257,7 +274,10 @@ async fn connection_manager(
 ) {
     let current_url = initial_url;
     let mut stream_opt = Some(initial_stream);
-    let mut reconnect_mgr = config.reconnect.as_ref().map(|c| ReconnectManager::new(c.clone()));
+    let mut reconnect_mgr = config
+        .reconnect
+        .as_ref()
+        .map(|c| ReconnectManager::new(c.clone()));
 
     let first_latency = initial_latency_ms;
     let mut first_connect = true;
@@ -309,7 +329,15 @@ async fn connection_manager(
                 cmd = cmd_rx.recv() => {
                     match cmd {
                         Some(WsCommand::Text(t)) => {
-                            let msg = tokio_tungstenite::tungstenite::Message::Text(t.into());
+                            let msg = match encode_text_message(&t, config) {
+                                Ok(msg) => msg,
+                                Err(e) => {
+                                    let _ = event_tx.send(WsEvent::Error {
+                                        message: e.to_string(),
+                                    });
+                                    continue;
+                                }
+                            };
                             if writer.send(msg).await.is_err() {
                                 break LoopOutcome::Disconnected {
                                     code: 1006,
@@ -318,7 +346,15 @@ async fn connection_manager(
                             }
                         }
                         Some(WsCommand::Binary(d)) => {
-                            let msg = tokio_tungstenite::tungstenite::Message::Binary(d.into());
+                            let msg = match encode_binary_message(&d, config) {
+                                Ok(msg) => msg,
+                                Err(e) => {
+                                    let _ = event_tx.send(WsEvent::Error {
+                                        message: e.to_string(),
+                                    });
+                                    continue;
+                                }
+                            };
                             if writer.send(msg).await.is_err() {
                                 break LoopOutcome::Disconnected {
                                     code: 1006,
@@ -327,12 +363,7 @@ async fn connection_manager(
                             }
                         }
                         Some(WsCommand::Close { code, reason }) => {
-                            let msg = tokio_tungstenite::tungstenite::Message::Close(Some(
-                                tokio_tungstenite::tungstenite::protocol::CloseFrame {
-                                    code: code.into(),
-                                    reason: reason.into(),
-                                },
-                            ));
+                            let msg = Frame::close(yawc::close::CloseCode::from(code), reason);
                             let _ = writer.send(msg).await;
                             let _ = writer.close().await;
                             break LoopOutcome::CleanClose;
@@ -352,9 +383,7 @@ async fn connection_manager(
                         }
                         state.waiting_for_pong = true;
                         state.ping_sent_at = Some(Instant::now());
-                        let _ = writer.send(
-                            tokio_tungstenite::tungstenite::Message::Ping(Vec::new().into()),
-                        ).await;
+                        let _ = writer.send(Frame::ping(Vec::new())).await;
                         // 根据自适应间隔重设下一次 ping 时间
                         let next_ms = state.mgr.interval_ms();
                         ping_sleep.as_mut().reset(
@@ -366,20 +395,38 @@ async fn connection_manager(
                 // 收到的消息
                 msg = reader.next() => {
                     match msg {
-                        Some(Ok(tokio_tungstenite::tungstenite::Message::Text(t))) => {
+                        Some(frame) if frame.opcode() == OpCode::Text => {
                             let _ = event_tx.send(WsEvent::Message {
-                                data: t.as_bytes().to_vec(),
+                                data: frame.payload().to_vec(),
                                 is_binary: false,
                             });
                         }
-                        Some(Ok(tokio_tungstenite::tungstenite::Message::Binary(d))) => {
-                            let _ = event_tx.send(WsEvent::Message {
-                                data: d.to_vec(),
-                                is_binary: true,
-                            });
+                        Some(frame) if frame.opcode() == OpCode::Binary => {
+                            match decode_application_compression_frame(
+                                frame.payload(),
+                                config.max_payload_bytes,
+                            ) {
+                                Ok(Some(frame)) => {
+                                    let _ = event_tx.send(WsEvent::Message {
+                                        data: frame.data,
+                                        is_binary: frame.is_binary,
+                                    });
+                                }
+                                Ok(None) => {
+                                    let _ = event_tx.send(WsEvent::Message {
+                                        data: frame.payload().to_vec(),
+                                        is_binary: true,
+                                    });
+                                }
+                                Err(e) => {
+                                    let _ = event_tx.send(WsEvent::Error {
+                                        message: e.to_string(),
+                                    });
+                                }
+                            }
                         }
-                        Some(Ok(tokio_tungstenite::tungstenite::Message::Ping(_))) => {}
-                        Some(Ok(tokio_tungstenite::tungstenite::Message::Pong(_))) => {
+                        Some(frame) if frame.opcode() == OpCode::Ping => {}
+                        Some(frame) if frame.opcode() == OpCode::Pong => {
                             if let Some(ref mut state) = hb_state {
                                 let rtt_ms = state.ping_sent_at
                                     .take()
@@ -390,22 +437,17 @@ async fn connection_manager(
                                 let _ = event_tx.send(WsEvent::HeartbeatRtt { rtt_ms });
                             }
                         }
-                        Some(Ok(tokio_tungstenite::tungstenite::Message::Close(frame))) => {
-                            let (code, reason) = frame
-                                .map(|f| {
-                                    let c: u16 = f.code.into();
-                                    (c, f.reason.to_string())
-                                })
-                                .unwrap_or((1006, "abnormal".into()));
+                        Some(frame) if frame.opcode() == OpCode::Close => {
+                            let code = frame.close_code().map(u16::from).unwrap_or(1006);
+                            let reason = frame
+                                .close_reason()
+                                .ok()
+                                .flatten()
+                                .unwrap_or("abnormal")
+                                .to_string();
                             break LoopOutcome::Disconnected { code, reason };
                         }
-                        Some(Ok(tokio_tungstenite::tungstenite::Message::Frame(_))) => {}
-                        Some(Err(e)) => {
-                            break LoopOutcome::Disconnected {
-                                code: 1006,
-                                reason: e.to_string(),
-                            };
-                        }
+                        Some(_) => {}
                         None => {
                             break LoopOutcome::Disconnected {
                                 code: 1006,
@@ -438,7 +480,10 @@ async fn connection_manager(
 
             while let Some(delay) = mgr.on_disconnect() {
                 let attempt = mgr.attempt();
-                let _ = event_tx.send(WsEvent::Reconnecting { attempt, delay_ms: delay });
+                let _ = event_tx.send(WsEvent::Reconnecting {
+                    attempt,
+                    delay_ms: delay,
+                });
 
                 tokio::time::sleep(Duration::from_millis(delay)).await;
 
@@ -479,24 +524,24 @@ mod tests {
     fn build_request_with_headers_and_protocols() {
         let config = WsClientConfig {
             urls: vec!["wss://example.com/ws".into()],
-            headers: vec![
-                ("Authorization".into(), "Bearer token".into()),
-            ]
-            .into_iter()
-            .collect(),
+            headers: vec![("Authorization".into(), "Bearer token".into())]
+                .into_iter()
+                .collect(),
             protocols: vec!["v1".into(), "v2".into()],
             ..Default::default()
         };
 
-        let req = build_request("wss://example.com/ws", &config).unwrap();
+        let req = build_request(&config).unwrap();
         assert_eq!(
-            req.headers()
+            req.headers_ref()
+                .unwrap()
                 .get("Authorization")
                 .map(|v| v.to_str().unwrap()),
             Some("Bearer token")
         );
         assert_eq!(
-            req.headers()
+            req.headers_ref()
+                .unwrap()
                 .get("Sec-WebSocket-Protocol")
                 .map(|v| v.to_str().unwrap()),
             Some("v1, v2")
@@ -510,16 +555,25 @@ mod tests {
             urls: vec!["ws://localhost".into()],
             ..Default::default()
         };
-        let req = build_request("ws://localhost", &config).unwrap();
-        assert!(req.headers().get("Authorization").is_none());
-        assert!(req.headers().get("Sec-WebSocket-Protocol").is_none());
+        let req = build_request(&config).unwrap();
+        assert!(req.headers_ref().unwrap().get("Authorization").is_none());
+        assert!(req
+            .headers_ref()
+            .unwrap()
+            .get("Sec-WebSocket-Protocol")
+            .is_none());
     }
 
     /// 验证 build_request 无效 URL 报错
     #[test]
     fn build_request_invalid_url() {
-        let config = WsClientConfig::default();
-        assert!(build_request("not a url :///", &config).is_err());
+        let config = WsClientConfig {
+            headers: vec![("bad header".into(), "value".into())]
+                .into_iter()
+                .collect(),
+            ..Default::default()
+        };
+        assert!(build_request(&config).is_err());
     }
 
     /// 验证 WsClientConfig 的 headers 序列化/反序列化
@@ -533,5 +587,63 @@ mod tests {
         let config: WsClientConfig = serde_json::from_str(json).unwrap();
         assert_eq!(config.headers.len(), 2);
         assert_eq!(config.protocols, vec!["graphql-ws"]);
+    }
+
+    /// 验证 build_request 自动声明应用层压缩能力
+    #[test]
+    fn build_request_adds_application_compression_headers() {
+        let config = WsClientConfig {
+            urls: vec!["wss://example.com/ws".into()],
+            per_message_deflate: false,
+            application_compression: Some(ApplicationCompressionConfig {
+                enabled: true,
+                algorithm: ApplicationCompressionAlgorithm::Zstd,
+                threshold_bytes: 2048,
+            }),
+            ..Default::default()
+        };
+
+        let req = build_request(&config).unwrap();
+
+        assert_eq!(
+            req.headers_ref()
+                .unwrap()
+                .get("X-Catcher-Application-Compression")
+                .map(|v| v.to_str().unwrap()),
+            Some("zstd")
+        );
+        assert_eq!(
+            req.headers_ref()
+                .unwrap()
+                .get("X-Catcher-Application-Compression-Format")
+                .map(|v| v.to_str().unwrap()),
+            Some("CATCHER-CMP-1")
+        );
+        assert_eq!(
+            req.headers_ref()
+                .unwrap()
+                .get("X-Catcher-Application-Compression-Threshold")
+                .map(|v| v.to_str().unwrap()),
+            Some("2048")
+        );
+    }
+
+    /// permessage-deflate 优先于应用层压缩，避免双重压缩。
+    #[test]
+    fn build_request_omits_application_compression_when_permessage_deflate_enabled() {
+        let config = WsClientConfig {
+            urls: vec!["wss://example.com/ws".into()],
+            per_message_deflate: true,
+            application_compression: Some(ApplicationCompressionConfig::default()),
+            ..Default::default()
+        };
+
+        let req = build_request(&config).unwrap();
+
+        assert!(req
+            .headers_ref()
+            .unwrap()
+            .get("X-Catcher-Application-Compression")
+            .is_none());
     }
 }

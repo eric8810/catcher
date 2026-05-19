@@ -22,6 +22,7 @@
 | [`resilience.md`](./resilience.md) | 韧性策略 — retry（退避、可重试条件）、circuit breaker（三态机、参数调优）、超时层级、自适应超时 |
 | [`sse.md`](./sse.md) | SSE 完整指南 — 一次性流 / 长连接推送、AI 对话集成、Last-Event-ID 断点续传、SSE Router 事件路由 |
 | [`websocket.md`](./websocket.md) | WebSocket 深度指南 — 多端点竞速、per-message-deflate、自动重连、msgpack 编解码、心跳 RTT |
+| [`websocket-permessage-deflate-server-integration.md`](./websocket-permessage-deflate-server-integration.md) | WebSocket 服务端对接说明 — `permessage-deflate` 握手、服务端适配要点、验收建议 |
 | [`error-handling.md`](./error-handling.md) | 错误处理与诊断 — CatcherError 类型体系、错误分类、超时 vs 连接失败 vs 业务错误 |
 | [`migration.md`](./migration.md) | 迁移指南 — 从 axios / fetch / 原生 WebSocket 迁移到 catcher 的逐 API 对照表 |
 

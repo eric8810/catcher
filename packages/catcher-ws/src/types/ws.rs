@@ -26,7 +26,8 @@ impl WsEvent {
                     "type": "Message",
                     "data_base64": data_b64,
                     "is_binary": is_binary,
-                }).to_string()
+                })
+                .to_string()
             }
             _ => serde_json::to_string(self).unwrap_or_default(),
         }
@@ -121,6 +122,41 @@ impl Default for HeartbeatConfig {
     }
 }
 
+/// 应用层压缩算法
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ApplicationCompressionAlgorithm {
+    #[default]
+    Gzip,
+    Zstd,
+}
+
+/// 应用层压缩配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApplicationCompressionConfig {
+    /// 是否启用应用层压缩
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+
+    /// 压缩算法
+    #[serde(default)]
+    pub algorithm: ApplicationCompressionAlgorithm,
+
+    /// 压缩阈值（字节，大于等于此值的消息才压缩）
+    #[serde(alias = "thresholdBytes", default = "default_deflate_threshold")]
+    pub threshold_bytes: u32,
+}
+
+impl Default for ApplicationCompressionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_true(),
+            algorithm: ApplicationCompressionAlgorithm::default(),
+            threshold_bytes: default_deflate_threshold(),
+        }
+    }
+}
+
 /// WebSocket 客户端配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WsClientConfig {
@@ -136,13 +172,20 @@ pub struct WsClientConfig {
     #[serde(default)]
     pub headers: HashMap<String, String>,
 
-    /// 是否启用 perMessageDeflate 压缩
-    #[serde(alias = "perMessageDeflate", default)]
+    /// 是否启用标准 RFC 7692 permessage-deflate 压缩
+    #[serde(alias = "perMessageDeflate", default = "default_true")]
     pub per_message_deflate: bool,
 
     /// 压缩阈值（字节，大于此值的消息才压缩）
     #[serde(alias = "deflateThresholdBytes", default = "default_deflate_threshold")]
     pub deflate_threshold_bytes: u32,
+
+    /// 应用层压缩配置（gzip/zstd envelope，不依赖 WebSocket 扩展）
+    #[serde(
+        alias = "applicationCompression",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub application_compression: Option<ApplicationCompressionConfig>,
 
     /// 握手超时（毫秒）
     #[serde(alias = "handshakeTimeoutMs", default = "default_handshake_timeout")]
@@ -184,8 +227,9 @@ impl Default for WsClientConfig {
             urls: Vec::new(),
             protocols: Vec::new(),
             headers: HashMap::new(),
-            per_message_deflate: false,
+            per_message_deflate: default_true(),
             deflate_threshold_bytes: default_deflate_threshold(),
+            application_compression: None,
             handshake_timeout_ms: default_handshake_timeout(),
             max_payload_bytes: default_max_payload(),
             reconnect: None,

@@ -78,7 +78,7 @@ void main() {
     test('requires urls, has sensible defaults', () {
       final config = WsClientConfig(urls: ['wss://example.com']);
       expect(config.urls, ['wss://example.com']);
-      expect(config.perMessageDeflate, false);
+      expect(config.perMessageDeflate, true);
       expect(config.handshakeTimeoutMs, 15000);
       expect(config.raceCount, 1);
     });
@@ -93,6 +93,21 @@ void main() {
       expect(json['urls'], ['wss://example.com']);
       expect(json['per_message_deflate'], true);
       expect(json['reconnect']['max_attempts'], 3);
+    });
+
+    test('toJson with application compression', () {
+      final config = WsClientConfig(
+        urls: ['wss://example.com'],
+        applicationCompression: WsApplicationCompressionConfig(
+          algorithm: WsApplicationCompressionAlgorithm.zstd,
+          thresholdBytes: 2048,
+        ),
+      );
+
+      final json = config.toJson();
+      expect(json['application_compression']['enabled'], true);
+      expect(json['application_compression']['algorithm'], 'zstd');
+      expect(json['application_compression']['threshold_bytes'], 2048);
     });
 
     test('WsReconnectConfig defaults', () {

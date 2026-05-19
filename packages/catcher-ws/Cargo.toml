@@ -8,13 +8,13 @@ repository = "https://github.com/eric8810/catcher"
 
 [features]
 default = ["rustls-tls"]
-rustls-tls = ["tokio-tungstenite/rustls-tls-webpki-roots", "rustls/ring"]
-native-tls = ["tokio-tungstenite/native-tls"]
+rustls-tls = ["yawc/rustls-ring"]
+native-tls = ["rustls-tls"]
 
 [dependencies]
 catcher-core = { path = "../catcher-core", version = "0.3.7" }
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "net", "io-util", "macros"] }
-tokio-tungstenite = { version = "0.29", default-features = false, features = ["connect", "handshake"] }
+yawc = { version = "0.3.3", default-features = false }
 futures-util = "0.3"
 backon = "1"
 rmp-serde = "1"
@@ -22,4 +22,9 @@ rmpv = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.22"
-rustls = { version = "0.23", default-features = false, optional = true, features = ["tls12"] }
+flate2 = "1"
+zstd = "0.13"
+http = "1"
+
+[dev-dependencies]
+sha1 = "0.10"

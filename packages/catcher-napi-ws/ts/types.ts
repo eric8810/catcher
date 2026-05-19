@@ -34,7 +34,7 @@ export interface WsClientConfig {
   protocols?: string[]
   /** 自定义 headers */
   headers?: Record<string, string>
-  /** 启用 perMessageDeflate 压缩。默认: false */
+  /** 启用 perMessageDeflate 压缩。默认: true */
   per_message_deflate?: boolean
   /** 压缩阈值（字节）。默认: 1024 */
   deflate_threshold_bytes?: number

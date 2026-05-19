@@ -116,7 +116,8 @@ final unpacked = unpack(packed);                   // Map<String, dynamic>
 | Type | Description |
 |------|-------------|
 | `CatcherWsClient` | WebSocket client with event stream |
-| `WsClientConfig` | URLs, reconnect, heartbeat, compression |
+| `WsClientConfig` | URLs, reconnect, heartbeat, RFC 7692 permessage-deflate |
+| `WsApplicationCompressionConfig` | Optional application-layer gzip/zstd fallback |
 | `WsReconnectConfig` | Reconnect timing (initial, max delay, backoff) |
 | `WsHeartbeatConfig` | Heartbeat interval, adaptive, pong timeout |
 | `WsEvent` | Base event class |

@@ -4,7 +4,7 @@
 
 ```toml
 [dependencies]
-catcher-ws = "0.2"
+catcher-ws = "0.3"
 tokio = { version = "1", features = ["full"] }
 ```
 
@@ -15,7 +15,7 @@ tokio = { version = "1", features = ["full"] }
 ```
 catcher-ws
 ├── transport  → WsTransport, WsHandle
-├── ws         → EndpointRacer, HeartbeatManager, ReconnectManager, build_ws_config
+├── ws         → EndpointRacer, HeartbeatManager, ReconnectManager, build_ws_options
 ├── codec      → pack, unpack, unpack_value
 ├── ffi        → C ABI (内部使用)
 └── types      → 类型定义
@@ -33,7 +33,7 @@ use catcher_ws::{
     EndpointRacer,
     HeartbeatManager,
     ReconnectManager,
-    build_ws_config,
+    build_ws_options,
 
     // 编解码
     pack,
@@ -93,7 +93,7 @@ pub struct WsClientConfig {
     pub urls: Vec<String>,                        // 多端点 URL 列表
     pub protocols: Option<Vec<String>>,           // 子协议
     pub headers: HashMap<String, String>,         // 默认 {}
-    pub per_message_deflate: bool,                // 默认 false
+    pub per_message_deflate: bool,                // 默认 true
     pub deflate_threshold_bytes: u32,             // 默认 1024
     pub handshake_timeout_ms: u64,                // 默认 15000
     pub max_payload_bytes: u64,                   // 默认 67108864 (64MB)
@@ -305,13 +305,13 @@ let value: serde_json::Value = catcher_ws::unpack_value(&encoded)?;
 
 ---
 
-## build_ws_config
+## build_ws_options
 
 ```rust
-pub fn build_ws_config(config: &WsClientConfig) -> tokio_tungstenite::tungstenite::protocol::WebSocketConfig
+pub fn build_ws_options(config: &WsClientConfig) -> yawc::Options
 ```
 
-从 catcher 配置构建底层 tungstenite 配置。内部使用，但公开可调用。
+从 catcher 配置构建底层 yawc 配置。内部使用，但公开可调用。
 
 ---
 
@@ -319,7 +319,7 @@ pub fn build_ws_config(config: &WsClientConfig) -> tokio_tungstenite::tungstenit
 
 | 参数 | 默认值 |
 |------|--------|
-| `per_message_deflate` | `false` |
+| `per_message_deflate` | `true` |
 | `deflate_threshold_bytes` | `1024` |
 | `handshake_timeout_ms` | `15000` |
 | `max_payload_bytes` | `67108864` (64MB) |

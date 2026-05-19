@@ -358,17 +358,72 @@ let value: serde_json::Value = unpack_value(&bytes)?;
 
 ---
 
+## 应用层压缩（Flutter / Rust）
+
+Rust/Flutter 路径支持应用层 gzip/zstd 压缩。它不依赖 WebSocket 扩展协商，而是在二进制消息中包一层 catcher envelope；服务端完成适配后，可以和客户端双向发送压缩帧。
+
+### Flutter 启用方式
+
+```dart
+final ws = CatcherWsClient(WsClientConfig(
+  urls: ['wss://api.example.com/ws'],
+  applicationCompression: WsApplicationCompressionConfig(
+    algorithm: WsApplicationCompressionAlgorithm.zstd,
+    thresholdBytes: 2048,
+  ),
+));
+```
+
+默认行为：
+
+| 参数 | 默认 | 说明 |
+|------|------|------|
+| `enabled` | `true` | 只要传入 `applicationCompression` 即启用 |
+| `algorithm` | `gzip` | 可选 `gzip` / `zstd` |
+| `thresholdBytes` | `1024` | 小于阈值的消息保持原始 text/binary 帧 |
+
+### Wire format
+
+压缩后的消息总是以二进制帧发送。服务端按下面的 envelope 解析：
+
+```text
+bytes 0..12   magic: "CATCHER-CMP-1"
+byte 13       algorithm: 1 = gzip, 2 = zstd
+byte 14       original kind: 1 = text, 2 = binary
+bytes 15..18  uncompressed length, uint32 big-endian
+bytes 19..    compressed payload
+```
+
+服务端适配规则：
+
+1. 握手时可读取 `X-Catcher-Application-Compression`、`X-Catcher-Application-Compression-Format`、`X-Catcher-Application-Compression-Threshold` 判断客户端能力。
+2. 收到二进制帧时，先判断是否以 `CATCHER-CMP-1` 开头。
+3. 如果命中 envelope，根据 algorithm 解压 payload。
+4. 根据 original kind 把解压后的 bytes 还原为文本消息或二进制消息。
+5. 未命中 envelope 的 text/binary 帧按原协议处理。
+6. 服务端也可以用相同 envelope 回发压缩消息；客户端会自动解压并恢复 `WsMessageEvent.isBinary`。
+
+当前实现参数：gzip 使用 level 6，zstd 使用 level 3。客户端会校验解压后的长度不能超过 `maxPayloadBytes`。
+
+> `perMessageDeflate` 开启时，Rust/Flutter 会优先使用标准 WebSocket 扩展压缩，并跳过应用层 envelope，避免双重压缩。应用层 gzip/zstd 适合作为旧服务端或非标准网关的 fallback。
+
+---
+
 ## Per-Message Deflate 压缩
 
 WebSocket 的 per-message-deflate 扩展（RFC 7692）可在帧级别对消息进行 zlib 压缩，减少传输量。
 
+Node.js 使用 `ws` 包协商 `permessage-deflate`；Rust/Flutter/napi 现在使用 `yawc` 协商同一个 RFC 7692 扩展。服务端只需要按标准 WebSocket `Sec-WebSocket-Extensions: permessage-deflate` 握手和 RSV1 数据帧处理，不需要为 Flutter 另做私有协议。
+
+如需单独发给服务端同事，可参考 [`websocket-permessage-deflate-server-integration.md`](./websocket-permessage-deflate-server-integration.md)。
+
 ### 启用方式
 
-```typescript
-const ws = createResilientWS({
-  url: 'wss://api.example.com/ws',
-  perMessageDeflate: true,  // 默认启用
-})
+```dart
+final ws = CatcherWsClient(WsClientConfig(
+  urls: ['wss://api.example.com/ws'],
+  perMessageDeflate: true, // 默认启用
+));
 ```
 
 启用后，catcher 使用以下压缩参数：
@@ -376,26 +431,27 @@ const ws = createResilientWS({
 | 参数 | 值 | 说明 |
 |------|-----|------|
 | `level` | 6 | zlib 压缩级别（1-9，6 为速度/压缩比平衡） |
-| `memLevel` | 7 | zlib 内存级别 |
-| `threshold` | 1024 bytes | 仅压缩大于此阈值的帧 |
+| `context takeover` | negotiated | 默认保留上下文，与 Node.js `ws` 默认行为一致 |
 
-### 自定义阈值
+### Node.js 自定义阈值
 
 ```typescript
-// 仅压缩大于 4KB 的消息
+// Node.js ws 路径支持 threshold 对象配置
 const ws = createResilientWS({
   url: 'wss://api.example.com/ws',
   perMessageDeflate: { threshold: 4096 },
 })
 ```
 
+Flutter/Rust 当前公开的是布尔开关；`deflateThresholdBytes` 字段保留为兼容配置，但标准 RFC 7692 后端不会用应用层阈值去改写每帧压缩行为。
+
 ### 关闭压缩
 
-```typescript
-const ws = createResilientWS({
-  url: 'wss://api.example.com/ws',
+```dart
+final ws = CatcherWsClient(WsClientConfig(
+  urls: ['wss://api.example.com/ws'],
   perMessageDeflate: false,
-})
+));
 ```
 
 > **注意**：压缩需要服务端支持 per-message-deflate 扩展。如果服务端在握手响应中未协商该扩展，即使客户端启用也不会生效。

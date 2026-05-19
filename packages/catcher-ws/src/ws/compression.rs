@@ -1,16 +1,18 @@
 use crate::types::ws::WsClientConfig;
 
-/// 将 WsClientConfig 的压缩设置转换为 tungstenite WebSocketConfig
-pub fn build_ws_config(
-    config: &WsClientConfig,
-) -> tokio_tungstenite::tungstenite::protocol::WebSocketConfig {
-    let cfg = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default()
-        .max_message_size(Some(config.max_payload_bytes as usize))
-        .max_frame_size(Some(config.max_payload_bytes as usize));
+/// 将 WsClientConfig 的压缩设置转换为 yawc WebSocket Options。
+pub fn build_ws_options(config: &WsClientConfig) -> yawc::Options {
+    let max_payload = config.max_payload_bytes as usize;
+    let mut options = yawc::Options::default()
+        .with_max_payload_read(max_payload)
+        .with_max_read_buffer(max_payload.saturating_mul(2))
+        .with_utf8();
 
-    // tungstenite 0.29 仍未支持 permessage-deflate (RFC 7692)。
-    // 该字段保留为跨平台 API 兼容；Rust 侧压缩仍需等待上游或 fork。
-    let _ = config.per_message_deflate;
+    if config.per_message_deflate {
+        options = options.with_compression_level(yawc::CompressionLevel::new(6));
+    } else {
+        options = options.without_compression();
+    }
 
-    cfg
+    options
 }
