@@ -19,7 +19,7 @@ members = [
 ```toml
 [package]
 name = "catcher-core"
-version = "0.3.7"
+version = "0.3.8"
 edition = "2021"
 
 [dependencies]
@@ -33,7 +33,7 @@ serde_json = "1"
 ```toml
 [package]
 name = "catcher-http"
-version = "0.3.7"
+version = "0.3.8"
 edition = "2021"
 
 [features]
@@ -44,7 +44,7 @@ hickory-dns = ["reqwest/hickory-dns", "dep:hickory-resolver", "dep:hickory-proto
 napi = ["dep:napi", "dep:napi-derive"]
 
 [dependencies]
-catcher-core = { path = "../catcher-core", version = "0.3.7" }
+catcher-core = { path = "../catcher-core", version = "0.3.8" }
 tokio = { version = "1", features = ["sync", "time", "net", "io-util", "macros"] }
 tokio-util = "0.7"
 tokio-stream = "0.1"
@@ -75,11 +75,11 @@ napi-derive = { version = "2", optional = true }
 ```toml
 [package]
 name = "catcher-ws"
-version = "0.3.7"
+version = "0.3.8"
 edition = "2021"
 
 [dependencies]
-catcher-core = { path = "../catcher-core", version = "0.3.7" }
+catcher-core = { path = "../catcher-core", version = "0.3.8" }
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "net", "io-util", "macros"] }
 tokio-tungstenite = "0.29"
 futures-util = "0.3"

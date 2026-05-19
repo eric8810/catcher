@@ -24,9 +24,9 @@
 ```toml
 # Cargo.toml
 [dependencies]
-catcher-http = "0.3.7"
-catcher-ws = "0.3.7"
-catcher-core = "0.3.7"
+catcher-http = "0.3.8"
+catcher-ws = "0.3.8"
+catcher-core = "0.3.8"
 tokio = { version = "1", features = ["full"] }
 ```
 
