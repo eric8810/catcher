@@ -1,0 +1,11 @@
+.dart_tool/
+build/
+pubspec.lock
+rust/target/
+native/
+
+!android/src/main/jniLibs/**/*.so
+!ios/Frameworks/**/*
+!linux/lib/**/*.so
+!macos/Frameworks/**/*
+!windows/lib/**/*.dll

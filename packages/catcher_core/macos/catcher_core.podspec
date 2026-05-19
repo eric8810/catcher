@@ -1,0 +1,19 @@
+Pod::Spec.new do |s|
+  s.name             = 'catcher_core'
+  s.version          = '0.3.1'
+  s.summary          = 'Resilient HTTP/WebSocket client backed by Rust core for Flutter.'
+  s.description      = <<-DESC
+Resilient HTTP/WebSocket client backed by Rust core for Flutter.
+                       DESC
+  s.homepage         = 'https://github.com/eric8810/catcher'
+  s.license          = { :file => '../LICENSE' }
+  s.author           = { 'catcher' => 'https://github.com/eric8810/catcher' }
+  s.source           = { :path => '.' }
+
+  s.dependency 'FlutterMacOS'
+  s.platform = :osx, '10.15'
+  s.vendored_frameworks = 'Frameworks/catcher_ffi.xcframework'
+  s.preserve_paths = 'Frameworks/catcher_ffi.xcframework'
+  s.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES' }
+  s.swift_version = '5.0'
+end

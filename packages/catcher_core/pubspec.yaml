@@ -1,5 +1,5 @@
 name: catcher_core
-version: 0.3.7
+version: 0.3.8
 description: Resilient HTTP/WebSocket client backed by Rust core for Flutter
 repository: https://github.com/eric8810/catcher
 issue_tracker: https://github.com/eric8810/catcher/issues
@@ -7,10 +7,27 @@ documentation: https://github.com/eric8810/catcher#readme
 
 environment:
   sdk: ^3.2.0
+  flutter: '>=3.3.0'
 
 dependencies:
+  flutter:
+    sdk: flutter
   ffi: ^2.1.0
 
 dev_dependencies:
   lints: ^3.0.0
   test: ^1.24.0
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        ffiPlugin: true
+      ios:
+        ffiPlugin: true
+      linux:
+        ffiPlugin: true
+      macos:
+        ffiPlugin: true
+      windows:
+        ffiPlugin: true
