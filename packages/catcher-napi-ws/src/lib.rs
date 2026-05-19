@@ -7,15 +7,17 @@
 //!   "headers": { "Authorization": "Bearer ..." },
 //!   "protocols": ["v1", "v2"],
 //!   "per_message_deflate": true,
+//!   "dns": { "cache_ttl_secs": 300 },
+//!   "msgpack": true,
 //!   "reconnect": { "initial_delay_ms": 500, "max_delay_ms": 30000, "max_attempts": 20 },
 //!   "heartbeat": { "interval_ms": 30000, "pong_timeout_ms": 10000 }
 //! }
 //! ```
 
-use napi::*;
 use napi::threadsafe_function::{
     ErrorStrategy, ThreadSafeCallContext, ThreadsafeFunction, ThreadsafeFunctionCallMode,
 };
+use napi::*;
 use napi_derive::napi;
 use std::sync::{Arc, Mutex};
 
@@ -124,11 +126,7 @@ impl JsWsClient {
     ///
     /// Defaults to code 1000, reason "normal" if not specified.
     #[napi]
-    pub fn close(
-        &self,
-        code: Option<u16>,
-        reason: Option<String>,
-    ) -> napi::Result<()> {
+    pub fn close(&self, code: Option<u16>, reason: Option<String>) -> napi::Result<()> {
         if let Some(ref h) = *self.handle.lock().unwrap() {
             let code = code.unwrap_or(1000);
             let reason = reason.unwrap_or_else(|| "normal".into());
@@ -145,8 +143,8 @@ impl JsWsClient {
 /// Encode a JS value to msgpack bytes (Rust rmp-serde).
 #[napi]
 pub fn pack(value: serde_json::Value) -> napi::Result<napi::bindgen_prelude::Buffer> {
-    let bytes = catcher_ws::codec::pack(&value)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let bytes =
+        catcher_ws::codec::pack(&value).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     Ok(bytes.into())
 }
 
@@ -172,6 +170,15 @@ mod tests {
             "headers": {"Authorization": "Bearer token123"},
             "protocols": ["v1"],
             "per_message_deflate": true,
+            "dns": {
+                "cache_size": 256,
+                "cache_ttl_secs": 60,
+                "negative_ttl_secs": 30,
+                "stale_ttl_secs": 600,
+                "stale_on_error": true,
+                "host_mapping": {"example.com": "127.0.0.1"}
+            },
+            "msgpack": true,
             "reconnect": {
                 "initial_delay_ms": 200,
                 "max_delay_ms": 5000,
@@ -184,9 +191,19 @@ mod tests {
         }"#;
         let config: WsClientConfig = serde_json::from_str(json).unwrap();
         assert_eq!(config.urls, vec!["wss://example.com/ws"]);
-        assert_eq!(config.headers.get("Authorization").unwrap(), "Bearer token123");
+        assert_eq!(
+            config.headers.get("Authorization").unwrap(),
+            "Bearer token123"
+        );
         assert_eq!(config.protocols, vec!["v1"]);
         assert!(config.per_message_deflate);
+        assert!(config.msgpack);
+        let dns = config.dns.unwrap();
+        assert_eq!(dns.cache_size, 256);
+        assert_eq!(dns.cache_ttl_secs, 60);
+        assert_eq!(dns.negative_ttl_secs, 30);
+        assert_eq!(dns.stale_ttl_secs, 600);
+        assert_eq!(dns.host_mapping.get("example.com").unwrap(), "127.0.0.1");
         let rc = config.reconnect.unwrap();
         assert_eq!(rc.initial_delay_ms, 200);
         assert_eq!(rc.max_attempts, 3);
@@ -203,6 +220,8 @@ mod tests {
         assert!(config.headers.is_empty());
         assert!(config.protocols.is_empty());
         assert!(!config.per_message_deflate);
+        assert!(!config.msgpack);
+        assert!(config.dns.is_none());
         assert!(config.reconnect.is_none());
         assert!(config.heartbeat.is_none());
     }

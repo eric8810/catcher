@@ -39,11 +39,25 @@ class CatcherHttpClient {
 | 参数 | 类型 | 默认 | 说明 |
 |------|------|------|------|
 | `baseUrl` | `String` | **必填** | 基础 URL |
-| `connectTimeoutMs` | `int` | `5000` | 连接超时（ms） |
+| `connectTimeoutMs` | `int` | `10000` | 连接超时（ms） |
 | `responseTimeoutMs` | `int` | `30000` | 响应超时（ms） |
-| `keepAlive` | `bool` | `true` | TCP keep-alive |
+| `pool` | `PoolConfig` | 默认配置 | 连接池配置 |
+| `dns` | `DnsConfig?` | — | DNS 缓存、旧缓存兜底、自定义解析 |
 | `retry` | `RetryConfig?` | — | 重试配置 |
 | `circuitBreaker` | `CircuitBreakerConfig?` | — | 熔断器配置 |
+| `msgpack` | `bool` | `false` | 启用 HTTP body 自动 JSON ↔ msgpack |
+
+### DnsConfig
+
+| 参数 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `cacheSize` | `int` | `512` | DNS 缓存条目上限 |
+| `cacheTtlSecs` | `int` | `300` | 正常缓存有效时间（秒） |
+| `negativeTtlSecs` | `int` | `60` | 失败结果缓存时间（秒） |
+| `staleTtlSecs` | `int` | `3600` | 旧缓存可兜底的时间（秒） |
+| `staleOnError` | `bool` | `true` | DNS 失败时是否使用旧缓存 |
+| `nameservers` | `List<String>` | `[]` | 自定义 DNS 服务器 |
+| `hostMapping` | `Map<String, String>` | `{}` | 域名到 IP 的固定映射 |
 
 ### RetryConfig
 
@@ -133,7 +147,7 @@ class CatcherWsClient {
 | 参数 | 类型 | 默认 | 说明 |
 |------|------|------|------|
 | `urls` | `List<String>` | **必填** | WebSocket URL(s) |
-| `perMessageDeflate` | `bool` | `true` | per-message deflate |
+| `perMessageDeflate` | `bool` | `false` | per-message deflate |
 | `reconnect` | `ReconnectConfig?` | — | 重连 |
 | `reconnect.initialDelayMs` | `int` | `1000` | 初始延迟（ms） |
 | `reconnect.maxDelayMs` | `int` | `30000` | 最大延迟（ms） |
@@ -141,6 +155,8 @@ class CatcherWsClient {
 | `heartbeat` | `HeartbeatConfig?` | — | 心跳 |
 | `heartbeat.intervalMs` | `int` | `30000` | 心跳间隔（ms） |
 | `heartbeat.adaptive` | `bool` | `true` | 自适应间隔 |
+| `dns` | `DnsConfig?` | — | DNS 缓存、旧缓存兜底、自定义解析 |
+| `msgpack` | `bool` | `false` | 启用 WS 文本消息 JSON ↔ msgpack |
 
 ### WsEvent 类型
 

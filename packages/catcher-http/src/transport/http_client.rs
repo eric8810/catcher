@@ -594,8 +594,10 @@ async fn execute_http_request(
             let encoded = rmp_serde::to_vec(&value)
                 .map_err(|e| CatcherError::Internal(format!("msgpack encode: {e}")))?;
             req = req.body(encoded);
+            req = req.header("Content-Type", "application/msgpack");
+        } else if let Some(content_type) = &request.content_type {
+            req = req.header("Content-Type", content_type);
         }
-        req = req.header("Content-Type", "application/msgpack");
     } else {
         if let Some(body) = &request.body {
             req = req.body(body.clone());

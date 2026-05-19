@@ -429,6 +429,7 @@ dependencies = [
  "backon",
  "base64",
  "catcher-core",
+ "catcher-http",
  "futures-util",
  "rmp-serde",
  "rmpv",

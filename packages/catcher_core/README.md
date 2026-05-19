@@ -105,6 +105,7 @@ final unpacked = unpack(packed);                   // Map<String, dynamic>
 |------|-------------|
 | `CatcherHttpClient` | HTTP client wrapper (get, post, put, delete, patch) |
 | `HttpClientConfig` | Base URL, timeouts, pool, retry, circuit breaker |
+| `DnsConfig` | DNS cache, stale fallback, nameservers, host mapping |
 | `HttpResponse` | status, headers, body bytes, elapsedMs, bodyAsString |
 | `RetryConfig` | maxAttempts, backoff, jitter |
 | `CircuitBreakerConfig` | failureThreshold, resetTimeoutMs |
@@ -116,7 +117,7 @@ final unpacked = unpack(packed);                   // Map<String, dynamic>
 | Type | Description |
 |------|-------------|
 | `CatcherWsClient` | WebSocket client with event stream |
-| `WsClientConfig` | URLs, reconnect, heartbeat, compression |
+| `WsClientConfig` | URLs, reconnect, heartbeat, DNS, compression, msgpack |
 | `WsReconnectConfig` | Reconnect timing (initial, max delay, backoff) |
 | `WsHeartbeatConfig` | Heartbeat interval, adaptive, pong timeout |
 | `WsEvent` | Base event class |

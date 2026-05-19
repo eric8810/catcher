@@ -3,22 +3,26 @@
 //! 使用 tokio-tungstenite 建立连接，通过 mpsc channel 推送 WsEvent。
 //! 集成：headers/protocols 握手、多端点竞速、自动重连、心跳采样、压缩配置。
 
+use std::sync::Arc;
+#[cfg(feature = "rustls-tls")]
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::mpsc;
 
-use catcher_core::CatcherError;
 use crate::types::ws::*;
 use crate::ws::{build_ws_config, EndpointRacer, HeartbeatManager, ReconnectManager};
+use catcher_core::CatcherError;
+use catcher_http::transport::dns::{build_stale_aware_resolver, StaleAwareDnsResolver};
 
 // ── 类型别名 ──
 
 /// 底层 WebSocket 流类型
-pub(crate) type WsStream = tokio_tungstenite::WebSocketStream<
-    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
->;
+pub(crate) type WsStream =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+
+pub(crate) type SharedDnsResolver = Arc<StaleAwareDnsResolver>;
 
 // ── TLS 初始化 ──
 
@@ -150,11 +154,97 @@ fn build_request(
     Ok(request)
 }
 
+fn request_host_port(
+    request: &tokio_tungstenite::tungstenite::handshake::client::Request,
+) -> Result<(String, u16), CatcherError> {
+    let uri = request.uri();
+    let host = uri
+        .host()
+        .ok_or_else(|| CatcherError::InvalidConfig("WS URL missing host".into()))?
+        .to_string();
+    let port = uri
+        .port_u16()
+        .or_else(|| match uri.scheme_str() {
+            Some("wss") => Some(443),
+            Some("ws") => Some(80),
+            _ => None,
+        })
+        .ok_or_else(|| CatcherError::InvalidConfig("unsupported WS URL scheme".into()))?;
+    Ok((host, port))
+}
+
+fn build_dns_resolver(config: &WsClientConfig) -> Result<SharedDnsResolver, CatcherError> {
+    let dns_config = config.dns.clone().unwrap_or_default();
+    build_stale_aware_resolver(&dns_config)
+}
+
+async fn connect_with_dns(
+    request: tokio_tungstenite::tungstenite::handshake::client::Request,
+    ws_config: tokio_tungstenite::tungstenite::protocol::WebSocketConfig,
+    resolver: &SharedDnsResolver,
+) -> Result<
+    (
+        WsStream,
+        tokio_tungstenite::tungstenite::handshake::client::Response,
+    ),
+    CatcherError,
+> {
+    let (host, port) = request_host_port(&request)?;
+    let addrs = resolver.resolve_socket_addrs(&host, port).await?;
+    let mut last_error = None;
+
+    for addr in addrs {
+        match tokio::net::TcpStream::connect(addr).await {
+            Ok(socket) => {
+                socket
+                    .set_nodelay(true)
+                    .map_err(|e| CatcherError::Internal(format!("set TCP_NODELAY: {e}")))?;
+                #[cfg(any(feature = "rustls-tls", feature = "native-tls"))]
+                {
+                    return tokio_tungstenite::client_async_tls_with_config(
+                        request,
+                        socket,
+                        Some(ws_config),
+                        None,
+                    )
+                    .await
+                    .map_err(|e| CatcherError::Internal(format!("ws connect failed: {e}")));
+                }
+
+                #[cfg(not(any(feature = "rustls-tls", feature = "native-tls")))]
+                {
+                    if request.uri().scheme_str() == Some("wss") {
+                        return Err(CatcherError::InvalidConfig(
+                            "wss requires rustls-tls or native-tls feature".into(),
+                        ));
+                    }
+                    return tokio_tungstenite::client_async_with_config(
+                        request,
+                        tokio_tungstenite::MaybeTlsStream::Plain(socket),
+                        Some(ws_config),
+                    )
+                    .await
+                    .map_err(|e| CatcherError::Internal(format!("ws connect failed: {e}")));
+                }
+            }
+            Err(e) => {
+                last_error = Some(e);
+            }
+        }
+    }
+
+    Err(CatcherError::Internal(format!(
+        "ws connect failed: no resolved address for {host}:{port} succeeded{}",
+        last_error.map(|e| format!(": {e}")).unwrap_or_default(),
+    )))
+}
+
 /// 底层 WebSocket 连接 — 处理 headers/protocols/handshake_timeout/deflate。
 /// 返回 (stream, latency_ms)。
-pub(crate) async fn connect_stream(
+pub(crate) async fn connect_stream_with_resolver(
     url: &str,
     config: &WsClientConfig,
+    resolver: &SharedDnsResolver,
 ) -> Result<(WsStream, u64), CatcherError> {
     ensure_tls_provider();
 
@@ -165,16 +255,15 @@ pub(crate) async fn connect_stream(
     let result = if config.handshake_timeout_ms > 0 {
         tokio::time::timeout(
             Duration::from_millis(config.handshake_timeout_ms),
-            tokio_tungstenite::connect_async_with_config(request, Some(ws_config), true),
+            connect_with_dns(request, ws_config, resolver),
         )
         .await
         .map_err(|_| CatcherError::ConnectionTimeout(config.handshake_timeout_ms))?
     } else {
-        tokio_tungstenite::connect_async_with_config(request, Some(ws_config), true).await
+        connect_with_dns(request, ws_config, resolver).await
     };
 
-    let (stream, _response) = result
-        .map_err(|e| CatcherError::Internal(format!("ws connect failed: {e}")))?;
+    let (stream, _response) = result?;
 
     let latency_ms = start.elapsed().as_millis() as u64;
     Ok((stream, latency_ms))
@@ -202,22 +291,22 @@ impl WsTransport {
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel::<WsCommand>();
 
         if config.urls.is_empty() {
-            return Err(CatcherError::InvalidConfig(
-                "no WS URLs configured".into(),
-            ));
+            return Err(CatcherError::InvalidConfig("no WS URLs configured".into()));
         }
+        let dns_resolver = build_dns_resolver(config)?;
 
         // 初始连接 — 多端点竞速或单 URL
-        let (connected_url, initial_stream, latency_ms) =
-            if config.urls.len() > 1 || config.race_count > 1 {
-                let racer = EndpointRacer::new(config.urls.clone(), config.race_count);
-                let (url, stream, lat) = racer.race(config).await?;
-                (url, stream, lat)
-            } else {
-                let url = config.urls.first().unwrap().clone();
-                let (stream, lat) = connect_stream(&url, config).await?;
-                (url, stream, lat)
-            };
+        let (connected_url, initial_stream, latency_ms) = if config.urls.len() > 1
+            || config.race_count > 1
+        {
+            let racer = EndpointRacer::new(config.urls.clone(), config.race_count);
+            let (url, stream, lat) = racer.race(config, &dns_resolver).await?;
+            (url, stream, lat)
+        } else {
+            let url = config.urls.first().unwrap().clone();
+            let (stream, lat) = connect_stream_with_resolver(&url, config, &dns_resolver).await?;
+            (url, stream, lat)
+        };
 
         let handle_url = connected_url.clone();
         let mgr_config = config.clone();
@@ -229,6 +318,7 @@ impl WsTransport {
                 initial_stream,
                 latency_ms,
                 &mgr_config,
+                dns_resolver,
                 event_tx,
                 cmd_rx,
             )
@@ -252,12 +342,16 @@ async fn connection_manager(
     initial_stream: WsStream,
     initial_latency_ms: u64,
     config: &WsClientConfig,
+    dns_resolver: SharedDnsResolver,
     event_tx: mpsc::UnboundedSender<WsEvent>,
     mut cmd_rx: mpsc::UnboundedReceiver<WsCommand>,
 ) {
     let current_url = initial_url;
     let mut stream_opt = Some(initial_stream);
-    let mut reconnect_mgr = config.reconnect.as_ref().map(|c| ReconnectManager::new(c.clone()));
+    let mut reconnect_mgr = config
+        .reconnect
+        .as_ref()
+        .map(|c| ReconnectManager::new(c.clone()));
 
     let first_latency = initial_latency_ms;
     let mut first_connect = true;
@@ -470,7 +564,10 @@ async fn connection_manager(
 
             while let Some(delay) = mgr.on_disconnect() {
                 let attempt = mgr.attempt();
-                let _ = event_tx.send(WsEvent::Reconnecting { attempt, delay_ms: delay });
+                let _ = event_tx.send(WsEvent::Reconnecting {
+                    attempt,
+                    delay_ms: delay,
+                });
 
                 tokio::time::sleep(Duration::from_millis(delay)).await;
 
@@ -479,7 +576,7 @@ async fn connection_manager(
                     break;
                 }
 
-                match connect_stream(&current_url, config).await {
+                match connect_stream_with_resolver(&current_url, config, &dns_resolver).await {
                     Ok((stream, _lat)) => {
                         stream_opt = Some(stream);
                         mgr.on_connected();
@@ -511,11 +608,9 @@ mod tests {
     fn build_request_with_headers_and_protocols() {
         let config = WsClientConfig {
             urls: vec!["wss://example.com/ws".into()],
-            headers: vec![
-                ("Authorization".into(), "Bearer token".into()),
-            ]
-            .into_iter()
-            .collect(),
+            headers: vec![("Authorization".into(), "Bearer token".into())]
+                .into_iter()
+                .collect(),
             protocols: vec!["v1".into(), "v2".into()],
             ..Default::default()
         };
@@ -554,16 +649,97 @@ mod tests {
         assert!(build_request("not a url :///", &config).is_err());
     }
 
+    /// 验证 WS URL 能正确提取 host 和默认端口
+    #[test]
+    fn request_host_port_defaults() {
+        let config = WsClientConfig::default();
+        let req = build_request("wss://example.com/ws", &config).unwrap();
+        let (host, port) = request_host_port(&req).unwrap();
+        assert_eq!(host, "example.com");
+        assert_eq!(port, 443);
+
+        let req = build_request("ws://example.com:8080/ws", &config).unwrap();
+        let (host, port) = request_host_port(&req).unwrap();
+        assert_eq!(host, "example.com");
+        assert_eq!(port, 8080);
+    }
+
     /// 验证 WsClientConfig 的 headers 序列化/反序列化
     #[test]
     fn config_headers_roundtrip() {
         let json = r#"{
             "urls": ["wss://example.com"],
             "headers": {"X-Custom": "value", "Authorization": "Bearer abc"},
-            "protocols": ["graphql-ws"]
+            "protocols": ["graphql-ws"],
+            "msgpack": true,
+            "dns": {
+                "cache_size": 128,
+                "cache_ttl_secs": 30,
+                "host_mapping": {"example.com": "127.0.0.1"}
+            }
         }"#;
         let config: WsClientConfig = serde_json::from_str(json).unwrap();
         assert_eq!(config.headers.len(), 2);
         assert_eq!(config.protocols, vec!["graphql-ws"]);
+        assert!(config.msgpack);
+        let dns = config.dns.unwrap();
+        assert_eq!(dns.cache_size, 128);
+        assert_eq!(dns.cache_ttl_secs, 30);
+        assert_eq!(
+            dns.host_mapping.get("example.com"),
+            Some(&"127.0.0.1".to_string())
+        );
+    }
+
+    /// 验证 WS 连接使用 DNS host_mapping，而不是系统 DNS
+    #[tokio::test]
+    async fn connect_stream_uses_dns_host_mapping() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            tokio_tungstenite::accept_async(stream).await.unwrap()
+        });
+
+        let config = WsClientConfig {
+            urls: vec![format!("ws://ws.test:{port}")],
+            dns: Some(DnsConfig {
+                host_mapping: [("ws.test".to_string(), "127.0.0.1".to_string())]
+                    .into_iter()
+                    .collect(),
+                ..Default::default()
+            }),
+            handshake_timeout_ms: 1_000,
+            ..Default::default()
+        };
+        let resolver = build_dns_resolver(&config).unwrap();
+
+        let result = connect_stream_with_resolver(&config.urls[0], &config, &resolver).await;
+        assert!(result.is_ok());
+        drop(result);
+        let _ = server.await.unwrap();
+    }
+
+    /// 验证未配置 DNS 时，默认路径仍能连接本机 IP
+    #[tokio::test]
+    async fn connect_stream_without_dns_config_still_connects_ip() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            tokio_tungstenite::accept_async(stream).await.unwrap()
+        });
+
+        let config = WsClientConfig {
+            urls: vec![format!("ws://127.0.0.1:{port}")],
+            handshake_timeout_ms: 1_000,
+            ..Default::default()
+        };
+        let resolver = build_dns_resolver(&config).unwrap();
+
+        let result = connect_stream_with_resolver(&config.urls[0], &config, &resolver).await;
+        assert!(result.is_ok());
+        drop(result);
+        let _ = server.await.unwrap();
     }
 }

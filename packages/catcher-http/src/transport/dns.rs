@@ -7,15 +7,15 @@ mod stale_resolver {
     use std::sync::Arc;
     use std::time::{Duration, Instant};
 
+    use hickory_proto::xfer::Protocol;
     use hickory_resolver::config::{NameServerConfig, ResolverConfig, ResolverOpts};
     use hickory_resolver::name_server::TokioConnectionProvider;
     use hickory_resolver::TokioResolver;
-    use hickory_proto::xfer::Protocol;
     use moka::future::Cache;
     use parking_lot::Mutex;
 
-    use catcher_core::CatcherError;
     use crate::types::http::DnsConfig;
+    use catcher_core::CatcherError;
 
     #[derive(Clone, Debug)]
     struct DnsCacheEntry {
@@ -38,9 +38,8 @@ mod stale_resolver {
         pub fn new(config: &DnsConfig) -> Result<Self, CatcherError> {
             let resolver = build_inner_resolver(config)?;
 
-            let total_ttl = Duration::from_secs(
-                config.cache_ttl_secs as u64 + config.stale_ttl_secs as u64,
-            );
+            let total_ttl =
+                Duration::from_secs(config.cache_ttl_secs as u64 + config.stale_ttl_secs as u64);
             let cache = Cache::builder()
                 .max_capacity(config.cache_size)
                 .time_to_live(total_ttl)
@@ -81,12 +80,104 @@ mod stale_resolver {
                 .lookup_ip(hostname)
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
-            let addrs: Vec<SocketAddr> =
-                lookup.into_iter().map(|ip| SocketAddr::new(ip, 0)).collect();
+            let addrs: Vec<SocketAddr> = lookup
+                .into_iter()
+                .map(|ip| SocketAddr::new(ip, 0))
+                .collect();
             if addrs.is_empty() {
                 return Err("DNS resolved to empty address list".into());
             }
             Ok(addrs)
+        }
+
+        async fn resolve_zero_port(
+            &self,
+            hostname: &str,
+        ) -> Result<Vec<SocketAddr>, Box<dyn std::error::Error + Send + Sync>> {
+            if let Some(addrs) = self.host_mapping.get(hostname) {
+                return Ok(addrs.clone());
+            }
+
+            if let Some(entry) = self.cache.get(hostname).await {
+                let age = entry.inserted.elapsed();
+
+                if age < self.cache_ttl {
+                    return Ok(entry.addrs.clone());
+                }
+
+                if age < self.cache_ttl + self.stale_ttl {
+                    let refresh = self.clone();
+                    let key = hostname.to_string();
+                    if self.refreshing.lock().insert(key.clone()) {
+                        tokio::spawn(async move {
+                            if let Ok(addrs) = refresh.do_resolve(&key).await {
+                                refresh
+                                    .cache
+                                    .insert(
+                                        key.clone(),
+                                        DnsCacheEntry {
+                                            addrs,
+                                            inserted: Instant::now(),
+                                        },
+                                    )
+                                    .await;
+                            }
+                            refresh.refreshing.lock().remove(&key);
+                        });
+                    }
+                    return Ok(entry.addrs.clone());
+                }
+            }
+
+            let resolver = self.clone();
+            let key = hostname.to_string();
+            let result = self
+                .cache
+                .try_get_with::<_, String>(hostname.to_string(), async move {
+                    match resolver.do_resolve(&key).await {
+                        Ok(addrs) => Ok(DnsCacheEntry {
+                            addrs,
+                            inserted: Instant::now(),
+                        }),
+                        Err(e) => Err(e.to_string()),
+                    }
+                })
+                .await;
+
+            match result {
+                Ok(entry) => Ok(entry.addrs.clone()),
+                Err(e) => {
+                    if self.stale_on_error {
+                        if let Some(entry) = self.cache.get(hostname).await {
+                            return Ok(entry.addrs.clone());
+                        }
+                    }
+                    let msg: String = match Arc::try_unwrap(e) {
+                        Ok(s) => s,
+                        Err(arc) => (*arc).clone(),
+                    };
+                    Err(msg.into())
+                }
+            }
+        }
+
+        /// 解析主机名并填入调用方需要连接的端口。
+        pub async fn resolve_socket_addrs(
+            &self,
+            hostname: &str,
+            port: u16,
+        ) -> Result<Vec<SocketAddr>, CatcherError> {
+            let addrs =
+                self.resolve_zero_port(hostname)
+                    .await
+                    .map_err(|e| CatcherError::DnsError {
+                        host: hostname.to_string(),
+                        reason: e.to_string(),
+                    })?;
+            Ok(addrs
+                .into_iter()
+                .map(|addr| SocketAddr::new(addr.ip(), port))
+                .collect())
         }
     }
 
@@ -95,83 +186,12 @@ mod stale_resolver {
             let this = self.clone();
             Box::pin(async move {
                 let hostname = name.as_str().to_string();
-
-                // host_mapping has highest priority
-                if let Some(addrs) = this.host_mapping.get(&hostname) {
-                    return Ok(Box::new(addrs.clone().into_iter())
-                        as Box<dyn Iterator<Item = SocketAddr> + Send>);
-                }
-
-                // Check cache
-                if let Some(entry) = this.cache.get(&hostname).await {
-                    let age = entry.inserted.elapsed();
-
-                    if age < this.cache_ttl {
-                        return Ok(Box::new(entry.addrs.clone().into_iter())
-                            as Box<dyn Iterator<Item = SocketAddr> + Send>);
+                match this.resolve_zero_port(&hostname).await {
+                    Ok(addrs) => {
+                        Ok(Box::new(addrs.into_iter())
+                            as Box<dyn Iterator<Item = SocketAddr> + Send>)
                     }
-
-                    if age < this.cache_ttl + this.stale_ttl {
-                        // Stale hit — return old result, spawn background refresh
-                        let refresh = this.clone();
-                        let key = hostname.clone();
-                        if this.refreshing.lock().insert(key.clone()) {
-                            tokio::spawn(async move {
-                                if let Ok(addrs) = refresh.do_resolve(&key).await {
-                                    refresh
-                                        .cache
-                                        .insert(
-                                            key.clone(),
-                                            DnsCacheEntry {
-                                                addrs,
-                                                inserted: Instant::now(),
-                                            },
-                                        )
-                                        .await;
-                                }
-                                refresh.refreshing.lock().remove(&key);
-                            });
-                        }
-                        return Ok(Box::new(entry.addrs.clone().into_iter())
-                            as Box<dyn Iterator<Item = SocketAddr> + Send>);
-                    }
-                    // Past stale window — fall through to synchronous resolve
-                }
-
-                // Cache miss — coalesced resolve via try_get_with.
-                // Concurrent lookups for the same hostname share one DNS query.
-                let resolver = this.clone();
-                let key = hostname.clone();
-                let result = this
-                    .cache
-                    .try_get_with::<_, String>(hostname.clone(), async move {
-                        match resolver.do_resolve(&key).await {
-                            Ok(addrs) => Ok(DnsCacheEntry {
-                                addrs,
-                                inserted: Instant::now(),
-                            }),
-                            Err(e) => Err(e.to_string()),
-                        }
-                    })
-                    .await;
-
-                match result {
-                    Ok(entry) => Ok(Box::new(entry.addrs.clone().into_iter())
-                        as Box<dyn Iterator<Item = SocketAddr> + Send>),
-                    Err(e) => {
-                        // stale-on-error fallback
-                        if this.stale_on_error {
-                            if let Some(entry) = this.cache.get(&hostname).await {
-                                return Ok(Box::new(entry.addrs.clone().into_iter())
-                                    as Box<dyn Iterator<Item = SocketAddr> + Send>);
-                            }
-                        }
-                        let msg: String = match Arc::try_unwrap(e) {
-                            Ok(s) => s,
-                            Err(arc) => (*arc).clone(),
-                        };
-                        Err(msg.into())
-                    }
+                    Err(e) => Err(e),
                 }
             })
         }
@@ -185,8 +205,7 @@ mod stale_resolver {
             // Use system DNS configuration
             let (sys_config, sys_opts) = hickory_resolver::system_conf::read_system_conf()
                 .unwrap_or_else(|_| (ResolverConfig::default(), ResolverOpts::default()));
-            opts.negative_max_ttl =
-                opts.negative_max_ttl.or(sys_opts.negative_max_ttl);
+            opts.negative_max_ttl = opts.negative_max_ttl.or(sys_opts.negative_max_ttl);
             let resolver =
                 TokioResolver::builder_with_config(sys_config, TokioConnectionProvider::default())
                     .with_options(opts)
@@ -195,9 +214,9 @@ mod stale_resolver {
         } else {
             let mut resolver_config = ResolverConfig::new();
             for ns in &config.nameservers {
-                let addr: std::net::SocketAddr = ns
-                    .parse()
-                    .map_err(|e| CatcherError::InvalidConfig(format!("invalid nameserver '{ns}': {e}")))?;
+                let addr: std::net::SocketAddr = ns.parse().map_err(|e| {
+                    CatcherError::InvalidConfig(format!("invalid nameserver '{ns}': {e}"))
+                })?;
                 resolver_config.add_name_server(NameServerConfig {
                     socket_addr: addr,
                     protocol: Protocol::Udp,
@@ -226,7 +245,7 @@ mod stale_resolver {
 }
 
 #[cfg(feature = "hickory-dns")]
-pub use stale_resolver::build_stale_aware_resolver;
+pub use stale_resolver::{build_stale_aware_resolver, StaleAwareDnsResolver};
 
 // ── Fallback when hickory-dns is not enabled ──────────────
 
@@ -250,7 +269,10 @@ mod tests {
             host_mapping,
             ..Default::default()
         };
-        assert_eq!(config.host_mapping.get("api.test"), Some(&"127.0.0.1".to_string()));
+        assert_eq!(
+            config.host_mapping.get("api.test"),
+            Some(&"127.0.0.1".to_string())
+        );
     }
 
     #[test]
@@ -293,7 +315,10 @@ mod tests {
             host_mapping,
             ..Default::default()
         };
-        assert_eq!(config.host_mapping.get("api.test"), Some(&"10.0.0.5".to_string()));
+        assert_eq!(
+            config.host_mapping.get("api.test"),
+            Some(&"10.0.0.5".to_string())
+        );
         assert_eq!(config.host_mapping.get("unknown.test"), None);
     }
 
@@ -392,8 +417,7 @@ mod tests {
                 .collect(),
             ..Default::default()
         };
-        let resolver =
-            super::stale_resolver::StaleAwareDnsResolver::new(&config).unwrap();
+        let resolver = super::stale_resolver::StaleAwareDnsResolver::new(&config).unwrap();
         assert!(resolver.has_host_mapping("api.test"));
     }
 
@@ -409,6 +433,9 @@ mod tests {
         let result = super::stale_resolver::StaleAwareDnsResolver::new(&config);
         assert!(result.is_err());
         let msg = format!("{}", result.unwrap_err());
-        assert!(msg.contains("not-an-ip"), "error should mention the bad IP: {msg}");
+        assert!(
+            msg.contains("not-an-ip"),
+            "error should mention the bad IP: {msg}"
+        );
     }
 }
