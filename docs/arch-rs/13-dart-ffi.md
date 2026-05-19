@@ -374,7 +374,7 @@ environment:
 
 ## Rust 动态库 crate
 
-`catcher-ffi` 是 cdylib umbrella crate，桥接 `catcher-http` + `catcher-ws`，导出全部 16 个 C ABI 符号：
+`catcher-ffi` 是 cdylib umbrella crate，桥接 `catcher-http` + `catcher-ws`，导出全部 25 个 C ABI 符号：
 
 ```toml
 # crates/catcher-ffi/Cargo.toml
@@ -396,7 +396,7 @@ tokio = { version = "1", features = ["rt-multi-thread"] }
 `crates/catcher-ffi/src/lib.rs` — 使用 `block_on_aux_thread` 避免 tokio re-entrance：
 
 ```rust
-// All 16 C ABI symbols exported:
+// All 25 C ABI symbols exported:
 // - catcher_http_client_create/destroy
 // - catcher_http_get/post/put/delete/patch
 // - catcher_ws_create/destroy

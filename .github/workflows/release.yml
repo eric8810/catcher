@@ -41,6 +41,11 @@ jobs:
 
   # ──────────────────────────────────────────────
   # 2. napi native packages (cross-platform)
+  #
+  # Platforms (8 total):
+  #   defaults:   win32-x64-msvc, darwin-x64, linux-x64-gnu
+  #   additional: darwin-arm64, linux-x64-musl, linux-arm64-gnu,
+  #               linux-arm64-musl, win32-arm64-msvc
   # ──────────────────────────────────────────────
   publish-napi-http:
     if: "!startsWith(github.ref, 'refs/tags/catcher_core-v')"
@@ -51,29 +56,22 @@ jobs:
         settings:
           - host: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            build: |
-              cd packages/catcher-napi-http
-              pnpm exec napi build --platform --release --target x86_64-unknown-linux-gnu
           - host: ubuntu-latest
             target: x86_64-unknown-linux-musl
-            build: |
-              cd packages/catcher-napi-http
-              pnpm exec napi build --platform --release --target x86_64-unknown-linux-musl
+          - host: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            use-zig: true
+          - host: ubuntu-latest
+            target: aarch64-unknown-linux-musl
+            use-zig: true
           - host: macos-latest
             target: aarch64-apple-darwin
-            build: |
-              cd packages/catcher-napi-http
-              pnpm exec napi build --platform --release --target aarch64-apple-darwin
           - host: macos-latest
             target: x86_64-apple-darwin
-            build: |
-              cd packages/catcher-napi-http
-              pnpm exec napi build --platform --release --target x86_64-apple-darwin
           - host: windows-latest
             target: x86_64-pc-windows-msvc
-            build: |
-              cd packages/catcher-napi-http
-              pnpm exec napi build --platform --release --target x86_64-pc-windows-msvc
+          - host: windows-latest
+            target: aarch64-pc-windows-msvc
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -88,9 +86,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: packages -> target
-      - name: Install musl tools (linux)
+      - name: Install musl tools
         if: matrix.settings.target == 'x86_64-unknown-linux-musl'
         run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Install zig (for cross-compilation)
+        if: matrix.settings.use-zig
+        uses: mlugg/setup-zig@v2
       - run: pnpm install
       - name: Ensure cargo path (macOS)
         if: runner.os == 'macOS'
@@ -99,7 +100,15 @@ jobs:
           echo "CARGO=$HOME/.cargo/bin/cargo" >> $GITHUB_ENV
           which cargo
           cargo --version
-      - run: ${{ matrix.settings.build }}
+      - name: Build native addon
+        shell: bash
+        run: |
+          cd packages/catcher-napi-http
+          ZIG_FLAG=""
+          if [ "${{ matrix.settings.use-zig }}" = "true" ]; then
+            ZIG_FLAG="--zig"
+          fi
+          pnpm exec napi build --platform --release --target ${{ matrix.settings.target }} $ZIG_FLAG
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -118,29 +127,22 @@ jobs:
         settings:
           - host: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            build: |
-              cd packages/catcher-napi-ws
-              pnpm exec napi build --platform --release --target x86_64-unknown-linux-gnu
           - host: ubuntu-latest
             target: x86_64-unknown-linux-musl
-            build: |
-              cd packages/catcher-napi-ws
-              pnpm exec napi build --platform --release --target x86_64-unknown-linux-musl
+          - host: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            use-zig: true
+          - host: ubuntu-latest
+            target: aarch64-unknown-linux-musl
+            use-zig: true
           - host: macos-latest
             target: aarch64-apple-darwin
-            build: |
-              cd packages/catcher-napi-ws
-              pnpm exec napi build --platform --release --target aarch64-apple-darwin
           - host: macos-latest
             target: x86_64-apple-darwin
-            build: |
-              cd packages/catcher-napi-ws
-              pnpm exec napi build --platform --release --target x86_64-apple-darwin
           - host: windows-latest
             target: x86_64-pc-windows-msvc
-            build: |
-              cd packages/catcher-napi-ws
-              pnpm exec napi build --platform --release --target x86_64-pc-windows-msvc
+          - host: windows-latest
+            target: aarch64-pc-windows-msvc
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -155,9 +157,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: packages -> target
-      - name: Install musl tools (linux)
+      - name: Install musl tools
         if: matrix.settings.target == 'x86_64-unknown-linux-musl'
         run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Install zig (for cross-compilation)
+        if: matrix.settings.use-zig
+        uses: mlugg/setup-zig@v2
       - run: pnpm install
       - name: Ensure cargo path (macOS)
         if: runner.os == 'macOS'
@@ -166,7 +171,15 @@ jobs:
           echo "CARGO=$HOME/.cargo/bin/cargo" >> $GITHUB_ENV
           which cargo
           cargo --version
-      - run: ${{ matrix.settings.build }}
+      - name: Build native addon
+        shell: bash
+        run: |
+          cd packages/catcher-napi-ws
+          ZIG_FLAG=""
+          if [ "${{ matrix.settings.use-zig }}" = "true" ]; then
+            ZIG_FLAG="--zig"
+          fi
+          pnpm exec napi build --platform --release --target ${{ matrix.settings.target }} $ZIG_FLAG
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -192,37 +205,92 @@ jobs:
         with:
           path: napi-artifacts
           merge-multiple: false
-      - name: Place napi-http artifacts (index.d.ts + *.node)
+      - name: Abort if no artifacts were produced
+        run: |
+          HTTP_COUNT=$(find napi-artifacts -name "*.node" -path "*/napi-http-*" 2>/dev/null | wc -l)
+          WS_COUNT=$(find napi-artifacts -name "*.node" -path "*/napi-ws-*" 2>/dev/null | wc -l)
+          echo "napi-http .node files: $HTTP_COUNT"
+          echo "napi-ws .node files: $WS_COUNT"
+          if [ "$HTTP_COUNT" -eq 0 ] && [ "$WS_COUNT" -eq 0 ]; then
+            echo "::error::No .node artifacts found — all build jobs failed. Aborting publish."
+            exit 1
+          fi
+
+      # ── catcher-napi-http ──
+      - name: Place napi-http artifacts
         run: |
           for dir in napi-artifacts/napi-http-*; do
             [ -d "$dir" ] || continue
             cp "$dir"/*.node packages/catcher-napi-http/ || true
             cp "$dir"/index.d.ts packages/catcher-napi-http/ || true
           done
-      - name: Place napi-ws artifacts (*.node)
+          echo "=== .node files in catcher-napi-http ==="
+          ls -lh packages/catcher-napi-http/*.node || true
+      - name: Create napi-http sub-package dirs and distribute binaries
+        run: |
+          cd packages/catcher-napi-http
+          pnpm exec napi create-npm-dir -t .
+          for f in *.node; do
+            [ -f "$f" ] || continue
+            platform="${f%.node}"
+            platform="${platform#*.}"
+            if [ -d "npm/$platform" ]; then
+              cp "$f" "npm/$platform/"
+              echo "  $f -> npm/$platform/"
+            else
+              echo "  WARN: no npm/$platform dir for $f"
+            fi
+          done
+      - name: Build napi-http TS wrappers
+        run: pnpm --filter @eric8810/catcher-napi-http build:ts
+      - name: Prepublish napi-http (update optionalDeps + publish sub-packages)
+        run: |
+          cd packages/catcher-napi-http
+          pnpm exec napi prepublish --skip-gh-release
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish catcher-napi-http main package
+        run: |
+          cd packages/catcher-napi-http
+          npm publish --access public --ignore-scripts
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # ── catcher-napi-ws ──
+      - name: Place napi-ws artifacts
         run: |
           for dir in napi-artifacts/napi-ws-*; do
             [ -d "$dir" ] || continue
             cp "$dir"/*.node packages/catcher-napi-ws/ || true
           done
-      - name: Build TS wrappers for napi packages
+          echo "=== .node files in catcher-napi-ws ==="
+          ls -lh packages/catcher-napi-ws/*.node || true
+      - name: Create napi-ws sub-package dirs and distribute binaries
         run: |
-          pnpm --filter @eric8810/catcher-napi-http build:ts
-          pnpm --filter @eric8810/catcher-napi-ws build:ts
-      - name: Assemble and publish catcher-napi-http
+          cd packages/catcher-napi-ws
+          pnpm exec napi create-npm-dir -t .
+          for f in *.node; do
+            [ -f "$f" ] || continue
+            platform="${f%.node}"
+            platform="${platform#*.}"
+            if [ -d "npm/$platform" ]; then
+              cp "$f" "npm/$platform/"
+              echo "  $f -> npm/$platform/"
+            else
+              echo "  WARN: no npm/$platform dir for $f"
+            fi
+          done
+      - name: Build napi-ws TS wrappers
+        run: pnpm --filter @eric8810/catcher-napi-ws build:ts
+      - name: Prepublish napi-ws (update optionalDeps + publish sub-packages)
         run: |
-          ls packages/catcher-napi-http/*.node || true
-          ls packages/catcher-napi-http/index.d.ts || true
-          cd packages/catcher-napi-http
-          pnpm exec napi prepublish -t npm --skip-gh-release
-          npm publish --access public --ignore-scripts
+          cd packages/catcher-napi-ws
+          pnpm exec napi prepublish --skip-gh-release
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-      - name: Assemble and publish catcher-napi-ws
+      - name: Publish catcher-napi-ws main package
         run: |
-          ls packages/catcher-napi-ws/*.node || true
           cd packages/catcher-napi-ws
-          pnpm exec napi prepublish -t npm --skip-gh-release
           npm publish --access public --ignore-scripts
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

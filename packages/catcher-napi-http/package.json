@@ -1,6 +1,6 @@
 {
   "name": "@eric8810/catcher-napi-http",
-  "version": "0.3.3",
+  "version": "0.3.7",
   "description": "catcher HTTP native addon for Node.js via napi-rs",
   "main": "dist/client.js",
   "types": "dist/client.d.ts",
@@ -24,13 +24,20 @@
   "files": [
     "dist/",
     "index.js",
-    "index.d.ts",
-    "*.node",
-    "npm/"
+    "index.d.ts"
   ],
   "napi": {
     "name": "catcher-napi-http",
-    "triples": { "defaults": true }
+    "triples": {
+      "defaults": true,
+      "additional": [
+        "aarch64-apple-darwin",
+        "x86_64-unknown-linux-musl",
+        "aarch64-unknown-linux-gnu",
+        "aarch64-unknown-linux-musl",
+        "aarch64-pc-windows-msvc"
+      ]
+    }
   },
   "scripts": {
     "build:ts": "tsup ts/client.ts ts/types.ts ts/sse.ts --format cjs --dts --outDir dist --clean",
@@ -43,6 +50,9 @@
     "@napi-rs/cli": "^2.18.0",
     "tsup": "^8.0.0",
     "typescript": "^5.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "license": "MIT"
 }

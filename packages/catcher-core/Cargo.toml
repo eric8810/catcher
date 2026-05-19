@@ -1,6 +1,6 @@
 [package]
 name = "catcher-core"
-version = "0.3.3"
+version = "0.3.7"
 edition = "2021"
 description = "Shared core types and errors for catcher — zero I/O dependencies"
 license = "MIT"

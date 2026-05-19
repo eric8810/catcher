@@ -38,7 +38,7 @@ Wraps `catcher-http`'s `HttpTransport` — reqwest + retry + circuit breaker, co
 npm install @eric8810/catcher-napi-http
 ```
 
-Pre-built binaries available for Linux (x64 gnu/musl), macOS (x64/arm64), and Windows (x64).
+Pre-built binaries available for Linux (x64/arm64 gnu/musl), macOS (x64/arm64), and Windows (x64/arm64). Installed automatically via platform-specific `optionalDependencies`.
 
 ## Usage
 

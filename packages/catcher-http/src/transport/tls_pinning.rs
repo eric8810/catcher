@@ -100,8 +100,22 @@ impl ServerCertVerifier for PinningVerifier {
 mod tests {
     use super::*;
     use std::sync::Arc;
+    use std::sync::OnceLock;
+
+    /// 确保 rustls CryptoProvider 已安装（测试用）。
+    /// rustls 0.23+ 需要显式安装 crypto backend。
+    static CRYPTO_INSTALLED: OnceLock<()> = OnceLock::new();
+
+    fn ensure_crypto_provider() {
+        CRYPTO_INSTALLED.get_or_init(|| {
+            // catcher-http 使用 aws_lc_rs feature。
+            // workspace 构建中 catcher-ws 可能同时启用 ring，但 aws_lc_rs 优先。
+            let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        });
+    }
 
     fn make_mock_verifier() -> Arc<dyn ServerCertVerifier> {
+        ensure_crypto_provider();
         let mut roots = rustls::RootCertStore::empty();
         roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
         rustls::client::WebPkiServerVerifier::builder(Arc::new(roots))

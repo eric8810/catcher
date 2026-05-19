@@ -8,35 +8,52 @@ function tryRequire(...paths: string[]): any {
   return null
 }
 
+function isMusl(): boolean {
+  const report = (typeof process.report?.getReport === 'function'
+    ? process.report.getReport() : null) as any
+  if (report?.header?.glibcVersionRuntime) return false
+  try {
+    const lddPath = require('child_process')
+      .execSync('which ldd', { encoding: 'utf8' }).trim()
+    return require('fs').readFileSync(lddPath, 'utf8').includes('musl')
+  } catch {
+    return true
+  }
+}
+
+function getAbi(): string {
+  if (process.env.npm_config_libc) return process.env.npm_config_libc
+  const platform = os.platform()
+  if (platform === 'win32') return 'msvc'
+  if (platform === 'linux') return isMusl() ? 'musl' : 'gnu'
+  return ''
+}
+
 /**
- * 加载 napi 原生模块
- *
  * tsup 输出到 dist/，__dirname = dist/，
  * 所以所有路径都需要 path.join(__dirname, '..') 回到包根。
  */
 export function loadNativeAddon(pkgName: string): any {
   const platform = os.platform()
   const arch = os.arch()
-  const libc = process.env.npm_config_libc ?? (platform === 'linux' ? 'gnu' : '')
-  // __dirname = dist/，root = 包根目录
+  const abi = getAbi()
+  const platformKey = abi ? `${platform}-${arch}-${abi}` : `${platform}-${arch}`
   const root = path.join(__dirname, '..')
 
-  // 1. index.js — napi build 生成的入口（在包根）
+  // 1. optionalDependencies 子包（npm install 自动安装对应平台）
+  const subPkg = tryRequire(`@eric8810/${pkgName}-${platformKey}`)
+  if (subPkg) return subPkg
+
+  // 2. napi build 生成的 index.js（包根）
   const napiJs = tryRequire(path.join(root, 'index.js'))
   if (napiJs) return napiJs
 
-  // 2. 预编译二进制（npm/ 目录，带 libc 后缀）→ 3. 根目录 .node（多种命名格式）→ 4. cargo build 产物
+  // 3. 本地开发：根目录 .node 文件 / cargo build 产物
   const libName = pkgName.replace(/-/g, '_')
   const addon =
-    // npm/ 目录：linux-x64-gnu / darwin-arm64 / win32-x64-msvc
-    tryRequire(path.join(root, 'npm', `${platform}-${arch}${libc ? '-' + libc : ''}`, `${pkgName}.node`)) ??
-    // 根目录：完整 triple 命名 (napi prepublish 新格式)
-    tryRequire(path.join(root, `${pkgName}.${platform}-${arch}${libc ? '-' + libc : ''}.node`)) ??
-    // 根目录：旧格式 platform-arch (无 libc 后缀)
+    tryRequire(path.join(root, `${pkgName}.${platformKey}.node`)) ??
     tryRequire(path.join(root, `${pkgName}.${platform}-${arch}.node`)) ??
-    // 根目录：无平台后缀
     tryRequire(path.join(root, `${pkgName}.node`)) ??
-    // cargo build 产物
     tryRequire(path.join(root, 'target', 'release', `lib${libName}.so`)) ??
     tryRequire(path.join(root, 'target', 'release', `lib${libName}.dylib`)) ??
     tryRequire(path.join(root, 'target', 'release', `${libName}.dll`))

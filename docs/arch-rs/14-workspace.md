@@ -42,7 +42,7 @@ crates/                               # Rust workspace
 │       ├── transport/ws_client.rs
 │       └── ws/                       # reconnect, heartbeat, multi_endpoint
 │
-├── catcher-ffi/                      # cdylib umbrella — 16 C ABI symbols
+├── catcher-ffi/                      # cdylib umbrella — 25 C ABI symbols
 │   ├── Cargo.toml                    # deps: catcher-http, catcher-ws, catcher-core
 │   └── src/
 │       ├── lib.rs                    # block_on_aux_thread + all exports

@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file. See [release-please](https://github.com/googleapis/release-please) for automated management.
 
+## 0.3.7 (2026-05-18)
+
+### 🐛 Bug Fixes
+
+- **Windows native addon loading**: `native.ts` ABI suffix detection returned empty string on Windows, causing file lookup for `catcher-napi-http.win32-x64.node` instead of the correct `catcher-napi-http.win32-x64-msvc.node`. Added proper ABI detection: `msvc` for Windows, `gnu`/`musl` for Linux.
+
+### ✨ Features
+
+- **8-platform native addon support**: Expanded from 5 to 8 build targets — added `linux-arm64-gnu`, `linux-arm64-musl`, `win32-arm64-msvc`. ARM64 Linux targets use zig cross-compilation.
+- **Platform sub-package distribution**: Native addons now publish as separate per-platform `optionalDependencies` packages (e.g., `@eric8810/catcher-napi-http-win32-x64-msvc`). Main package no longer bundles all `.node` files, reducing install size from ~56MB to ~10MB per platform.
+- **Release binary size optimization**: Added `[profile.release]` with `lto = true`, `codegen-units = 1`, `strip = "symbols"` to reduce `.node` file sizes.
+
+## 0.3.6 (2026-07-20)
+
+### 🐛 Bug Fixes
+
+- **catcher-ws missing TLS 1.2 support**: `catcher-ws` used `default-features = false` for rustls but did not enable the `tls12` feature. This caused `HandshakeFailure` on servers that only support TLS 1.2 (e.g. `ws-gateway.fazhiplus.com`). Added `features = ["tls12"]` to the rustls dependency, bringing 6 TLS 1.2 cipher suites alongside the 3 TLS 1.3 suites.
+
+## 0.3.5 (2026-07-20)
+
+### 🐛 Bug Fixes
+
+- **rustls CryptoProvider panic on wss:// (critical)**: `catcher-ws` enabled `tokio-tungstenite/rustls-tls` but never installed a `CryptoProvider`. Since rustls 0.23, this must be done explicitly. Added `ensure_tls_provider()` with `OnceLock`-guarded `ring::default_provider()` initialization in `connect_stream()`. Fixes runtime panic when connecting to any `wss://` endpoint.
+- **catcher-http tls_pinning test failure**: `make_mock_verifier()` called `WebPkiServerVerifier::builder().build()` without a `CryptoProvider` installed. Added `OnceLock`-guarded `aws_lc_rs::default_provider()` initialization in the test module.
+
 ## 0.3.3 (2026-07-20)
 
 ### 🐛 Bug Fixes

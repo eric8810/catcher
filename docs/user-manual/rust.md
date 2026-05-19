@@ -12,7 +12,7 @@
 | `catcher-core` | `catcher_core` | 共享类型、错误定义、SSE 类型、编解码 trait |
 | `catcher-http` | `catcher_http` | HTTP 传输层（reqwest + 重试中间件 + 熔断器 + 自适应超时） |
 | `catcher-ws` | `catcher_ws` | WebSocket 传输层（指数退避重连 + 心跳 + 多端点竞速） |
-| `catcher-ffi` | `catcher_ffi` | cdylib umbrella，导出 16 个 C ABI 符号用于跨语言绑定 |
+| `catcher-ffi` | `catcher_ffi` | cdylib umbrella，导出 25 个 C ABI 符号用于跨语言绑定 |
 | `catcher-uniffi` | `catcher_uniffi` | UniFFI 绑定，面向 Kotlin / Swift |
 
 依赖顺序：`catcher-core` → `catcher-http` / `catcher-ws` → `catcher-ffi` / `catcher-uniffi`
@@ -24,9 +24,9 @@
 ```toml
 # Cargo.toml
 [dependencies]
-catcher-http = "0.3.1"
-catcher-ws = "0.3.1"
-catcher-core = "0.3.1"
+catcher-http = "0.3.7"
+catcher-ws = "0.3.7"
+catcher-core = "0.3.7"
 tokio = { version = "1", features = ["full"] }
 ```
 
