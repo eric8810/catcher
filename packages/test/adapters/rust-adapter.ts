@@ -170,27 +170,26 @@ export function createRustWsClient(config: {
   let onReady: (() => void) | null = null
   const ready = new Promise<void>((resolve) => { onReady = resolve })
 
-  const onEvent = (eventJson: string) => {
-    try {
-      const event = JSON.parse(eventJson)
-      switch (event.type) {
-        case 'Connected':
-          onReady?.()
-          listeners.open.forEach((fn) => fn())
-          break
-        case 'Disconnected':
-          listeners.close.forEach((fn) => fn({ code: event.code, reason: event.reason }))
-          break
-        case 'Message':
-          listeners.message.forEach((fn) =>
-            fn({ data: event.data ?? '' })
-          )
-          break
-        case 'Error':
-          listeners.error.forEach((fn) => fn({ message: event.message }))
-          break
-      }
-    } catch { /* ignore parse errors */ }
+  // WsClient wrapper already JSON.parse's the native event — we receive a typed object
+  const onEvent = (event: any) => {
+    switch (event.type) {
+      case 'Connected':
+        onReady?.()
+        listeners.open.forEach((fn) => fn())
+        break
+      case 'Disconnected':
+        listeners.close.forEach((fn) => fn({ code: event.code, reason: event.reason }))
+        break
+      case 'Message':
+        // Rust WsEvent::to_ffi_json() emits data_base64 for binary, data for text
+        listeners.message.forEach((fn) =>
+          fn({ data: event.data_base64 ?? event.data ?? '' })
+        )
+        break
+      case 'Error':
+        listeners.error.forEach((fn) => fn({ message: event.message }))
+        break
+    }
   }
 
   const ws = new WsClient(JSON.stringify({
