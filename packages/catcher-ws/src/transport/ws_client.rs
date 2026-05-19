@@ -3,6 +3,9 @@
 //! 使用 tokio-tungstenite 建立连接，通过 mpsc channel 推送 WsEvent。
 //! 集成：headers/protocols 握手、多端点竞速、自动重连、心跳采样、压缩配置。
 
+use std::fmt;
+use std::io;
+use std::net::SocketAddr;
 use std::sync::Arc;
 #[cfg(feature = "rustls-tls")]
 use std::sync::OnceLock;
@@ -115,6 +118,41 @@ enum LoopOutcome {
     HeartbeatTimeout,
 }
 
+#[derive(Debug)]
+enum ResolvedAddrConnectError {
+    Tcp {
+        addr: SocketAddr,
+        source: io::Error,
+    },
+    TcpOption {
+        addr: SocketAddr,
+        source: io::Error,
+    },
+    Handshake {
+        addr: SocketAddr,
+        source: tokio_tungstenite::tungstenite::Error,
+    },
+    HandshakeTimeout {
+        addr: SocketAddr,
+        timeout_ms: u64,
+    },
+}
+
+impl fmt::Display for ResolvedAddrConnectError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Tcp { addr, source } => write!(f, "{addr}: TCP connect failed: {source}"),
+            Self::TcpOption { addr, source } => {
+                write!(f, "{addr}: set TCP_NODELAY failed: {source}")
+            }
+            Self::Handshake { addr, source } => write!(f, "{addr}: WS handshake failed: {source}"),
+            Self::HandshakeTimeout { addr, timeout_ms } => {
+                write!(f, "{addr}: WS handshake timeout after {timeout_ms}ms")
+            }
+        }
+    }
+}
+
 // ── 底层连接 ──
 
 /// 构建带 headers 和 protocols 的 tungstenite Request
@@ -200,7 +238,7 @@ async fn connect_with_resolved_addrs(
     ws_config: tokio_tungstenite::tungstenite::protocol::WebSocketConfig,
     host: &str,
     port: u16,
-    addrs: Vec<std::net::SocketAddr>,
+    addrs: Vec<SocketAddr>,
     handshake_timeout_ms: u64,
 ) -> Result<
     (
@@ -218,8 +256,7 @@ async fn connect_with_resolved_addrs(
         }
     }
 
-    let mut last_error = None;
-    let mut last_error_was_timeout = false;
+    let mut last_error: Option<ResolvedAddrConnectError> = None;
 
     for addr in addrs {
         let attempt = connect_to_resolved_addr(request.clone(), ws_config, addr);
@@ -227,10 +264,10 @@ async fn connect_with_resolved_addrs(
             match tokio::time::timeout(Duration::from_millis(handshake_timeout_ms), attempt).await {
                 Ok(result) => result,
                 Err(_) => {
-                    last_error = Some(format!(
-                        "{addr}: WS handshake timeout after {handshake_timeout_ms}ms"
-                    ));
-                    last_error_was_timeout = true;
+                    last_error = Some(ResolvedAddrConnectError::HandshakeTimeout {
+                        addr,
+                        timeout_ms: handshake_timeout_ms,
+                    });
                     continue;
                 }
             }
@@ -242,13 +279,12 @@ async fn connect_with_resolved_addrs(
             Ok(pair) => return Ok(pair),
             Err(e) => {
                 last_error = Some(e);
-                last_error_was_timeout = false;
             }
         }
     }
 
-    if last_error_was_timeout {
-        return Err(CatcherError::WsHandshakeTimeout(handshake_timeout_ms));
+    if let Some(ResolvedAddrConnectError::HandshakeTimeout { timeout_ms, .. }) = last_error {
+        return Err(CatcherError::WsHandshakeTimeout(timeout_ms));
     }
 
     Err(CatcherError::Internal(format!(
@@ -260,26 +296,26 @@ async fn connect_with_resolved_addrs(
 async fn connect_to_resolved_addr(
     request: tokio_tungstenite::tungstenite::handshake::client::Request,
     ws_config: tokio_tungstenite::tungstenite::protocol::WebSocketConfig,
-    addr: std::net::SocketAddr,
+    addr: SocketAddr,
 ) -> Result<
     (
         WsStream,
         tokio_tungstenite::tungstenite::handshake::client::Response,
     ),
-    String,
+    ResolvedAddrConnectError,
 > {
     let socket = tokio::net::TcpStream::connect(addr)
         .await
-        .map_err(|e| format!("{addr}: {e}"))?;
+        .map_err(|source| ResolvedAddrConnectError::Tcp { addr, source })?;
     socket
         .set_nodelay(true)
-        .map_err(|e| format!("{addr}: set TCP_NODELAY: {e}"))?;
+        .map_err(|source| ResolvedAddrConnectError::TcpOption { addr, source })?;
 
     #[cfg(any(feature = "rustls-tls", feature = "native-tls"))]
     {
         tokio_tungstenite::client_async_tls_with_config(request, socket, Some(ws_config), None)
             .await
-            .map_err(|e| format!("{addr}: {e}"))
+            .map_err(|source| ResolvedAddrConnectError::Handshake { addr, source })
     }
 
     #[cfg(not(any(feature = "rustls-tls", feature = "native-tls")))]
@@ -290,7 +326,7 @@ async fn connect_to_resolved_addr(
             Some(ws_config),
         )
         .await
-        .map_err(|e| format!("{addr}: {e}"))
+        .map_err(|source| ResolvedAddrConnectError::Handshake { addr, source })
     }
 }
 

@@ -2,6 +2,10 @@
 //!
 //! 这个 crate 放置 HTTP 和 WebSocket 都会用到的 DNS 配置、缓存、
 //! host mapping 和旧缓存兜底逻辑，避免业务协议包互相依赖。
+//!
+//! 启用默认 `hickory-dns` feature 时，解析器使用 hickory-resolver，
+//! 并提供缓存、过期缓存兜底和后台刷新。关闭该 feature 时，解析器只
+//! 使用系统 DNS 和 `host_mapping`，不提供缓存和过期缓存兜底。
 
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
@@ -68,6 +72,9 @@ impl Default for DnsConfig {
 }
 
 /// 共享 DNS 解析器。
+///
+/// 默认 feature 会启用缓存和旧缓存兜底；关闭 `hickory-dns` 后仅保留
+/// 系统 DNS 查询和 `host_mapping`。
 #[derive(Clone, Debug)]
 pub struct DnsResolver {
     #[cfg(feature = "hickory-dns")]
