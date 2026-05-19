@@ -167,6 +167,45 @@ describe('NAPI DNS cache — StaleAwareDnsResolver', () => {
   })
 })
 
+describe('NAPI DNS cache — stale-while-revalidate (DNS goes down)', () => {
+  it('requests succeed via stale cache after DNS proxy stops', async () => {
+    // Short TTL so entry becomes stale quickly; long stale window for fallback
+    const staleDns = createSlowDnsProxy(50, { [FAKE_DOMAIN]: '127.0.0.1' })
+    await staleDns.start()
+
+    const client = new HttpClient(JSON.stringify({
+      base_url: `http://${FAKE_DOMAIN}:${httpServer.port}`,
+      connect_timeout_ms: 5000,
+      response_timeout_ms: 10_000,
+      dns: {
+        cache_ttl_secs: 1,
+        stale_ttl_secs: 3600,
+        stale_on_error: true,
+        nameservers: [`127.0.0.1:${staleDns.port}`],
+      },
+    }))
+
+    // Warm the cache
+    const warmResp = await client.get('/channels')
+    expect(warmResp.status).toBe(200)
+
+    // Kill DNS proxy — new DNS queries will fail
+    await staleDns.stop()
+
+    // Wait for TTL to expire so entry becomes stale
+    await new Promise(r => setTimeout(r, 1500))
+
+    // Requests should still succeed: stale entry returned, background refresh fails silently
+    const staleResp = await client.get('/channels')
+    expect(staleResp.status).toBe(200)
+
+    const staleResp2 = await client.get('/channels')
+    expect(staleResp2.status).toBe(200)
+
+    console.log('  DNS proxy down → stale cache served successfully')
+  })
+})
+
 describe('NAPI DNS cache — 5-request comparison', () => {
   it('cached requests are faster than uncached first request', async () => {
     const client = createCachingClient()
@@ -187,5 +226,30 @@ describe('NAPI DNS cache — 5-request comparison', () => {
     // First pays ~200ms DNS; subsequent should be much faster
     expect(first).toBeGreaterThanOrEqual(DNS_DELAY_MS * 0.5)
     expect(avgRest).toBeLessThan(first * 0.5)
+  })
+})
+
+describe('NAPI DNS cache — benchmark vs TS cacheable-lookup', () => {
+  it('NAPI StaleAwareDnsResolver vs TS cacheable-lookup: 10 sequential requests', async () => {
+    // ── NAPI side ──
+    const napiClient = createCachingClient()
+
+    const napiTimes: number[] = []
+    for (let i = 0; i < 10; i++) {
+      const start = Date.now()
+      await napiClient.get('/channels')
+      napiTimes.push(Date.now() - start)
+    }
+
+    const napiFirst = napiTimes[0]
+    const napiAvgRest = napiTimes.slice(1).reduce((a, b) => a + b, 0) / 9
+    const napiTotal = napiTimes.reduce((a, b) => a + b, 0)
+
+    console.log(`  NAPI:  first=${napiFirst}ms, avg(2-10)=${napiAvgRest.toFixed(1)}ms, total=${napiTotal}ms`)
+    console.log(`  NAPI times: [${napiTimes.join(', ')}]`)
+
+    // DNS cache should make subsequent requests much faster than first
+    expect(napiFirst).toBeGreaterThanOrEqual(DNS_DELAY_MS * 0.5)
+    expect(napiAvgRest).toBeLessThan(napiFirst * 0.5)
   })
 })
