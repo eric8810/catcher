@@ -133,15 +133,17 @@ describe('NAPI Chaos — 韧性压力测试 (Rust)', () => {
     })
 
     let wsConnected = false
+    let hasConnectedOnce = false
     let wsMsgsSent = 0
     let wsMsgsReceived = 0
 
     ws.addEventListener('open', () => {
-      if (wsConnected) {
+      if (hasConnectedOnce) {
         result.wsReconnects++
         log('ws-reconnect', `reconnect #${result.wsReconnects}`)
       } else {
         log('ws-open')
+        hasConnectedOnce = true
       }
       wsConnected = true
     })
@@ -151,9 +153,15 @@ describe('NAPI Chaos — 韧性压力测试 (Rust)', () => {
       log('ws-close', `disconnect #${result.wsDisconnects}`)
     })
     ws.addEventListener('message', (msg: any) => {
-      wsMsgsReceived++
-      const len = typeof msg.data === 'string' ? msg.data.length : 0
-      result.totalBytesReceived += len
+      // msg.data is base64-encoded (from Rust WsEvent::to_ffi_json data_base64)
+      // Decode and only count messages that contain our "chaos" marker (not server heartbeats)
+      try {
+        const decoded = Buffer.from(msg.data ?? '', 'base64').toString('utf-8')
+        if (decoded.includes('chaos')) {
+          wsMsgsReceived++
+          result.totalBytesReceived += decoded.length
+        }
+      } catch { /* ignore decode errors */ }
     })
     ws.addEventListener('error', () => {
       log('ws-error')

@@ -644,8 +644,17 @@ async fn execute_http_request(
             .map(|ct| ct.contains("msgpack"))
             .unwrap_or(false);
         if is_msgpack {
-            let value: serde_json::Value = rmp_serde::from_slice(&body)
+            let mut cursor = std::io::Cursor::new(&body[..]);
+            let value: serde_json::Value = rmp_serde::from_read(&mut cursor)
                 .map_err(|e| CatcherError::Internal(format!("msgpack decode: {e}")))?;
+            if (cursor.position() as usize) != body.len() {
+                return Err(CatcherError::Internal(format!(
+                    "msgpack decode: {} trailing bytes (consumed {}/{})",
+                    body.len() - cursor.position() as usize,
+                    cursor.position(),
+                    body.len(),
+                )));
+            }
             serde_json::to_vec(&value)
                 .map_err(|e| CatcherError::Internal(format!("msgpack decode: json serialize: {e}")))?
         } else {
