@@ -23,7 +23,8 @@ export interface RustHttpConfig {
   dnsNameservers?: string[]
   dnsHostMapping?: Record<string, string>
   retry?: { attempts: number; backoff?: string }
-  timeout: { response: number }
+  circuitBreaker?: { failureThreshold: number; resetTimeout: number; successThreshold?: number; halfOpenMaxRequests?: number }
+  timeout: { response: number } | number
   concurrency?: number
 }
 
@@ -44,10 +45,14 @@ export function createRustHttpClient(config: RustHttpConfig) {
       }
     : undefined
 
+  const timeoutMs = typeof config.timeout === 'number'
+    ? config.timeout
+    : config.timeout.response
+
   const inner = new HttpClient(JSON.stringify({
     base_url: config.baseURL,
     connect_timeout_ms: 5000,
-    response_timeout_ms: config.timeout.response,
+    response_timeout_ms: timeoutMs,
     pool: {
       keep_alive: config.keepAlive,
       keep_alive_interval_secs: 60,
@@ -64,7 +69,14 @@ export function createRustHttpClient(config: RustHttpConfig) {
           jitter: true,
         }
       : null,
-    circuit_breaker: null,
+    circuit_breaker: config.circuitBreaker
+      ? {
+          failure_threshold: config.circuitBreaker.failureThreshold,
+          reset_timeout_ms: config.circuitBreaker.resetTimeout,
+          success_threshold: config.circuitBreaker.successThreshold ?? 2,
+          half_open_max_requests: config.circuitBreaker.halfOpenMaxRequests ?? 5,
+        }
+      : null,
     max_concurrency: config.concurrency ?? 50,
   }))
 
@@ -83,6 +95,10 @@ export function createRustHttpClient(config: RustHttpConfig) {
   return {
     /** Bytes received in the last request (response body length) */
     get lastBytes() { return lastBytes },
+    /** Circuit breaker state: "closed" | "open" | "half-open" */
+    circuitBreakerState(): string { return inner.circuitBreakerState() },
+    /** Queue depth (not directly exposed in NAPI — approximate from metrics) */
+    queueDepth(): number { return 0 },
     /**
      * Cumulative number of retries since client creation.
      * Read from `MetricsCollector::http_retries` after each request.

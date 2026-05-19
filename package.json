@@ -10,6 +10,8 @@
     "test:napi": "pnpm --filter @eric8810/catcher-napi-http build && pnpm --filter @eric8810/catcher-napi-ws build && vitest run --config vitest.napi.config.ts",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "test:chaos": "vitest run --config vitest.chaos.config.ts",
+    "test:napi-bench": "pnpm --filter @eric8810/catcher-napi-http build && pnpm --filter @eric8810/catcher-napi-ws build && vitest run --config vitest.napi-bench.config.ts",
+    "test:napi-chaos": "pnpm --filter @eric8810/catcher-napi-http build && pnpm --filter @eric8810/catcher-napi-ws build && vitest run --config vitest.napi-chaos.config.ts",
     "test:watch": "vitest",
     "bench": "vitest bench --run",
     "lint": "pnpm typecheck",
