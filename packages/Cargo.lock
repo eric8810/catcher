@@ -324,7 +324,7 @@ dependencies = [
 
 [[package]]
 name = "catcher-core"
-version = "0.3.8"
+version = "0.3.9"
 dependencies = [
  "serde",
  "serde_json",
@@ -333,7 +333,7 @@ dependencies = [
 
 [[package]]
 name = "catcher-ffi"
-version = "0.3.8"
+version = "0.3.9"
 dependencies = [
  "catcher-core",
  "catcher-http",
@@ -346,7 +346,7 @@ dependencies = [
 
 [[package]]
 name = "catcher-http"
-version = "0.3.8"
+version = "0.3.9"
 dependencies = [
  "async-trait",
  "backon",
@@ -380,7 +380,7 @@ dependencies = [
 
 [[package]]
 name = "catcher-napi-http"
-version = "0.3.8"
+version = "0.3.9"
 dependencies = [
  "base64",
  "bytes",
@@ -398,7 +398,7 @@ dependencies = [
 
 [[package]]
 name = "catcher-napi-ws"
-version = "0.3.8"
+version = "0.3.9"
 dependencies = [
  "catcher-ws",
  "napi",
@@ -410,7 +410,7 @@ dependencies = [
 
 [[package]]
 name = "catcher-uniffi"
-version = "0.3.8"
+version = "0.3.9"
 dependencies = [
  "catcher-core",
  "catcher-http",
@@ -424,7 +424,7 @@ dependencies = [
 
 [[package]]
 name = "catcher-ws"
-version = "0.3.8"
+version = "0.3.9"
 dependencies = [
  "backon",
  "base64",

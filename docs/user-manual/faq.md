@@ -283,7 +283,7 @@ externals: ['@eric8810/catcher-napi-http', '@eric8810/catcher-napi-ws']
 catcher 遵循语义化版本。建议写完整版本或兼容性约束：
 
 ```toml
-catcher-http = "0.3.8"       # 精确兼容 MAJOR.MINOR
+catcher-http = "0.3.9"       # 精确兼容 MAJOR.MINOR
 # 或
 catcher-http = ">=0.2,<0.3"  # 0.2.x 系列
 ```

@@ -1,6 +1,6 @@
 [package]
 name = "catcher-ws"
-version = "0.3.8"
+version = "0.3.9"
 edition = "2021"
 description = "WebSocket client for catcher — resilient reconnect, heartbeat, multi-endpoint racing"
 license = "MIT"
@@ -12,7 +12,7 @@ rustls-tls = ["tokio-tungstenite/rustls-tls-webpki-roots", "rustls/ring"]
 native-tls = ["tokio-tungstenite/native-tls"]
 
 [dependencies]
-catcher-core = { path = "../catcher-core", version = "0.3.8" }
+catcher-core = { path = "../catcher-core", version = "0.3.9" }
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "net", "io-util", "macros"] }
 tokio-tungstenite = { version = "0.29", default-features = false, features = ["connect", "handshake"] }
 futures-util = "0.3"
