@@ -1,5 +1,5 @@
 use catcher_core::types::default_true;
-pub use catcher_http::types::http::DnsConfig;
+pub use catcher_dns::DnsConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

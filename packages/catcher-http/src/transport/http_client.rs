@@ -64,7 +64,7 @@ impl HttpTransport {
         // G8: TLS configuration
         reqwest_builder = build_tls_config(reqwest_builder, &config.tls)?;
 
-        // G7: DNS resolution — always build StaleAwareDnsResolver for caching
+        // G7: DNS resolution — always build shared DNS resolver for caching
         #[cfg(feature = "hickory-dns")]
         {
             let dns_config = config.dns.clone().unwrap_or_default();
@@ -570,7 +570,7 @@ async fn execute_http_request(
         )
     };
 
-    // G7: host_mapping is handled by StaleAwareDnsResolver at the DNS layer.
+    // G7: host_mapping is handled by the shared DNS resolver.
     // No request-level URL rewriting needed — the resolver returns the mapped IP
     // while reqwest preserves the original hostname for Host header and TLS SNI.
 

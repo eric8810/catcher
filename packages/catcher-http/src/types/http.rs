@@ -1,5 +1,6 @@
-use catcher_core::types::resilience::{CircuitBreakerConfig, RetryConfig};
 use catcher_core::types::default_true;
+use catcher_core::types::resilience::{CircuitBreakerConfig, RetryConfig};
+pub use catcher_dns::DnsConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -54,7 +55,10 @@ pub struct HttpResponse {
 /// 流式 HTTP 响应事件（N-02）
 #[derive(Debug, Clone)]
 pub enum StreamEvent {
-    Headers { status: u16, headers: HashMap<String, String> },
+    Headers {
+        status: u16,
+        headers: HashMap<String, String>,
+    },
     Chunk(bytes::Bytes),
     Done,
     Error(String),
@@ -74,7 +78,10 @@ pub struct PoolConfig {
     #[serde(alias = "keepAlive", default = "default_true")]
     pub keep_alive: bool,
     /// keepalive 间隔（秒）— 更短的间隔能更快检测死连接 (G-02)
-    #[serde(alias = "keepAliveIntervalSecs", default = "default_keep_alive_interval")]
+    #[serde(
+        alias = "keepAliveIntervalSecs",
+        default = "default_keep_alive_interval"
+    )]
     pub keep_alive_interval_secs: u64,
 }
 
@@ -136,7 +143,10 @@ pub struct TlsConfig {
     #[serde(alias = "clientIdentityPfx", skip_serializing_if = "Option::is_none")]
     pub client_identity_pfx: Option<Vec<u8>>,
     /// PFX 身份密码
-    #[serde(alias = "clientIdentityPassword", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        alias = "clientIdentityPassword",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub client_identity_password: Option<String>,
     /// TLS SNI 覆写
     #[serde(alias = "tlsSniOverride", skip_serializing_if = "Option::is_none")]
@@ -168,59 +178,6 @@ impl Default for TlsConfig {
             min_tls_version: None,
             max_tls_version: None,
             pin_sha256: None,
-        }
-    }
-}
-
-/// DNS 配置
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DnsConfig {
-    /// 缓存条目数上限
-    #[serde(alias = "cacheSize", default = "default_dns_cache_size")]
-    pub cache_size: u64,
-    /// DNS 缓存 TTL（秒）— 正常缓存有效期
-    #[serde(alias = "cacheTtlSecs", default = "default_dns_cache_ttl")]
-    pub cache_ttl_secs: u32,
-    /// 否定缓存 TTL（秒）— 传给 hickory-resolver
-    #[serde(alias = "negativeTtlSecs", default = "default_dns_negative_ttl")]
-    pub negative_ttl_secs: u32,
-    /// 过期后仍可用的宽限期（秒）— stale-while-revalidate 窗口
-    #[serde(alias = "staleTtlSecs", default = "default_dns_stale_ttl")]
-    pub stale_ttl_secs: u32,
-    /// DNS 失败时是否用旧缓存兜底
-    #[serde(alias = "staleOnError", default = "default_true")]
-    pub stale_on_error: bool,
-    /// 自定义 DNS 服务器地址列表（如 ["8.8.8.8:53"]）
-    #[serde(default)]
-    pub nameservers: Vec<String>,
-    /// Hostname → IP 映射 (G7: custom DNS host mapping)
-    #[serde(alias = "hostMapping", default)]
-    pub host_mapping: HashMap<String, String>,
-}
-
-fn default_dns_cache_size() -> u64 {
-    512
-}
-fn default_dns_cache_ttl() -> u32 {
-    300
-}
-fn default_dns_negative_ttl() -> u32 {
-    60
-}
-fn default_dns_stale_ttl() -> u32 {
-    3600
-}
-
-impl Default for DnsConfig {
-    fn default() -> Self {
-        Self {
-            cache_size: default_dns_cache_size(),
-            cache_ttl_secs: default_dns_cache_ttl(),
-            negative_ttl_secs: default_dns_negative_ttl(),
-            stale_ttl_secs: default_dns_stale_ttl(),
-            stale_on_error: default_true(),
-            nameservers: Vec::new(),
-            host_mapping: HashMap::new(),
         }
     }
 }

@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "catcher-core",
+    "catcher-dns",
     "catcher-http",
     "catcher-ws",
     "catcher-ffi",

@@ -26,6 +26,10 @@
       "package-name": "catcher-core",
       "release-type": "rust"
     },
+    "packages/catcher-dns": {
+      "package-name": "catcher-dns",
+      "release-type": "rust"
+    },
     "packages/catcher-http": {
       "package-name": "catcher-http",
       "release-type": "rust"

@@ -1,0 +1,23 @@
+[package]
+name = "catcher-dns"
+version = "0.3.9"
+edition = "2021"
+description = "Shared DNS resolver for catcher — cache, host mapping, and stale fallback"
+license = "MIT"
+repository = "https://github.com/eric8810/catcher"
+
+[features]
+default = ["hickory-dns"]
+hickory-dns = ["dep:hickory-resolver", "dep:hickory-proto", "dep:moka"]
+
+[dependencies]
+catcher-core = { path = "../catcher-core", version = "0.3.9" }
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["net", "rt", "time", "macros"] }
+parking_lot = "0.12"
+hickory-resolver = { version = "0.25", optional = true, features = ["tokio"] }
+hickory-proto = { version = "0.25", optional = true }
+moka = { version = "0.12", optional = true, features = ["future"] }
+
+[dev-dependencies]
+serde_json = "1"

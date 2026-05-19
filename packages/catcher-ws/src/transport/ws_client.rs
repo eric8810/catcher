@@ -14,7 +14,7 @@ use tokio::sync::mpsc;
 use crate::types::ws::*;
 use crate::ws::{build_ws_config, EndpointRacer, HeartbeatManager, ReconnectManager};
 use catcher_core::CatcherError;
-use catcher_http::transport::dns::{build_stale_aware_resolver, StaleAwareDnsResolver};
+use catcher_dns::{build_stale_aware_resolver, DnsResolver};
 
 // ── 类型别名 ──
 
@@ -22,7 +22,7 @@ use catcher_http::transport::dns::{build_stale_aware_resolver, StaleAwareDnsReso
 pub(crate) type WsStream =
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
-pub(crate) type SharedDnsResolver = Arc<StaleAwareDnsResolver>;
+pub(crate) type SharedDnsResolver = Arc<DnsResolver>;
 
 // ── TLS 初始化 ──
 
@@ -182,6 +182,7 @@ async fn connect_with_dns(
     request: tokio_tungstenite::tungstenite::handshake::client::Request,
     ws_config: tokio_tungstenite::tungstenite::protocol::WebSocketConfig,
     resolver: &SharedDnsResolver,
+    handshake_timeout_ms: u64,
 ) -> Result<
     (
         WsStream,
@@ -191,52 +192,106 @@ async fn connect_with_dns(
 > {
     let (host, port) = request_host_port(&request)?;
     let addrs = resolver.resolve_socket_addrs(&host, port).await?;
+    connect_with_resolved_addrs(request, ws_config, &host, port, addrs, handshake_timeout_ms).await
+}
+
+async fn connect_with_resolved_addrs(
+    request: tokio_tungstenite::tungstenite::handshake::client::Request,
+    ws_config: tokio_tungstenite::tungstenite::protocol::WebSocketConfig,
+    host: &str,
+    port: u16,
+    addrs: Vec<std::net::SocketAddr>,
+    handshake_timeout_ms: u64,
+) -> Result<
+    (
+        WsStream,
+        tokio_tungstenite::tungstenite::handshake::client::Response,
+    ),
+    CatcherError,
+> {
+    #[cfg(not(any(feature = "rustls-tls", feature = "native-tls")))]
+    {
+        if request.uri().scheme_str() == Some("wss") {
+            return Err(CatcherError::InvalidConfig(
+                "wss requires rustls-tls or native-tls feature".into(),
+            ));
+        }
+    }
+
     let mut last_error = None;
+    let mut last_error_was_timeout = false;
 
     for addr in addrs {
-        match tokio::net::TcpStream::connect(addr).await {
-            Ok(socket) => {
-                socket
-                    .set_nodelay(true)
-                    .map_err(|e| CatcherError::Internal(format!("set TCP_NODELAY: {e}")))?;
-                #[cfg(any(feature = "rustls-tls", feature = "native-tls"))]
-                {
-                    return tokio_tungstenite::client_async_tls_with_config(
-                        request,
-                        socket,
-                        Some(ws_config),
-                        None,
-                    )
-                    .await
-                    .map_err(|e| CatcherError::Internal(format!("ws connect failed: {e}")));
-                }
-
-                #[cfg(not(any(feature = "rustls-tls", feature = "native-tls")))]
-                {
-                    if request.uri().scheme_str() == Some("wss") {
-                        return Err(CatcherError::InvalidConfig(
-                            "wss requires rustls-tls or native-tls feature".into(),
-                        ));
-                    }
-                    return tokio_tungstenite::client_async_with_config(
-                        request,
-                        tokio_tungstenite::MaybeTlsStream::Plain(socket),
-                        Some(ws_config),
-                    )
-                    .await
-                    .map_err(|e| CatcherError::Internal(format!("ws connect failed: {e}")));
+        let attempt = connect_to_resolved_addr(request.clone(), ws_config, addr);
+        let result = if handshake_timeout_ms > 0 {
+            match tokio::time::timeout(Duration::from_millis(handshake_timeout_ms), attempt).await {
+                Ok(result) => result,
+                Err(_) => {
+                    last_error = Some(format!(
+                        "{addr}: WS handshake timeout after {handshake_timeout_ms}ms"
+                    ));
+                    last_error_was_timeout = true;
+                    continue;
                 }
             }
+        } else {
+            attempt.await
+        };
+
+        match result {
+            Ok(pair) => return Ok(pair),
             Err(e) => {
                 last_error = Some(e);
+                last_error_was_timeout = false;
             }
         }
+    }
+
+    if last_error_was_timeout {
+        return Err(CatcherError::WsHandshakeTimeout(handshake_timeout_ms));
     }
 
     Err(CatcherError::Internal(format!(
         "ws connect failed: no resolved address for {host}:{port} succeeded{}",
         last_error.map(|e| format!(": {e}")).unwrap_or_default(),
     )))
+}
+
+async fn connect_to_resolved_addr(
+    request: tokio_tungstenite::tungstenite::handshake::client::Request,
+    ws_config: tokio_tungstenite::tungstenite::protocol::WebSocketConfig,
+    addr: std::net::SocketAddr,
+) -> Result<
+    (
+        WsStream,
+        tokio_tungstenite::tungstenite::handshake::client::Response,
+    ),
+    String,
+> {
+    let socket = tokio::net::TcpStream::connect(addr)
+        .await
+        .map_err(|e| format!("{addr}: {e}"))?;
+    socket
+        .set_nodelay(true)
+        .map_err(|e| format!("{addr}: set TCP_NODELAY: {e}"))?;
+
+    #[cfg(any(feature = "rustls-tls", feature = "native-tls"))]
+    {
+        tokio_tungstenite::client_async_tls_with_config(request, socket, Some(ws_config), None)
+            .await
+            .map_err(|e| format!("{addr}: {e}"))
+    }
+
+    #[cfg(not(any(feature = "rustls-tls", feature = "native-tls")))]
+    {
+        tokio_tungstenite::client_async_with_config(
+            request,
+            tokio_tungstenite::MaybeTlsStream::Plain(socket),
+            Some(ws_config),
+        )
+        .await
+        .map_err(|e| format!("{addr}: {e}"))
+    }
 }
 
 /// 底层 WebSocket 连接 — 处理 headers/protocols/handshake_timeout/deflate。
@@ -252,16 +307,7 @@ pub(crate) async fn connect_stream_with_resolver(
     let ws_config = build_ws_config(config);
 
     let start = Instant::now();
-    let result = if config.handshake_timeout_ms > 0 {
-        tokio::time::timeout(
-            Duration::from_millis(config.handshake_timeout_ms),
-            connect_with_dns(request, ws_config, resolver),
-        )
-        .await
-        .map_err(|_| CatcherError::ConnectionTimeout(config.handshake_timeout_ms))?
-    } else {
-        connect_with_dns(request, ws_config, resolver).await
-    };
+    let result = connect_with_dns(request, ws_config, resolver, config.handshake_timeout_ms).await;
 
     let (stream, _response) = result?;
 
@@ -741,5 +787,89 @@ mod tests {
         assert!(result.is_ok());
         drop(result);
         let _ = server.await.unwrap();
+    }
+
+    /// 验证第一个 IP 握手失败后，会继续尝试下一个 IP。
+    #[tokio::test]
+    async fn connect_with_dns_retries_next_ip_after_handshake_failure() {
+        use tokio::io::AsyncWriteExt;
+
+        let bad_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let bad_addr = bad_listener.local_addr().unwrap();
+        let bad_server = tokio::spawn(async move {
+            let (mut stream, _) = bad_listener.accept().await.unwrap();
+            let _ = stream
+                .write_all(b"HTTP/1.1 500 Internal Server Error\r\n\r\n")
+                .await;
+        });
+
+        let good_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let good_addr = good_listener.local_addr().unwrap();
+        let good_server = tokio::spawn(async move {
+            let (stream, _) = good_listener.accept().await.unwrap();
+            tokio_tungstenite::accept_async(stream).await.unwrap()
+        });
+
+        let config = WsClientConfig {
+            urls: vec![format!("ws://retry.test:{}/ws", good_addr.port())],
+            handshake_timeout_ms: 1_000,
+            ..Default::default()
+        };
+        let request = build_request(&config.urls[0], &config).unwrap();
+        let ws_config = build_ws_config(&config);
+        let result = connect_with_resolved_addrs(
+            request,
+            ws_config,
+            "retry.test",
+            good_addr.port(),
+            vec![bad_addr, good_addr],
+            1_000,
+        )
+        .await;
+
+        assert!(result.is_ok());
+        drop(result);
+        bad_server.await.unwrap();
+        let _ = good_server.await.unwrap();
+    }
+
+    /// 验证第一个 IP 握手卡住时，也会在超时后继续尝试下一个 IP。
+    #[tokio::test]
+    async fn connect_with_dns_retries_next_ip_after_handshake_timeout() {
+        let bad_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let bad_addr = bad_listener.local_addr().unwrap();
+        let bad_server = tokio::spawn(async move {
+            let (_stream, _) = bad_listener.accept().await.unwrap();
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        });
+
+        let good_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let good_addr = good_listener.local_addr().unwrap();
+        let good_server = tokio::spawn(async move {
+            let (stream, _) = good_listener.accept().await.unwrap();
+            tokio_tungstenite::accept_async(stream).await.unwrap()
+        });
+
+        let config = WsClientConfig {
+            urls: vec![format!("ws://retry-timeout.test:{}/ws", good_addr.port())],
+            handshake_timeout_ms: 50,
+            ..Default::default()
+        };
+        let request = build_request(&config.urls[0], &config).unwrap();
+        let ws_config = build_ws_config(&config);
+        let result = connect_with_resolved_addrs(
+            request,
+            ws_config,
+            "retry-timeout.test",
+            good_addr.port(),
+            vec![bad_addr, good_addr],
+            config.handshake_timeout_ms,
+        )
+        .await;
+
+        assert!(result.is_ok());
+        drop(result);
+        bad_server.abort();
+        let _ = good_server.await.unwrap();
     }
 }
