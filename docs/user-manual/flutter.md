@@ -161,6 +161,183 @@ flutter build apk   # 自动编译 Rust + 打包 .so
 
 编译产物自动嵌入 app bundle，Dart 侧通过 `DynamicLibrary.process()` 加载。
 
+### 手动构建 Android / iOS native 二进制
+
+当需要在本地重新生成 `catcher_core` 的 Android `.so` 或 iOS `XCFramework` 时，从仓库根目录执行。以下步骤只覆盖 Android 和 iOS，不发布 pub.dev 包。
+
+#### 前置依赖
+
+- Rust toolchain: `cargo`、`rustup`
+- Android: Android SDK + NDK，建议使用 release workflow 同版本 `27.0.12077973`
+- iOS: Xcode command line tools，包含 `xcodebuild`、`lipo`、`install_name_tool`
+
+```bash
+rustup target add \
+  aarch64-linux-android \
+  armv7-linux-androideabi \
+  i686-linux-android \
+  x86_64-linux-android \
+  aarch64-apple-ios \
+  aarch64-apple-ios-sim \
+  x86_64-apple-ios
+```
+
+#### Android
+
+`packages/catcher_core/scripts/build_native.sh android` 会设置 Cargo linker，但部分 Rust 依赖（例如 `ring` 通过 `cc-rs` 编译 C/ASM）还会读取 `CC_*`。NDK 新版本只提供带 API 后缀的 clang，例如 `aarch64-linux-android24-clang`，因此手动构建时需要显式设置 `CC_*`。
+
+```bash
+cd /path/to/catcher
+
+export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-$HOME/Library/Android/sdk/ndk/27.0.12077973}"
+export ANDROID_API="${ANDROID_API:-24}"
+
+case "$(uname -s)" in
+  Darwin) HOST_TAG="darwin-x86_64" ;;
+  Linux) HOST_TAG="linux-x86_64" ;;
+  *) echo "Unsupported Android build host: $(uname -s)" >&2; exit 1 ;;
+esac
+
+TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/$HOST_TAG/bin"
+
+export CC_aarch64_linux_android="$TOOLCHAIN/aarch64-linux-android${ANDROID_API}-clang"
+export CC_armv7_linux_androideabi="$TOOLCHAIN/armv7a-linux-androideabi${ANDROID_API}-clang"
+export CC_i686_linux_android="$TOOLCHAIN/i686-linux-android${ANDROID_API}-clang"
+export CC_x86_64_linux_android="$TOOLCHAIN/x86_64-linux-android${ANDROID_API}-clang"
+
+export AR_aarch64_linux_android="$TOOLCHAIN/llvm-ar"
+export AR_armv7_linux_androideabi="$TOOLCHAIN/llvm-ar"
+export AR_i686_linux_android="$TOOLCHAIN/llvm-ar"
+export AR_x86_64_linux_android="$TOOLCHAIN/llvm-ar"
+
+packages/catcher_core/scripts/build_native.sh android
+```
+
+输出位置：
+
+```text
+packages/catcher_core/android/src/main/jniLibs/arm64-v8a/libcatcher_ffi.so
+packages/catcher_core/android/src/main/jniLibs/armeabi-v7a/libcatcher_ffi.so
+packages/catcher_core/android/src/main/jniLibs/x86/libcatcher_ffi.so
+packages/catcher_core/android/src/main/jniLibs/x86_64/libcatcher_ffi.so
+```
+
+#### iOS
+
+仓库脚本的 `apple` target 会同时构建 iOS 和 macOS。如果只需要 iOS，可按下面步骤编译 device/simulator 三个 target，并组装 `catcher_ffi.xcframework`。
+
+```bash
+cd /path/to/catcher
+
+export IPHONEOS_DEPLOYMENT_TARGET="${IPHONEOS_DEPLOYMENT_TARGET:-13.0}"
+
+rustup target add \
+  aarch64-apple-ios \
+  aarch64-apple-ios-sim \
+  x86_64-apple-ios
+
+cargo build --release -p catcher-ffi --target aarch64-apple-ios --manifest-path packages/Cargo.toml
+cargo build --release -p catcher-ffi --target aarch64-apple-ios-sim --manifest-path packages/Cargo.toml
+cargo build --release -p catcher-ffi --target x86_64-apple-ios --manifest-path packages/Cargo.toml
+
+TMP_DIR="$(mktemp -d)"
+trap 'rm -rf "$TMP_DIR"' EXIT
+
+lipo -create \
+  packages/target/aarch64-apple-ios-sim/release/libcatcher_ffi.dylib \
+  packages/target/x86_64-apple-ios/release/libcatcher_ffi.dylib \
+  -output "$TMP_DIR/libcatcher_ffi_ios_sim.dylib"
+
+make_framework() {
+  local source="$1"
+  local framework_dir="$2"
+  local bundle_id="$3"
+
+  rm -rf "$framework_dir"
+  mkdir -p "$framework_dir"
+  cp "$source" "$framework_dir/catcher_ffi"
+  install_name_tool -id "@rpath/catcher_ffi.framework/catcher_ffi" "$framework_dir/catcher_ffi"
+  cat > "$framework_dir/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>en</string>
+  <key>CFBundleExecutable</key>
+  <string>catcher_ffi</string>
+  <key>CFBundleIdentifier</key>
+  <string>${bundle_id}</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundleName</key>
+  <string>catcher_ffi</string>
+  <key>CFBundlePackageType</key>
+  <string>FMWK</string>
+  <key>CFBundleShortVersionString</key>
+  <string>1.0</string>
+  <key>CFBundleVersion</key>
+  <string>1</string>
+</dict>
+</plist>
+PLIST
+}
+
+make_framework \
+  packages/target/aarch64-apple-ios/release/libcatcher_ffi.dylib \
+  "$TMP_DIR/ios-device/catcher_ffi.framework" \
+  "com.eric8810.catcher.ffi.ios"
+
+make_framework \
+  "$TMP_DIR/libcatcher_ffi_ios_sim.dylib" \
+  "$TMP_DIR/ios-simulator/catcher_ffi.framework" \
+  "com.eric8810.catcher.ffi.ios-simulator"
+
+rm -rf packages/catcher_core/ios/Frameworks/catcher_ffi.xcframework
+mkdir -p packages/catcher_core/ios/Frameworks
+
+xcodebuild -create-xcframework \
+  -framework "$TMP_DIR/ios-device/catcher_ffi.framework" \
+  -framework "$TMP_DIR/ios-simulator/catcher_ffi.framework" \
+  -output packages/catcher_core/ios/Frameworks/catcher_ffi.xcframework
+```
+
+输出位置：
+
+```text
+packages/catcher_core/ios/Frameworks/catcher_ffi.xcframework
+```
+
+#### 校验
+
+```bash
+export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-$HOME/Library/Android/sdk/ndk/27.0.12077973}"
+case "$(uname -s)" in
+  Darwin) HOST_TAG="darwin-x86_64" ;;
+  Linux) HOST_TAG="linux-x86_64" ;;
+  *) echo "Unsupported Android build host: $(uname -s)" >&2; exit 1 ;;
+esac
+TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/$HOST_TAG/bin"
+
+# Android ABI
+file packages/catcher_core/android/src/main/jniLibs/*/libcatcher_ffi.so
+
+# iOS framework slices
+lipo -info packages/catcher_core/ios/Frameworks/catcher_ffi.xcframework/ios-arm64/catcher_ffi.framework/catcher_ffi
+lipo -info packages/catcher_core/ios/Frameworks/catcher_ffi.xcframework/ios-arm64_x86_64-simulator/catcher_ffi.framework/catcher_ffi
+
+# XCFramework metadata
+plutil -p packages/catcher_core/ios/Frameworks/catcher_ffi.xcframework/Info.plist
+
+# Core FFI symbols
+"$TOOLCHAIN/llvm-nm" -gD packages/catcher_core/android/src/main/jniLibs/arm64-v8a/libcatcher_ffi.so \
+  | rg 'catcher_http_execute$|catcher_ws_create$|catcher_free_result$|catcher_sse_connect$'
+nm -gU packages/catcher_core/ios/Frameworks/catcher_ffi.xcframework/ios-arm64/catcher_ffi.framework/catcher_ffi \
+  | rg '_catcher_http_execute$|_catcher_ws_create$|_catcher_free_result$|_catcher_sse_connect$'
+```
+
+> `android/src/main/jniLibs/` 和 `ios/Frameworks/` 下的二进制产物默认被 git ignore。发布前请确认这些文件实际存在；pub.dev 打包依赖 `.pubignore` 中对平台 bundle 目录的例外规则。
+
 ---
 
 ## 七、与 Node.js 的 API 对应

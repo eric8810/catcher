@@ -21,7 +21,7 @@ dependencies:
   catcher_core: ^0.2.0
 ```
 
-> **Note:** This package loads a native Rust library (`libcatcher_ffi.so` / `catcher_ffi.dylib` / `catcher_ffi.dll`). The library must be bundled with your app. See the [GitHub repo](https://github.com/eric8810/catcher) for build instructions.
+> **Note:** This package loads a native Rust library (`libcatcher_ffi.so` / `catcher_ffi.dylib` / `catcher_ffi.dll`). The library must be bundled with your app. See the [Flutter manual build guide](../../docs/user-manual/flutter.md#手动构建-android--ios-native-二进制) for Android/iOS build instructions.
 
 ## Quick Start
 
