@@ -175,9 +175,21 @@ impl Default for TlsConfig {
 /// DNS 配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DnsConfig {
-    /// DNS 缓存 TTL（秒）
+    /// 缓存条目数上限
+    #[serde(alias = "cacheSize", default = "default_dns_cache_size")]
+    pub cache_size: u64,
+    /// DNS 缓存 TTL（秒）— 正常缓存有效期
     #[serde(alias = "cacheTtlSecs", default = "default_dns_cache_ttl")]
     pub cache_ttl_secs: u32,
+    /// 否定缓存 TTL（秒）— 传给 hickory-resolver
+    #[serde(alias = "negativeTtlSecs", default = "default_dns_negative_ttl")]
+    pub negative_ttl_secs: u32,
+    /// 过期后仍可用的宽限期（秒）— stale-while-revalidate 窗口
+    #[serde(alias = "staleTtlSecs", default = "default_dns_stale_ttl")]
+    pub stale_ttl_secs: u32,
+    /// DNS 失败时是否用旧缓存兜底
+    #[serde(alias = "staleOnError", default = "default_true")]
+    pub stale_on_error: bool,
     /// 自定义 DNS 服务器地址列表（如 ["8.8.8.8:53"]）
     #[serde(default)]
     pub nameservers: Vec<String>,
@@ -186,14 +198,27 @@ pub struct DnsConfig {
     pub host_mapping: HashMap<String, String>,
 }
 
+fn default_dns_cache_size() -> u64 {
+    512
+}
 fn default_dns_cache_ttl() -> u32 {
     300
+}
+fn default_dns_negative_ttl() -> u32 {
+    60
+}
+fn default_dns_stale_ttl() -> u32 {
+    3600
 }
 
 impl Default for DnsConfig {
     fn default() -> Self {
         Self {
+            cache_size: default_dns_cache_size(),
             cache_ttl_secs: default_dns_cache_ttl(),
+            negative_ttl_secs: default_dns_negative_ttl(),
+            stale_ttl_secs: default_dns_stale_ttl(),
+            stale_on_error: default_true(),
             nameservers: Vec::new(),
             host_mapping: HashMap::new(),
         }

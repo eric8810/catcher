@@ -16,18 +16,31 @@ export interface RustHttpConfig {
   baseURL: string
   keepAlive: boolean
   dnsCacheTtl?: number
+  dnsNegativeTtl?: number
+  dnsStaleTtl?: number
+  dnsStaleOnError?: boolean
+  dnsCacheSize?: number
   dnsNameservers?: string[]
+  dnsHostMapping?: Record<string, string>
   retry?: { attempts: number; backoff?: string }
   timeout: { response: number }
   concurrency?: number
 }
 
 export function createRustHttpClient(config: RustHttpConfig) {
-  const dnsConfig = (config.dnsCacheTtl || config.dnsNameservers)
+  const hasDns = config.dnsCacheTtl != null || config.dnsNegativeTtl != null
+    || config.dnsStaleTtl != null || config.dnsStaleOnError != null
+    || config.dnsCacheSize != null || config.dnsNameservers != null
+    || config.dnsHostMapping != null
+  const dnsConfig = hasDns
     ? {
+        cache_size: config.dnsCacheSize ?? 512,
         cache_ttl_secs: config.dnsCacheTtl ?? 300,
+        negative_ttl_secs: config.dnsNegativeTtl ?? 60,
+        stale_ttl_secs: config.dnsStaleTtl ?? 3600,
+        stale_on_error: config.dnsStaleOnError ?? true,
         nameservers: config.dnsNameservers ?? [],
-        host_mapping: {} as Record<string, string>,
+        host_mapping: config.dnsHostMapping ?? {},
       }
     : undefined
 

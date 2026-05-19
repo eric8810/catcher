@@ -11,7 +11,6 @@ use catcher_core::CatcherError;
 use crate::resilience::backoff::build_retry_policy;
 use crate::resilience::circuit_breaker::CircuitBreaker;
 use crate::resilience::timeout::AdaptiveTimeout;
-use crate::transport::dns::build_dns_resolver;
 use crate::transport::retry_middleware::MetricsRetryMiddleware;
 use crate::transport::tls::build_tls_config;
 use crate::types::http::*;
@@ -65,19 +64,12 @@ impl HttpTransport {
         // G8: TLS configuration
         reqwest_builder = build_tls_config(reqwest_builder, &config.tls)?;
 
-        // G7: DNS resolution: validates config, builds custom resolver if nameservers configured
+        // G7: DNS resolution — always build StaleAwareDnsResolver for caching
         #[cfg(feature = "hickory-dns")]
-        if let Some(ref dns) = config.dns {
-            build_dns_resolver(dns)?;
-            if !dns.nameservers.is_empty() {
-                let resolver = crate::transport::dns::build_custom_resolver(&dns.nameservers)
-                    .map_err(CatcherError::InvalidConfig)?;
-                reqwest_builder = reqwest_builder.dns_resolver(resolver);
-            }
-        }
-        #[cfg(not(feature = "hickory-dns"))]
-        if let Some(ref dns) = config.dns {
-            build_dns_resolver(dns)?;
+        {
+            let dns_config = config.dns.clone().unwrap_or_default();
+            let resolver = crate::transport::dns::build_stale_aware_resolver(&dns_config)?;
+            reqwest_builder = reqwest_builder.dns_resolver(resolver);
         }
 
         // G4: Proxy configuration
@@ -568,7 +560,7 @@ async fn execute_http_request(
         HttpMethod::PATCH => reqwest::Method::PATCH,
     };
 
-    let mut url = if request.url.starts_with("http") {
+    let url = if request.url.starts_with("http") {
         request.url
     } else {
         format!(
@@ -578,22 +570,9 @@ async fn execute_http_request(
         )
     };
 
-    // G7: Apply host_mapping
-    let mut host_header_override: Option<String> = None;
-    if let Some(ref dns) = config.dns {
-        if let Some(after_scheme) = url.strip_prefix("http://").or_else(|| url.strip_prefix("https://")) {
-            let host_end = after_scheme.find(['/', '?', '#']).unwrap_or(after_scheme.len());
-            let host_port = &after_scheme[..host_end];
-            let hostname = host_port.split(':').next().unwrap_or(host_port);
-            if let Some(mapped_ip) = crate::transport::dns::resolve_host_mapping(dns, hostname) {
-                host_header_override = Some(hostname.to_string());
-                let scheme_end = url.find("://").map(|p| p + 3).unwrap_or(0);
-                let after_host = &url[scheme_end + host_port.len()..];
-                let scheme = &url[..scheme_end];
-                url = format!("{}{}{}", scheme, mapped_ip, after_host);
-            }
-        }
-    }
+    // G7: host_mapping is handled by StaleAwareDnsResolver at the DNS layer.
+    // No request-level URL rewriting needed — the resolver returns the mapped IP
+    // while reqwest preserves the original hostname for Host header and TLS SNI.
 
     let mut req = client.request(method, &url);
     for (k, v) in &config.default_headers {
@@ -614,9 +593,6 @@ async fn execute_http_request(
         if let Some(content_type) = &request.content_type {
             req = req.header("Content-Type", content_type);
         }
-    }
-    if let Some(ref original_host) = host_header_override {
-        req = req.header("Host", original_host.as_str());
     }
     if let Some(ref override_host) = config.hostname_override {
         req = req.header("Host", override_host.as_str());

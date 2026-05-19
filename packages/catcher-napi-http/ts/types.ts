@@ -60,8 +60,16 @@ export interface TlsConfig {
 
 /** DNS 配置 — 对应 Rust DnsConfig */
 export interface DnsConfig {
+  /** 缓存条目数上限。默认: 512 */
+  cache_size?: number
   /** DNS 缓存 TTL（秒）。默认: 300 */
   cache_ttl_secs?: number
+  /** 否定缓存 TTL（秒）。默认: 60 */
+  negative_ttl_secs?: number
+  /** 过期后仍可用的宽限期（秒）— stale-while-revalidate。默认: 3600 */
+  stale_ttl_secs?: number
+  /** DNS 失败时是否用旧缓存兜底。默认: true */
+  stale_on_error?: boolean
   /** 自定义 DNS 服务器 */
   nameservers?: string[]
   /** Hostname → IP 映射 */

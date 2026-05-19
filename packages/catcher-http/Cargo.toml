@@ -10,7 +10,7 @@ repository = "https://github.com/eric8810/catcher"
 default = ["rustls-tls", "hickory-dns"]
 rustls-tls = ["reqwest/rustls", "dep:rustls", "dep:rustls-pki-types", "dep:sha2", "dep:webpki-roots"]
 native-tls = ["reqwest/native-tls"]
-hickory-dns = ["reqwest/hickory-dns", "dep:hickory-resolver", "dep:hickory-proto"]
+hickory-dns = ["reqwest/hickory-dns", "dep:hickory-resolver", "dep:hickory-proto", "dep:moka"]
 napi = ["dep:napi", "dep:napi-derive"]
 
 [dependencies]
@@ -37,6 +37,7 @@ http = "1"
 # ── DNS 缓存 ──
 hickory-resolver = { version = "0.25", optional = true, features = ["tokio"] }
 hickory-proto = { version = "0.25", optional = true }
+moka = { version = "0.12", optional = true, features = ["future"] }
 
 # ── TLS pinning (pulled in by rustls-tls) ──
 rustls = { version = "0.23", optional = true, default-features = false, features = ["aws_lc_rs", "logging", "std", "tls12"] }

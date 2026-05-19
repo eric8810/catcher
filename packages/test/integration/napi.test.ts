@@ -54,7 +54,7 @@ describe('@eric8810/catcher-napi-ws', () => {
   })
 
   it('receives events via callback', async () => {
-    const events: string[] = []
+    const events: any[] = []
     let resolveConnected!: () => void
     let rejectConnected!: (error: Error) => void
     const connected = new Promise<void>((resolve, reject) => {
@@ -62,7 +62,7 @@ describe('@eric8810/catcher-napi-ws', () => {
       rejectConnected = reject
     })
     const timeout = setTimeout(() => {
-      rejectConnected(new Error(`Timed out waiting for Connected event. Events: ${events.join('\n')}`))
+      rejectConnected(new Error(`Timed out waiting for Connected event. Events: ${JSON.stringify(events)}`))
     }, 5_000)
 
     const ws = new WsClient(JSON.stringify({
@@ -71,9 +71,8 @@ describe('@eric8810/catcher-napi-ws', () => {
       handshake_timeout_ms: 10000,
       reconnect: null,
       race_count: 1,
-    }), (e: string) => {
-      events.push(e)
-      const event = JSON.parse(e)
+    }), (event) => {
+      events.push(event)
       if (event.type === 'Connected') {
         clearTimeout(timeout)
         resolveConnected()
@@ -87,7 +86,7 @@ describe('@eric8810/catcher-napi-ws', () => {
     ws.send('hello')
     await new Promise(r => setTimeout(r, 200))
     expect(ws).toBeDefined()
-    expect(events.some(e => JSON.parse(e).type === 'Connected')).toBe(true)
+    expect(events.some(e => e.type === 'Connected')).toBe(true)
   })
 
   it('closes cleanly', () => {
