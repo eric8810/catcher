@@ -47,6 +47,7 @@ jobs:
         with:
           workspaces: "packages -> target"
       - run: cd packages && cargo check --workspace
+      - run: cd packages && cargo clippy --workspace --all-targets -- -D warnings
       - run: cd packages && cargo test --workspace
 
   dart-ffi-roundtrip:

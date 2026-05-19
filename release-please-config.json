@@ -45,6 +45,14 @@
     "packages/catcher-uniffi": {
       "package-name": "catcher-uniffi",
       "release-type": "rust"
+    },
+    "packages/catcher_core": {
+      "package-name": "catcher_core",
+      "release-type": "dart",
+      "extra-files": [
+        "ios/catcher_core.podspec",
+        "macos/catcher_core.podspec"
+      ]
     }
   },
   "changelog-sections": [

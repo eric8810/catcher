@@ -10,5 +10,6 @@
   "packages/catcher-http": "0.3.9",
   "packages/catcher-ws": "0.3.9",
   "packages/catcher-ffi": "0.3.9",
-  "packages/catcher-uniffi": "0.3.9"
+  "packages/catcher-uniffi": "0.3.9",
+  "packages/catcher_core": "0.3.9"
 }

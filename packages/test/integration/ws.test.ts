@@ -116,9 +116,20 @@ describe('WS — message latency with perMessageDeflate', () => {
         let sent = 0
         let received = 0
         let sendTime = 0
+        let settled = false
+        let interval: ReturnType<typeof setInterval> | undefined
+
+        const done = () => {
+          if (settled) return
+          settled = true
+          if (interval) clearInterval(interval)
+          ws.close()
+          resolve()
+        }
 
         ws.addEventListener('open', () => {
-          const interval = setInterval(() => {
+          if (interval) clearInterval(interval)
+          interval = setInterval(() => {
             if (sent >= messageCount) {
               clearInterval(interval)
               return
@@ -133,12 +144,11 @@ describe('WS — message latency with perMessageDeflate', () => {
           catcherLatencies.push(Date.now() - sendTime)
           received++
           if (received >= messageCount) {
-            ws.close()
+            done()
           }
         })
 
-        ws.addEventListener('close', () => resolve())
-        setTimeout(() => resolve(), 30_000)
+        setTimeout(done, 30_000)
       })
 
       // Report
