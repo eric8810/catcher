@@ -1,3 +1,9 @@
+## 0.3.8
+
+- Publish `catcher_core` as a Flutter FFI plugin with platform native bundle metadata.
+- Bundle prebuilt Android, iOS, macOS, Linux, and Windows native libraries during pub.dev release.
+- Refresh README installation guidance for the current package version.
+
 ## 0.3.1
 
 - Package `catcher_core` as a Flutter FFI plugin with platform native bundle metadata.

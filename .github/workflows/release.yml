@@ -495,6 +495,7 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+      - uses: dart-lang/setup-dart@v1
 
       - name: Download all native artifacts
         uses: actions/download-artifact@v4
@@ -620,4 +621,4 @@ jobs:
 
       - name: Publish catcher_core
         working-directory: packages/catcher_core
-        run: flutter pub publish --force
+        run: dart pub publish --force
