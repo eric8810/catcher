@@ -155,6 +155,8 @@ const client = new HttpClient({
   connect_timeout_ms: 10000,
   retry: { max_attempts: 3, backoff: 'Fixed' },
   circuit_breaker: { failure_threshold: 5, reset_timeout_ms: 30000 },
+  dns: { cache_ttl_secs: 300, stale_on_error: true },
+  msgpack: true,  // auto JSON↔msgpack at transport layer
 })
 
 const resp = await client.get('/users/1')
@@ -300,12 +302,12 @@ void main() async {
 
 ## Features
 
-- **Shared HTTP Agent** — TCP keep-alive, DNS caching, TLS session reuse, idle socket eviction
+- **Shared HTTP Agent** — TCP keep-alive, **StaleAwareDnsResolver** (676x cache hit speedup, stale-while-revalidate), TLS session reuse, idle socket eviction
 - **Auto-retry** — exponential backoff with jitter, destroys stale keepAlive sockets on retry
 - **Circuit Breaker** — trips on consecutive failures, auto-recovers, prevents retry storms
 - **Resilient WebSocket** — perMessageDeflate compression, exponential reconnect, multi-endpoint racing
 - **Server-Sent Events (SSE)** — raw line stream, auto-reconnect, `Last-Event-ID` resume, `AbortSignal`, cross-platform (Rust + TS + Browser)
-- **Binary codec** — msgpack / msgpackr (2-4x faster than JSON, ~47% smaller)
+- **Binary codec** — built-in `msgpack: true` transport-level codec (10% wire savings), standalone pack/unpack via `@eric8810/catcher-napi-ws/codec`
 - **Priority queue** — POST before prefetch, concurrency-aware scheduling
 - **Dynamic interceptors** — use/eject/clear at runtime, per-request retry/timeout/signal overrides
 
@@ -322,7 +324,12 @@ interceptors → retry → circuit breaker → concurrency queue → HTTP engine
 | TS Unit + Integration (http, ws, sse, web) | 323/325 | ✅ |
 | TS E2E (scenarios + rust-vs-vanilla) | 38/38 | ✅ |
 | Rust Unit — catcher-core | 23/23 | ✅ |
-| Rust Unit — catcher-http | 4/4 | ✅ |
+| Rust Unit — catcher-http | 118/118 | ✅ |
+| Rust Unit — catcher-ws | 25/25 | ✅ |
+| NAPI Integration (dns, http, ws, msgpack) | 28/28 | ✅ |
+| NAPI E2E (rust-vs-vanilla S1-S8) | 37/37 | ✅ |
+| NAPI Throughput Benchmark | 14/14 | ✅ |
+| NAPI Chaos (S9-S16 + chaos) | 11/11 | ✅ |
 | Rust FFI Integration (http + sse + codec) | 17/17 | ✅ |
 | Dart Unit Tests | 20/20 | ✅ |
 | Dart Integration (real FFI + httpbin.org) | 8/8 | ✅ |
@@ -348,6 +355,10 @@ pnpm build            # build all TS packages
 pnpm test             # run integration tests (vitest)
 pnpm typecheck        # type-check all TS packages
 pnpm bench            # run benchmarks
+pnpm test:napi        # NAPI integration tests
+pnpm test:napi-bench  # NAPI throughput benchmark
+pnpm bench:napi       # NAPI micro-benchmarks (agent + codec)
+pnpm test:napi-chaos  # NAPI chaos + extreme scenarios
 
 # Rust
 cd crates && cargo build

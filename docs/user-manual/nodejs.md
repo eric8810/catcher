@@ -32,6 +32,8 @@ const client = new HttpClient({
   response_timeout_ms: 30000,
   retry: { max_attempts: 3, backoff: 'Fixed' },
   circuit_breaker: { failure_threshold: 5, reset_timeout_ms: 30000 },
+  dns: { cache_ttl_secs: 300, stale_on_error: true },
+  msgpack: true,
 })
 
 const resp = await client.get('/users/1')
@@ -198,4 +200,40 @@ ipcMain.handle('api:get', async (_e, url) => {
 contextBridge.exposeInMainWorld('api', {
   get: (url: string) => ipcRenderer.invoke('api:get', url),
 })
+```
+
+---
+
+## 四、DNS 缓存
+
+NAPI 版内置 StaleAwareDnsResolver，默认启用。无需额外配置即可获得 DNS 缓存。
+
+| 配置 | 说明 | 默认值 |
+|------|------|--------|
+| `dns.cache_ttl_secs` | 缓存有效期 | 300 |
+| `dns.stale_ttl_secs` | 过期后仍可用的宽限期 | 3600 |
+| `dns.stale_on_error` | DNS 失败时用旧缓存兜底 | true |
+
+Benchmark：cold start 203ms → cached 0.3ms（676x 加速）。
+
+## 五、Msgpack 内置编解码
+
+设置 `msgpack: true` 后，transport 层自动将 JSON body 编码为 msgpack 发送，收到 msgpack 响应后自动解码为 JSON 返回给 JS。编解码在 Rust 内部完成，无 NAPI 边界开销。
+
+```typescript
+const client = new HttpClient({
+  base_url: 'https://api.example.com',
+  msgpack: true,
+})
+// JS 侧始终收发 JSON，wire 上走 msgpack（小 10-35%）
+```
+
+WS 同理：
+```typescript
+const ws = new WsClient({
+  urls: ['wss://rt.example.com'],
+  msgpack: true,
+})
+// send text → Rust 自动编码为 msgpack binary frame
+// 收到 binary → Rust 自动解码为 JSON text event
 ```

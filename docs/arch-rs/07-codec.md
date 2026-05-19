@@ -58,3 +58,41 @@ fn rmpv_to_json(val: rmpv::Value) -> serde_json::Value {
     }
 }
 ```
+
+---
+
+## Transport 层内置 Msgpack
+
+> v0.3.8+ 新增
+
+除了独立的 `pack` / `unpack` 函数外，catcher-http 和 catcher-ws 现在支持在 transport 层自动编解码 msgpack。
+
+### 配置
+
+```rust
+pub struct HttpClientConfig {
+    // ...
+    pub msgpack: bool,  // default: false
+}
+
+pub struct WsClientConfig {
+    // ...
+    pub msgpack: bool,  // default: false
+}
+```
+
+### HTTP 数据流（`msgpack: true`）
+
+```
+发送: JSON bytes → serde_json::from_slice → rmp_serde::to_vec → wire (Content-Type: application/msgpack)
+接收: wire → rmp_serde::from_read (with cursor validation) → serde_json::to_vec → JSON bytes
+```
+
+响应解码只在 `Content-Type` 包含 `msgpack` 且 body 非空时触发。使用 `Cursor` 验证整个 body 被完整消费。
+
+### WS 数据流（`msgpack: true`）
+
+```
+发送: JSON text → serde_json::from_str → rmp_serde::to_vec → Binary frame
+接收: Binary frame → rmp_serde::from_slice → serde_json::to_string → Text event (is_binary: false)
+```

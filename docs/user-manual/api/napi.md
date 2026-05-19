@@ -87,6 +87,16 @@ const client = new HttpClient({
     reset_timeout_ms: 30000,
     half_open_max_requests: 5,
   },
+  dns: {
+    cache_size: 512,
+    cache_ttl_secs: 300,
+    negative_ttl_secs: 60,
+    stale_ttl_secs: 3600,
+    stale_on_error: true,
+    nameservers: [],         // custom DNS servers, e.g. ['8.8.8.8:53']
+    host_mapping: {},        // hostname → IP mapping
+  },
+  msgpack: true,             // auto JSON↔msgpack at transport layer
 })
 ```
 
@@ -114,12 +124,20 @@ const client = new HttpClient({
 | `circuit_breaker.half_open_max_requests` | `number` | `5` | HALF_OPEN 最大放行数 |
 | `tls` | `TlsConfig` | — | TLS 配置（14 字段） |
 | `dns` | `DnsConfig` | — | DNS 配置 |
+| `dns.cache_size` | `number` | `512` | DNS 缓存条目数上限 |
+| `dns.cache_ttl_secs` | `number` | `300` | DNS 缓存 TTL（秒） |
+| `dns.negative_ttl_secs` | `number` | `60` | 否定缓存 TTL（秒） |
+| `dns.stale_ttl_secs` | `number` | `3600` | Stale 宽限期（秒）|
+| `dns.stale_on_error` | `boolean` | `true` | DNS 失败时用旧缓存兜底 |
+| `dns.nameservers` | `string[]` | `[]` | 自定义 DNS 服务器 |
+| `dns.host_mapping` | `Record<string, string>` | `{}` | Hostname → IP 映射 |
 | `proxy` | `ProxyConfig` | — | 代理配置 |
 | `redirect` | `RedirectConfig` | — | 重定向配置 |
 | `max_concurrency` | `number` | `50` | 最大并发请求数 |
 | `default_headers` | `Record<string, string>` | `{}` | 默认请求头 |
 | `auth` | `{ username, password }` | — | Basic 认证 |
 | `bearer_token` | `string` | — | Bearer token |
+| `msgpack` | `boolean` | `false` | 启用 transport 层 msgpack 编解码 |
 
 ### SSE
 
@@ -301,6 +319,7 @@ const ws = new WsClient(
 | `heartbeat.max_missed_pongs` | `number` | `3` | 丢失 pong 判定断线 |
 | `race_count` | `number` | `1` | 同时竞速端点数 |
 | `headers` | `object` | `{}` | 自定义头 |
+| `msgpack` | `boolean` | `false` | 启用 msgpack 编解码 |
 
 ### 回调事件
 
@@ -357,6 +376,26 @@ const ws = new WsClient(
 ws.send('hello')
 ws.close()
 ```
+
+---
+
+## @eric8810/catcher-napi-ws/codec
+
+### 导入
+
+```typescript
+import { pack, unpack } from '@eric8810/catcher-napi-ws/codec'
+```
+
+### API
+
+| 函数 | 签名 | 说明 |
+|------|------|------|
+| `pack` | `(value: unknown) => Buffer` | JS 值 → msgpack 字节（Rust rmp-serde） |
+| `unpack` | `(data: Buffer) => any` | msgpack 字节 → JS 值（Rust rmp-serde） |
+
+> **注意**：独立调用 pack/unpack 有 NAPI 边界开销（~6x slower than JS msgpackr）。
+> 推荐使用 `msgpack: true` 配置，让 transport 层在 Rust 内部完成编解码，无跨边界开销。
 
 ---
 

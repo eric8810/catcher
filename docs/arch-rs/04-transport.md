@@ -20,7 +20,7 @@ use crate::error::CatcherError;
 use crate::types::http::*;
 use crate::types::resilience::RetryConfig;
 use crate::transport::tls::build_tls_config;
-use crate::transport::dns::build_dns_resolver;
+use crate::transport::dns::build_stale_aware_resolver;
 
 /// HTTP 传输层 — 真实收发 HTTP 请求
 pub struct HttpTransport {
@@ -43,9 +43,8 @@ impl HttpTransport {
 
         build_tls_config(&mut reqwest_builder, &config.tls)?;
 
-        if let Some(resolver) = build_dns_resolver(&config.dns)? {
-            reqwest_builder = reqwest_builder.dns_resolver(Arc::new(resolver));
-        }
+        let resolver = build_stale_aware_resolver(&config.dns)?;
+        reqwest_builder = reqwest_builder.dns_resolver(resolver);
 
         let reqwest_client = reqwest_builder.build()
             .map_err(|e| CatcherError::Internal(format!("reqwest build error: {e}")))?;
@@ -241,23 +240,9 @@ use std::time::Duration;
 use crate::config::DnsConfig;
 use crate::error::CatcherError;
 
-#[cfg(feature = "hickory-dns")]
-pub fn build_dns_resolver(
-    config: &DnsConfig,
-) -> Result<Option<TokioAsyncResolver>, CatcherError> {
-    let resolver = TokioAsyncResolver::builder_tokio()
-        .cache_size(config.cache_size)
-        .positive_ttl(Some(Duration::from_secs(config.positive_ttl_secs)))
-        .negative_ttl(Some(Duration::from_secs(config.negative_ttl_secs)))
-        .build()
-        .map_err(|e| CatcherError::InvalidConfig(format!("DNS: {e}")))?;
-    Ok(Some(resolver))
-}
-
-#[cfg(not(feature = "hickory-dns"))]
-pub fn build_dns_resolver(_: &DnsConfig) -> Result<Option<()>, CatcherError> {
-    Ok(None) // fallback to system DNS
-}
+// StaleAwareDnsResolver wraps hickory-resolver with moka async cache.
+// Always injected into reqwest via dns_resolver() — caching is enabled by default.
+pub fn build_stale_aware_resolver(config: &DnsConfig) -> Result<Arc<StaleAwareDnsResolver>, CatcherError>
 ```
 
 ---
