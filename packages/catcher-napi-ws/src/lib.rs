@@ -140,6 +140,24 @@ impl JsWsClient {
     }
 }
 
+// ── Codec: expose Rust rmp-serde pack/unpack for benchmarking ──
+
+/// Encode a JS value to msgpack bytes (Rust rmp-serde).
+#[napi]
+pub fn pack(value: serde_json::Value) -> napi::Result<napi::bindgen_prelude::Buffer> {
+    let bytes = catcher_ws::codec::pack(&value)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    Ok(bytes.into())
+}
+
+/// Decode msgpack bytes to a JSON string (Rust rmp-serde).
+#[napi]
+pub fn unpack(data: napi::bindgen_prelude::Buffer) -> napi::Result<String> {
+    let value: serde_json::Value = catcher_ws::codec::unpack(data.as_ref())
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    serde_json::to_string(&value).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
 // ── Rust unit tests ──
 
 #[cfg(test)]

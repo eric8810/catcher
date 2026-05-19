@@ -6,4 +6,8 @@ export default defineConfig({
     testTimeout: 300_000,
     reporters: ['verbose'],
   },
+  benchmark: {
+    include: ['packages/test/benchmark/napi-*.bench.ts'],
+    reporters: ['verbose'],
+  },
 })
