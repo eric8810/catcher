@@ -163,6 +163,10 @@ pub struct WsClientConfig {
     /// 同时竞速的端点数
     #[serde(alias = "raceCount", default = "default_race_count")]
     pub race_count: u32,
+
+    /// 启用 msgpack 编解码 — send 自动 JSON→msgpack, receive 自动 msgpack→JSON
+    #[serde(default)]
+    pub msgpack: bool,
 }
 
 fn default_deflate_threshold() -> u32 {
@@ -191,6 +195,7 @@ impl Default for WsClientConfig {
             reconnect: None,
             heartbeat: None,
             race_count: default_race_count(),
+            msgpack: false,
         }
     }
 }

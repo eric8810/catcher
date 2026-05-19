@@ -309,7 +309,18 @@ async fn connection_manager(
                 cmd = cmd_rx.recv() => {
                     match cmd {
                         Some(WsCommand::Text(t)) => {
-                            let msg = tokio_tungstenite::tungstenite::Message::Text(t.into());
+                            let msg = if config.msgpack {
+                                // msgpack: JSON text → msgpack binary frame
+                                match serde_json::from_str::<serde_json::Value>(&t)
+                                    .map_err(|e| e.to_string())
+                                    .and_then(|v| rmp_serde::to_vec(&v).map_err(|e| e.to_string()))
+                                {
+                                    Ok(bin) => tokio_tungstenite::tungstenite::Message::Binary(bin.into()),
+                                    Err(_) => tokio_tungstenite::tungstenite::Message::Text(t.into()),
+                                }
+                            } else {
+                                tokio_tungstenite::tungstenite::Message::Text(t.into())
+                            };
                             if writer.send(msg).await.is_err() {
                                 break LoopOutcome::Disconnected {
                                     code: 1006,
@@ -373,10 +384,31 @@ async fn connection_manager(
                             });
                         }
                         Some(Ok(tokio_tungstenite::tungstenite::Message::Binary(d))) => {
-                            let _ = event_tx.send(WsEvent::Message {
-                                data: d.to_vec(),
-                                is_binary: true,
-                            });
+                            if config.msgpack {
+                                // msgpack: decode binary frame → JSON text
+                                match rmp_serde::from_slice::<serde_json::Value>(&d)
+                                    .map_err(|e| e.to_string())
+                                    .and_then(|v| serde_json::to_string(&v).map_err(|e| e.to_string()))
+                                {
+                                    Ok(json) => {
+                                        let _ = event_tx.send(WsEvent::Message {
+                                            data: json.into_bytes(),
+                                            is_binary: false,
+                                        });
+                                    }
+                                    Err(_) => {
+                                        let _ = event_tx.send(WsEvent::Message {
+                                            data: d.to_vec(),
+                                            is_binary: true,
+                                        });
+                                    }
+                                }
+                            } else {
+                                let _ = event_tx.send(WsEvent::Message {
+                                    data: d.to_vec(),
+                                    is_binary: true,
+                                });
+                            }
                         }
                         Some(Ok(tokio_tungstenite::tungstenite::Message::Ping(_))) => {}
                         Some(Ok(tokio_tungstenite::tungstenite::Message::Pong(_))) => {

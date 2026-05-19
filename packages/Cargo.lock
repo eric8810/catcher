@@ -364,6 +364,7 @@ dependencies = [
  "reqwest-middleware",
  "reqwest-retry",
  "retry-policies",
+ "rmp-serde",
  "rustls",
  "rustls-pki-types",
  "serde",

@@ -333,6 +333,10 @@ pub struct HttpClientConfig {
     /// Bearer token
     #[serde(alias = "bearerToken", skip_serializing_if = "Option::is_none")]
     pub bearer_token: Option<String>,
+
+    /// 启用 msgpack 编解码 — body 自动 JSON↔msgpack 转码
+    #[serde(default)]
+    pub msgpack: bool,
 }
 
 fn default_connect_timeout() -> u64 {
@@ -363,6 +367,7 @@ impl Default for HttpClientConfig {
             redirect: None,
             auth: None,
             bearer_token: None,
+            msgpack: false,
         }
     }
 }

@@ -586,6 +586,16 @@ async fn execute_http_request(
         let (encoded_body, ct) = form.encode();
         req = req.body(encoded_body);
         req = req.header("Content-Type", ct);
+    } else if config.msgpack {
+        // msgpack: encode JSON body → msgpack binary
+        if let Some(body) = &request.body {
+            let value: serde_json::Value = serde_json::from_slice(body)
+                .map_err(|e| CatcherError::Internal(format!("msgpack encode: invalid JSON body: {e}")))?;
+            let encoded = rmp_serde::to_vec(&value)
+                .map_err(|e| CatcherError::Internal(format!("msgpack encode: {e}")))?;
+            req = req.body(encoded);
+        }
+        req = req.header("Content-Type", "application/msgpack");
     } else {
         if let Some(body) = &request.body {
             req = req.body(body.clone());
@@ -628,10 +638,20 @@ async fn execute_http_request(
         });
     }
 
+    let response_body = if config.msgpack {
+        // msgpack: decode response msgpack → JSON bytes
+        let value: serde_json::Value = rmp_serde::from_slice(&body)
+            .map_err(|e| CatcherError::Internal(format!("msgpack decode: expected msgpack response: {e}")))?;
+        serde_json::to_vec(&value)
+            .map_err(|e| CatcherError::Internal(format!("msgpack decode: json serialize: {e}")))?
+    } else {
+        body.to_vec()
+    };
+
     Ok(HttpResponse {
         status,
         headers,
-        body: body.to_vec(),
+        body: response_body,
         elapsed_ms,
     })
 }

@@ -48,6 +48,8 @@ export interface WsClientConfig {
   heartbeat?: HeartbeatConfig
   /** 同时竞速端点数。默认: 1 */
   race_count?: number
+  /** 启用 msgpack 编解码 — send 自动 JSON→msgpack, receive 自动 msgpack→JSON. 默认 false */
+  msgpack?: boolean
 }
 
 /** WebSocket 事件 — 所有回调参数的联合类型 */

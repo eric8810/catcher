@@ -167,6 +167,8 @@ export interface HttpClientConfig {
   auth?: ProxyAuth
   /** Bearer token */
   bearer_token?: string
+  /** 启用 msgpack 编解码 — body 自动 JSON↔msgpack 转码. 默认 false */
+  msgpack?: boolean
 }
 
 /** SSE 客户端配置 — 对应 Rust SseClientConfig */
