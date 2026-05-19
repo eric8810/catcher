@@ -638,12 +638,19 @@ async fn execute_http_request(
         });
     }
 
-    let response_body = if config.msgpack {
-        // msgpack: decode response msgpack → JSON bytes
-        let value: serde_json::Value = rmp_serde::from_slice(&body)
-            .map_err(|e| CatcherError::Internal(format!("msgpack decode: expected msgpack response: {e}")))?;
-        serde_json::to_vec(&value)
-            .map_err(|e| CatcherError::Internal(format!("msgpack decode: json serialize: {e}")))?
+    let response_body = if config.msgpack && !body.is_empty() {
+        let is_msgpack = headers
+            .get("content-type")
+            .map(|ct| ct.contains("msgpack"))
+            .unwrap_or(false);
+        if is_msgpack {
+            let value: serde_json::Value = rmp_serde::from_slice(&body)
+                .map_err(|e| CatcherError::Internal(format!("msgpack decode: {e}")))?;
+            serde_json::to_vec(&value)
+                .map_err(|e| CatcherError::Internal(format!("msgpack decode: json serialize: {e}")))?
+        } else {
+            body.to_vec()
+        }
     } else {
         body.to_vec()
     };

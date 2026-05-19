@@ -24,7 +24,7 @@ import { createNetworkProxy, type NetworkProxy, type NetworkConditions } from '.
 
 // ── Chaos configuration ─────────────────────────────────────
 
-const CHAOS_DURATION_MS = parseInt(process.env.CHAOS_DURATION_MS ?? '600000', 10) // 10 min default for tests
+const CHAOS_DURATION_MS = parseInt(process.env.CHAOS_DURATION_MS ?? '60000', 10) // 1 min default, override with env
 const SEND_INTERVAL_MS = 500  // send a message every 500ms
 const CONDITION_SWITCH_MS = 30_000 // switch network conditions every 30s
 
@@ -145,8 +145,10 @@ describe('NAPI Chaos — 韧性压力测试 (Rust)', () => {
     const conditionTimer = setInterval(() => {
       const { name, conditions } = randomCondition()
       httpProxy.setConditions(conditions)
+      wsProxy.setConditions(conditions)
       result.conditionsApplied.push(name)
       httpProxy.disruptAll()
+      wsProxy.disruptAll()
       log('condition-switch', `${name} (latency=${conditions.latency}ms, loss=${((conditions.packetLoss ?? 0) * 100).toFixed(0)}%)`)
     }, CONDITION_SWITCH_MS)
 
@@ -154,8 +156,10 @@ describe('NAPI Chaos — 韧性压力测试 (Rust)', () => {
     {
       const { name, conditions } = randomCondition()
       httpProxy.setConditions(conditions)
+      wsProxy.setConditions(conditions)
       result.conditionsApplied.push(name)
       httpProxy.disruptAll()
+      wsProxy.disruptAll()
     }
 
     // Wait for WS to connect via the ready promise

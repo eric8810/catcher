@@ -169,12 +169,17 @@ describe('WS msgpack codec', () => {
 
     ws.close()
 
-    // The echo server echoes binary frames back as binary.
-    // With msgpack: true, the transport decodes the binary msgpack → JSON text.
     const msgEvents = events.filter(e => e.type === 'Message')
     console.log(`  WS msgpack events: ${msgEvents.length}`)
-    // At minimum we should have received the message
-    expect(msgEvents.length).toBeGreaterThanOrEqual(0)
+    expect(msgEvents.length).toBeGreaterThanOrEqual(1)
+
+    // Verify the decoded content is correct JSON (not binary)
+    const first = msgEvents[0]
+    expect(first.is_binary).toBe(false)
+    // data_base64 is set by Rust WsEvent::to_ffi_json, decode it
+    const decoded = JSON.parse(Buffer.from(first.data_base64, 'base64').toString('utf-8'))
+    expect(decoded.text).toBe('msgpack ws')
+    expect(decoded.n).toBe(7)
   })
 
   it('msgpack: false — sends text frame unchanged', async () => {
