@@ -132,10 +132,28 @@ describe('NAPI Chaos — 韧性压力测试 (Rust)', () => {
       reconnect: { maxAttempts: 100 },
     })
 
-    ws.addEventListener('open', () => log('ws-open'))
+    let wsConnected = false
+    let wsMsgsSent = 0
+    let wsMsgsReceived = 0
+
+    ws.addEventListener('open', () => {
+      if (wsConnected) {
+        result.wsReconnects++
+        log('ws-reconnect', `reconnect #${result.wsReconnects}`)
+      } else {
+        log('ws-open')
+      }
+      wsConnected = true
+    })
     ws.addEventListener('close', () => {
+      wsConnected = false
       result.wsDisconnects++
       log('ws-close', `disconnect #${result.wsDisconnects}`)
+    })
+    ws.addEventListener('message', (msg: any) => {
+      wsMsgsReceived++
+      const len = typeof msg.data === 'string' ? msg.data.length : 0
+      result.totalBytesReceived += len
     })
     ws.addEventListener('error', () => {
       log('ws-error')
@@ -174,6 +192,7 @@ describe('NAPI Chaos — 韧性压力测试 (Rust)', () => {
     while (Date.now() < endTime) {
       result.totalSends++
 
+      // HTTP: send message via REST
       try {
         await httpClient.post('/messages', {
           text: 'chaos message ' + result.totalSends,
@@ -182,10 +201,19 @@ describe('NAPI Chaos — 韧性压力测试 (Rust)', () => {
         result.successfulSends++
       } catch {
         result.failedSends++
-        log('send-fail', `message #${result.totalSends} failed`)
+        log('send-fail', `http #${result.totalSends} failed`)
       }
 
-      // Small pause between sends
+      // WS: send echo message if connected
+      if (wsConnected) {
+        try {
+          ws.send(JSON.stringify({ type: 'chaos', seq: wsMsgsSent, ts: Date.now() }))
+          wsMsgsSent++
+        } catch {
+          log('ws-send-fail', `ws send #${wsMsgsSent} failed`)
+        }
+      }
+
       await new Promise((r) => setTimeout(r, SEND_INTERVAL_MS))
     }
 
@@ -198,20 +226,25 @@ describe('NAPI Chaos — 韧性压力测试 (Rust)', () => {
     log('chaos-end', `successRate=${(result.successRate * 100).toFixed(1)}%`)
     ws.close()
 
+    const wsEchoRate = wsMsgsSent > 0 ? wsMsgsReceived / wsMsgsSent : 0
+
     // ── Assertions ──
     console.log('')
     console.log('═══ NAPI Chaos Test Results ═══')
     console.log(`  Duration:       ${(result.durationMs / 1000).toFixed(0)}s`)
-    console.log(`  Total sends:    ${result.totalSends}`)
-    console.log(`  Successful:     ${result.successfulSends}`)
-    console.log(`  Failed:         ${result.failedSends}`)
-    console.log(`  Success rate:   ${(result.successRate * 100).toFixed(1)}%`)
-    console.log(`  WS disconnects: ${result.wsDisconnects}`)
+    console.log(`  HTTP sends:     ${result.totalSends} (ok=${result.successfulSends}, fail=${result.failedSends})`)
+    console.log(`  HTTP rate:      ${(result.successRate * 100).toFixed(1)}%`)
+    console.log(`  WS sent/recv:   ${wsMsgsSent}/${wsMsgsReceived} (echo rate ${(wsEchoRate * 100).toFixed(1)}%)`)
+    console.log(`  WS disconnects: ${result.wsDisconnects}, reconnects: ${result.wsReconnects}`)
+    console.log(`  WS bytes recv:  ${result.totalBytesReceived}`)
     console.log(`  Conditions:     ${result.conditionsApplied.length} switches`)
     console.log('')
 
-    // Minimum acceptable success rate under chaos: 70%
+    // HTTP: minimum acceptable success rate under chaos
     expect(result.successRate).toBeGreaterThanOrEqual(0.70)
+
+    // WS: should have sent messages
+    expect(wsMsgsSent).toBeGreaterThan(0)
 
     // Should have experienced at least some disruption
     expect(result.conditionsApplied.length).toBeGreaterThan(0)
