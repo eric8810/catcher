@@ -1,6 +1,6 @@
 [package]
 name = "catcher_core_ffi"
-version = "0.3.7"
+version = "0.3.8"
 edition = "2021"
 
 [workspace]

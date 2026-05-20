@@ -44,7 +44,7 @@ Pre-built binaries available for Linux (x64/arm64 gnu/musl), macOS (x64/arm64), 
 
 ```typescript
 import { HttpClient } from '@eric8810/catcher-napi-http'
-import type { HttpClientConfig, SseEvent } from '@eric8810/catcher-napi-http'
+import type { HttpClientConfig, SseEvent } from '@eric8810/catcher-napi-http/types'
 
 // Config as typed object (recommended) or JSON string
 const client = new HttpClient({
@@ -52,6 +52,15 @@ const client = new HttpClient({
   connect_timeout_ms: 10000,
   retry: { max_attempts: 3, backoff: 'Fixed' },
   circuit_breaker: { failure_threshold: 5, reset_timeout_ms: 30000 },
+  dns: {
+    cache_size: 512,
+    cache_ttl_secs: 300,
+    negative_ttl_secs: 60,
+    stale_ttl_secs: 3600,
+    stale_on_error: true,
+    host_mapping: { 'api.internal': '10.0.0.10' },
+  },
+  msgpack: true,
 })
 
 // GET
@@ -59,15 +68,15 @@ const resp = await client.get('/users/1')
 console.log(resp.status, resp.body.toString())
 
 // POST
-await client.post('/messages', Buffer.from('hello'), {
-  contentType: 'text/plain',
+await client.post('/messages', Buffer.from(JSON.stringify({ text: 'hello' })), {
+  contentType: 'application/json',
 })
 
 // Circuit breaker state
 console.log(client.circuitBreakerState()) // 'closed' | 'open' | 'half-open'
 
 // SSE (one-shot stream)
-import { SseStream } from '@eric8810/catcher-napi-http'
+import { SseStream } from '@eric8810/catcher-napi-http/sse'
 
 const stream = new SseStream(
   { url: 'https://stream.example.com/events' },
@@ -78,7 +87,7 @@ const stream = new SseStream(
 // later: stream.close()
 
 // SSE (auto-reconnect client)
-import { SseClient } from '@eric8810/catcher-napi-http'
+import { SseClient } from '@eric8810/catcher-napi-http/sse'
 
 const sse = new SseClient(
   {
@@ -114,8 +123,21 @@ interface HttpClientConfig {
   redirect?: RedirectConfig
   auth?: { username: string; password: string }
   bearer_token?: string
+  msgpack?: boolean                  // default: false
+}
+
+interface DnsConfig {
+  cache_size?: number                // default: 512
+  cache_ttl_secs?: number            // default: 300
+  negative_ttl_secs?: number         // default: 60
+  stale_ttl_secs?: number            // default: 3600
+  stale_on_error?: boolean           // default: true
+  nameservers?: string[]
+  host_mapping?: Record<string, string>
 }
 ```
+
+When `msgpack` is enabled, JSON request bodies are encoded as MessagePack and MessagePack responses are decoded back to JSON bytes when the response content type contains `msgpack`.
 
 ### Methods
 

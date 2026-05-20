@@ -1,6 +1,6 @@
 {
   "name": "@eric8810/catcher-napi-ws",
-  "version": "0.3.7",
+  "version": "0.3.9",
   "description": "catcher WebSocket native addon for Node.js via napi-rs",
   "main": "dist/client.js",
   "types": "dist/client.d.ts",
@@ -14,6 +14,11 @@
       "types": "./dist/types.d.ts",
       "require": "./dist/types.js",
       "default": "./dist/types.js"
+    },
+    "./codec": {
+      "types": "./dist/codec.d.ts",
+      "require": "./dist/codec.js",
+      "default": "./dist/codec.js"
     }
   },
   "files": [
@@ -35,7 +40,7 @@
     }
   },
   "scripts": {
-    "build:ts": "tsup ts/client.ts ts/types.ts --format cjs --dts --outDir dist --clean",
+    "build:ts": "tsup ts/client.ts ts/types.ts ts/codec.ts --format cjs --dts --outDir dist --clean",
     "build": "napi build --platform --release && npm run build:ts && napi artifacts",
     "build-debug": "cargo build",
     "typecheck": "tsc --noEmit",

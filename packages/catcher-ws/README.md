@@ -3,7 +3,7 @@
 [![crates.io](https://img.shields.io/crates/v/catcher-ws.svg)](https://crates.io/crates/catcher-ws)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Resilient WebSocket client for the [catcher](https://github.com/eric8810/catcher) toolkit — built on **yawc** with RFC 7692 permessage-deflate, automatic reconnection, heartbeat, and multi-endpoint racing.
+Resilient WebSocket client for the [catcher](https://github.com/eric8810/catcher) toolkit — built on **tokio-tungstenite** with automatic reconnection, heartbeat, DNS-aware endpoint racing, and compression controls.
 
 > **⚠️ Breaking Change (0.3.0)**:
 > - `WsClientConfig` field renames: `deflate_threshold` → `deflate_threshold_bytes`, `max_message_size` → `max_payload_bytes`
@@ -20,6 +20,7 @@ Resilient WebSocket client for the [catcher](https://github.com/eric8810/catcher
 - **Multi-endpoint racing** — connect to the fastest of N servers
 - **Per-message deflate** — standard RFC 7692 negotiation via `Sec-WebSocket-Extensions`
 - **Application compression** — optional gzip/zstd envelope fallback for Flutter/Rust clients
+- **DNS cache config** — shared `DnsConfig` with cache TTL, stale fallback, nameservers, host mapping
 - **Msgpack codec** — built-in `pack()` / `unpack()` for binary serialization
 - **FFI C ABI** — exported symbols for cross-language bindings
 
@@ -27,17 +28,22 @@ Resilient WebSocket client for the [catcher](https://github.com/eric8810/catcher
 
 ```toml
 [dependencies]
-catcher-ws = "0.3"
+catcher-ws = "0.3.9"
 ```
 
 ### Basic WebSocket connection
 
 ```rust
-use catcher_ws::{WsTransport, WsHandle, WsEvent};
+use catcher_ws::{DnsConfig, HeartbeatConfig, ReconnectConfig, WsEvent, WsTransport};
 use catcher_ws::types::ws::WsClientConfig;
 
 let config = WsClientConfig {
     urls: vec!["wss://echo.example.com".into()],
+    dns: Some(DnsConfig {
+        cache_ttl_secs: 300,
+        stale_on_error: true,
+        ..Default::default()
+    }),
     reconnect: Some(ReconnectConfig {
         initial_delay_ms: 500,
         max_delay_ms: 30_000,
@@ -138,7 +144,7 @@ let config = WsClientConfig {
 |------|-------------|
 | `WsTransport`, `WsHandle` | Async WebSocket client & handle |
 | `WsEvent`, `WsState` | Event types |
-| `WsClientConfig`, `ReconnectConfig`, `HeartbeatConfig` | Configuration |
+| `WsClientConfig`, `DnsConfig`, `ReconnectConfig`, `HeartbeatConfig` | Configuration |
 | `EndpointRacer` | Multi-endpoint racing |
 | `ReconnectManager`, `HeartbeatManager` | Internal managers |
 | `pack`, `unpack`, `unpack_value` | Msgpack codec |

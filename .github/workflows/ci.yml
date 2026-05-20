@@ -47,6 +47,7 @@ jobs:
         with:
           workspaces: "packages -> target"
       - run: cd packages && cargo check --workspace
+      - run: cd packages && cargo clippy --workspace --all-targets -- -D warnings
       - run: cd packages && cargo test --workspace
 
   dart-ffi-roundtrip:
@@ -57,18 +58,18 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: "packages -> target"
-      - uses: dart-lang/setup-dart@v1
+      - uses: subosito/flutter-action@v2
         with:
-          sdk: stable
+          channel: stable
       - name: Build catcher-ffi .so
         run: cd packages && cargo build --release -p catcher-ffi
       - name: Install Dart dependencies
         run: |
           cd packages/catcher_core
-          dart pub get
+          flutter pub get
       - name: Run FFI roundtrip tests
         env:
           CATCHER_FFI_PATH: ${{ github.workspace }}/packages/target/release/libcatcher_ffi.so
         run: |
           cd packages/catcher_core
-          dart test test/ffi_roundtrip_test.dart
+          flutter test test/ffi_roundtrip_test.dart

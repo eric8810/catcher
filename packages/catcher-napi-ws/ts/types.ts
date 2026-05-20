@@ -24,6 +24,24 @@ export interface HeartbeatConfig {
   max_missed_pongs?: number
 }
 
+/** DNS 配置 — 对应 Rust DnsConfig */
+export interface DnsConfig {
+  /** 缓存条目数上限。默认: 512 */
+  cache_size?: number
+  /** DNS 缓存 TTL（秒）。默认: 300 */
+  cache_ttl_secs?: number
+  /** 否定缓存 TTL（秒）。默认: 60 */
+  negative_ttl_secs?: number
+  /** 过期后仍可用的宽限期（秒）。默认: 3600 */
+  stale_ttl_secs?: number
+  /** DNS 失败时是否用旧缓存兜底。默认: true */
+  stale_on_error?: boolean
+  /** 自定义 DNS 服务器 */
+  nameservers?: string[]
+  /** Hostname → IP 映射 */
+  host_mapping?: Record<string, string>
+}
+
 /**
  * WebSocket 客户端配置 — 对应 Rust WsClientConfig
  */
@@ -48,6 +66,10 @@ export interface WsClientConfig {
   heartbeat?: HeartbeatConfig
   /** 同时竞速端点数。默认: 1 */
   race_count?: number
+  /** DNS 配置 */
+  dns?: DnsConfig
+  /** 启用 msgpack 编解码 — send 自动 JSON→msgpack, receive 自动 msgpack→JSON. 默认 false */
+  msgpack?: boolean
 }
 
 /** WebSocket 事件 — 所有回调参数的联合类型 */

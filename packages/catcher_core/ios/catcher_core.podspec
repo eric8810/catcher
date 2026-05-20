@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name             = 'catcher_core'
-  s.version          = '0.3.8'
+  s.version          = '0.3.9'
   s.summary          = 'Resilient HTTP/WebSocket client backed by Rust core for Flutter.'
   s.description      = <<-DESC
 Resilient HTTP/WebSocket client backed by Rust core for Flutter.

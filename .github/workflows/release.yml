@@ -189,7 +189,7 @@ jobs:
 
   publish-napi-assemble:
     needs: [publish-napi-http, publish-napi-ws]
-    if: always() && !startsWith(github.ref, 'refs/tags/catcher_core-v')
+    if: "!startsWith(github.ref, 'refs/tags/catcher_core-v')"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -205,14 +205,49 @@ jobs:
         with:
           path: napi-artifacts
           merge-multiple: false
-      - name: Abort if no artifacts were produced
+      - name: Verify napi artifacts
         run: |
+          set -euo pipefail
+          targets=(
+            "x86_64-unknown-linux-gnu"
+            "x86_64-unknown-linux-musl"
+            "aarch64-unknown-linux-gnu"
+            "aarch64-unknown-linux-musl"
+            "aarch64-apple-darwin"
+            "x86_64-apple-darwin"
+            "x86_64-pc-windows-msvc"
+            "aarch64-pc-windows-msvc"
+          )
+
+          count_node_files() {
+            local dir="$1"
+            if [ ! -d "$dir" ]; then
+              echo 0
+              return 0
+            fi
+            find "$dir" -maxdepth 1 -name "*.node" | wc -l | tr -d ' '
+          }
+
           HTTP_COUNT=$(find napi-artifacts -name "*.node" -path "*/napi-http-*" 2>/dev/null | wc -l)
           WS_COUNT=$(find napi-artifacts -name "*.node" -path "*/napi-ws-*" 2>/dev/null | wc -l)
           echo "napi-http .node files: $HTTP_COUNT"
           echo "napi-ws .node files: $WS_COUNT"
-          if [ "$HTTP_COUNT" -eq 0 ] && [ "$WS_COUNT" -eq 0 ]; then
-            echo "::error::No .node artifacts found — all build jobs failed. Aborting publish."
+
+          missing=0
+          for target in "${targets[@]}"; do
+            http_files=$(count_node_files "napi-artifacts/napi-http-$target")
+            ws_files=$(count_node_files "napi-artifacts/napi-ws-$target")
+            if [ "$http_files" -ne 1 ]; then
+              echo "::error::Expected 1 napi-http .node artifact for $target, found $http_files"
+              missing=1
+            fi
+            if [ "$ws_files" -ne 1 ]; then
+              echo "::error::Expected 1 napi-ws .node artifact for $target, found $ws_files"
+              missing=1
+            fi
+          done
+
+          if [ "$missing" -ne 0 ]; then
             exit 1
           fi
 
@@ -307,25 +342,48 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: packages -> target
-      # Publish in dependency order (tolerate already-published versions)
-      - name: Publish catcher-core
-        run: cd packages/catcher-core && cargo publish || true
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-      - name: Publish catcher-http
-        run: cd packages/catcher-http && cargo publish || true
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-      - name: Publish catcher-ws
-        run: cd packages/catcher-ws && cargo publish || true
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-      - name: Publish catcher-ffi
-        run: cd packages/catcher-ffi && cargo publish || true
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-      - name: Publish catcher-uniffi
-        run: cd packages/catcher-uniffi && cargo publish || true
+      - name: Publish Rust crates
+        working-directory: packages
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          publish_crate() {
+            local crate_dir="$1"
+            local attempts=5
+
+            for attempt in $(seq 1 "$attempts"); do
+              echo "Publishing $crate_dir (attempt $attempt/$attempts)"
+              set +e
+              output=$(cd "$crate_dir" && cargo publish 2>&1)
+              status=$?
+              set -e
+              echo "$output"
+
+              if [ "$status" -eq 0 ]; then
+                return 0
+              fi
+
+              if echo "$output" | grep -Eiq "already (uploaded|exists)|crate version .* is already uploaded"; then
+                echo "$crate_dir is already published; continuing."
+                return 0
+              fi
+
+              if [ "$attempt" -lt "$attempts" ]; then
+                echo "Publish failed; waiting for crates.io index before retrying."
+                sleep 60
+              else
+                return "$status"
+              fi
+            done
+          }
+
+          publish_crate catcher-core
+          publish_crate catcher-dns
+          publish_crate catcher-http
+          publish_crate catcher-ws
+          publish_crate catcher-ffi
+          publish_crate catcher-uniffi
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
@@ -337,6 +395,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       ANDROID_NDK_VERSION: "27.0.12077973"
+      CARGO_PROFILE_RELEASE_OPT_LEVEL: "z"
+      CARGO_PROFILE_RELEASE_PANIC: "abort"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -359,12 +419,24 @@ jobs:
           export CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER="$TOOLCHAIN/armv7a-linux-androideabi24-clang"
           export CARGO_TARGET_I686_LINUX_ANDROID_LINKER="$TOOLCHAIN/i686-linux-android24-clang"
           export CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER="$TOOLCHAIN/x86_64-linux-android24-clang"
+          export CC_aarch64_linux_android="$TOOLCHAIN/aarch64-linux-android24-clang"
+          export CC_armv7_linux_androideabi="$TOOLCHAIN/armv7a-linux-androideabi24-clang"
+          export CC_i686_linux_android="$TOOLCHAIN/i686-linux-android24-clang"
+          export CC_x86_64_linux_android="$TOOLCHAIN/x86_64-linux-android24-clang"
+          export AR_aarch64_linux_android="$TOOLCHAIN/llvm-ar"
+          export AR_armv7_linux_androideabi="$TOOLCHAIN/llvm-ar"
+          export AR_i686_linux_android="$TOOLCHAIN/llvm-ar"
+          export AR_x86_64_linux_android="$TOOLCHAIN/llvm-ar"
           rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
           cd packages
           cargo build --release -p catcher-ffi --target aarch64-linux-android
           cargo build --release -p catcher-ffi --target armv7-linux-androideabi
           cargo build --release -p catcher-ffi --target i686-linux-android
           cargo build --release -p catcher-ffi --target x86_64-linux-android
+          "$TOOLCHAIN/llvm-strip" --strip-unneeded target/aarch64-linux-android/release/libcatcher_ffi.so
+          "$TOOLCHAIN/llvm-strip" --strip-unneeded target/armv7-linux-androideabi/release/libcatcher_ffi.so
+          "$TOOLCHAIN/llvm-strip" --strip-unneeded target/i686-linux-android/release/libcatcher_ffi.so
+          "$TOOLCHAIN/llvm-strip" --strip-unneeded target/x86_64-linux-android/release/libcatcher_ffi.so
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -381,6 +453,8 @@ jobs:
     runs-on: macos-latest
     env:
       IPHONEOS_DEPLOYMENT_TARGET: "13.0"
+      CARGO_PROFILE_RELEASE_OPT_LEVEL: "z"
+      CARGO_PROFILE_RELEASE_PANIC: "abort"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -392,12 +466,15 @@ jobs:
           rustup target add aarch64-apple-ios
           cd packages
           cargo build --release -p catcher-ffi --target aarch64-apple-ios
+          xcrun strip -x target/aarch64-apple-ios/release/libcatcher_ffi.dylib
       - name: Build for iOS simulator
         run: |
           rustup target add aarch64-apple-ios-sim x86_64-apple-ios
           cd packages
           cargo build --release -p catcher-ffi --target aarch64-apple-ios-sim
           cargo build --release -p catcher-ffi --target x86_64-apple-ios
+          xcrun strip -x target/aarch64-apple-ios-sim/release/libcatcher_ffi.dylib
+          xcrun strip -x target/x86_64-apple-ios/release/libcatcher_ffi.dylib
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -413,6 +490,8 @@ jobs:
     runs-on: macos-latest
     env:
       MACOSX_DEPLOYMENT_TARGET: "10.15"
+      CARGO_PROFILE_RELEASE_OPT_LEVEL: "z"
+      CARGO_PROFILE_RELEASE_PANIC: "abort"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -425,6 +504,8 @@ jobs:
           cd packages
           cargo build --release -p catcher-ffi --target aarch64-apple-darwin
           cargo build --release -p catcher-ffi --target x86_64-apple-darwin
+          xcrun strip -x target/aarch64-apple-darwin/release/libcatcher_ffi.dylib
+          xcrun strip -x target/x86_64-apple-darwin/release/libcatcher_ffi.dylib
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -437,6 +518,9 @@ jobs:
   build-native-windows:
     if: startsWith(github.ref, 'refs/tags/catcher_core-v')
     runs-on: windows-latest
+    env:
+      CARGO_PROFILE_RELEASE_OPT_LEVEL: "z"
+      CARGO_PROFILE_RELEASE_PANIC: "abort"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -456,6 +540,9 @@ jobs:
   build-native-linux:
     if: startsWith(github.ref, 'refs/tags/catcher_core-v')
     runs-on: ubuntu-latest
+    env:
+      CARGO_PROFILE_RELEASE_OPT_LEVEL: "z"
+      CARGO_PROFILE_RELEASE_PANIC: "abort"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -463,7 +550,7 @@ jobs:
         with:
           workspaces: "packages -> target"
       - name: Install Linux cross linker
-        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
       - name: Build for Linux
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
@@ -472,6 +559,8 @@ jobs:
           cd packages
           cargo build --release -p catcher-ffi --target x86_64-unknown-linux-gnu
           cargo build --release -p catcher-ffi --target aarch64-unknown-linux-gnu
+          strip --strip-unneeded target/x86_64-unknown-linux-gnu/release/libcatcher_ffi.so
+          aarch64-linux-gnu-strip --strip-unneeded target/aarch64-unknown-linux-gnu/release/libcatcher_ffi.so
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -548,6 +637,7 @@ jobs:
             mkdir -p "$dst"
             cp "$src" "$dst/catcher_ffi"
             install_name_tool -id "@rpath/catcher_ffi.framework/catcher_ffi" "$dst/catcher_ffi"
+            xcrun strip -x "$dst/catcher_ffi"
             cat > "$dst/Info.plist" <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -613,11 +703,20 @@ jobs:
 
       - name: Verify platform bundles
         run: |
+          du -sh packages/catcher_core/android/src/main/jniLibs
+          du -sh packages/catcher_core/ios/Frameworks
+          du -sh packages/catcher_core/macos/Frameworks
+          du -sh packages/catcher_core/linux/lib
+          du -sh packages/catcher_core/windows/lib
           find packages/catcher_core/android/src/main/jniLibs -type f | sort
           find packages/catcher_core/ios/Frameworks -type f | sort
           find packages/catcher_core/macos/Frameworks -type f | sort
           find packages/catcher_core/linux/lib -type f | sort
           find packages/catcher_core/windows/lib -type f | sort
+
+      - name: Check catcher_core package
+        working-directory: packages/catcher_core
+        run: dart pub publish --dry-run
 
       - name: Publish catcher_core
         working-directory: packages/catcher_core

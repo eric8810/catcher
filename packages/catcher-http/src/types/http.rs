@@ -1,5 +1,6 @@
-use catcher_core::types::resilience::{CircuitBreakerConfig, RetryConfig};
 use catcher_core::types::default_true;
+use catcher_core::types::resilience::{CircuitBreakerConfig, RetryConfig};
+pub use catcher_dns::DnsConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -54,7 +55,10 @@ pub struct HttpResponse {
 /// 流式 HTTP 响应事件（N-02）
 #[derive(Debug, Clone)]
 pub enum StreamEvent {
-    Headers { status: u16, headers: HashMap<String, String> },
+    Headers {
+        status: u16,
+        headers: HashMap<String, String>,
+    },
     Chunk(bytes::Bytes),
     Done,
     Error(String),
@@ -74,7 +78,10 @@ pub struct PoolConfig {
     #[serde(alias = "keepAlive", default = "default_true")]
     pub keep_alive: bool,
     /// keepalive 间隔（秒）— 更短的间隔能更快检测死连接 (G-02)
-    #[serde(alias = "keepAliveIntervalSecs", default = "default_keep_alive_interval")]
+    #[serde(
+        alias = "keepAliveIntervalSecs",
+        default = "default_keep_alive_interval"
+    )]
     pub keep_alive_interval_secs: u64,
 }
 
@@ -136,7 +143,10 @@ pub struct TlsConfig {
     #[serde(alias = "clientIdentityPfx", skip_serializing_if = "Option::is_none")]
     pub client_identity_pfx: Option<Vec<u8>>,
     /// PFX 身份密码
-    #[serde(alias = "clientIdentityPassword", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        alias = "clientIdentityPassword",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub client_identity_password: Option<String>,
     /// TLS SNI 覆写
     #[serde(alias = "tlsSniOverride", skip_serializing_if = "Option::is_none")]
@@ -168,34 +178,6 @@ impl Default for TlsConfig {
             min_tls_version: None,
             max_tls_version: None,
             pin_sha256: None,
-        }
-    }
-}
-
-/// DNS 配置
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DnsConfig {
-    /// DNS 缓存 TTL（秒）
-    #[serde(alias = "cacheTtlSecs", default = "default_dns_cache_ttl")]
-    pub cache_ttl_secs: u32,
-    /// 自定义 DNS 服务器地址列表（如 ["8.8.8.8:53"]）
-    #[serde(default)]
-    pub nameservers: Vec<String>,
-    /// Hostname → IP 映射 (G7: custom DNS host mapping)
-    #[serde(alias = "hostMapping", default)]
-    pub host_mapping: HashMap<String, String>,
-}
-
-fn default_dns_cache_ttl() -> u32 {
-    300
-}
-
-impl Default for DnsConfig {
-    fn default() -> Self {
-        Self {
-            cache_ttl_secs: default_dns_cache_ttl(),
-            nameservers: Vec::new(),
-            host_mapping: HashMap::new(),
         }
     }
 }
@@ -308,6 +290,10 @@ pub struct HttpClientConfig {
     /// Bearer token
     #[serde(alias = "bearerToken", skip_serializing_if = "Option::is_none")]
     pub bearer_token: Option<String>,
+
+    /// 启用 msgpack 编解码 — body 自动 JSON↔msgpack 转码
+    #[serde(default)]
+    pub msgpack: bool,
 }
 
 fn default_connect_timeout() -> u64 {
@@ -338,6 +324,7 @@ impl Default for HttpClientConfig {
             redirect: None,
             auth: None,
             bearer_token: None,
+            msgpack: false,
         }
     }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "catcher-napi-ws"
-version = "0.3.7"
+version = "0.3.9"
 edition = "2021"
 description = "catcher WebSocket napi-rs Node.js native bindings"
 license = "MIT"
@@ -9,7 +9,7 @@ license = "MIT"
 crate-type = ["cdylib"]
 
 [dependencies]
-catcher-ws = { path = "../catcher-ws", version = "0.3.7", features = ["rustls-tls"] }
+catcher-ws = { path = "../catcher-ws", version = "0.3.9", features = ["rustls-tls"] }
 napi = { version = "2", default-features = false, features = ["napi4", "tokio_rt", "serde-json"] }
 napi-derive = "2"
 serde_json = "1"

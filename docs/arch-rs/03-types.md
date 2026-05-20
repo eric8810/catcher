@@ -115,14 +115,26 @@ impl Default for TlsConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DnsConfig {
-    pub cache_size: usize,
-    pub positive_ttl_secs: u64,
-    pub negative_ttl_secs: u64,
+    pub cache_size: u64,           // 512
+    pub cache_ttl_secs: u32,      // 300
+    pub negative_ttl_secs: u32,   // 60
+    pub stale_ttl_secs: u32,      // 3600
+    pub stale_on_error: bool,     // true
+    pub nameservers: Vec<String>,
+    pub host_mapping: HashMap<String, String>,
 }
 
 impl Default for DnsConfig {
     fn default() -> Self {
-        Self { cache_size: 512, positive_ttl_secs: 300, negative_ttl_secs: 60 }
+        Self {
+            cache_size: 512,
+            cache_ttl_secs: 300,
+            negative_ttl_secs: 60,
+            stale_ttl_secs: 3600,
+            stale_on_error: true,
+            nameservers: vec![],
+            host_mapping: HashMap::new(),
+        }
     }
 }
 

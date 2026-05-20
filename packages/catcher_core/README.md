@@ -11,6 +11,8 @@ Resilient HTTP/WebSocket client for **Flutter** — powered by a **Rust core** v
 - **WebSocket client** — auto-reconnect, heartbeat, multi-endpoint racing
 - **Retry & circuit breaker** — configurable resilience policies
 - **Connection pooling** — keep-alive with configurable idle timeout
+- **DNS cache controls** — cache size, TTL, stale fallback, nameservers, host mapping
+- **Transport MessagePack** — optional native JSON ↔ msgpack conversion for HTTP and WS
 - **Binary codec** — msgpack pack/unpack
 - **Network quality** — evaluate connection health
 
@@ -18,10 +20,10 @@ Resilient HTTP/WebSocket client for **Flutter** — powered by a **Rust core** v
 
 ```yaml
 dependencies:
-  catcher_core: ^0.3.8
+  catcher_core: ^0.3.9
 ```
 
-> **Note:** This package loads a native Rust library (`libcatcher_ffi.so` / `catcher_ffi.dylib` / `catcher_ffi.dll`). The library must be bundled with your app. See the [Flutter manual build guide](../../docs/user-manual/flutter.md#手动构建-android--ios-native-二进制) for Android/iOS build instructions.
+> **Note:** The pub.dev package includes the native Rust libraries for supported platforms. If you build from a source checkout or need custom targets, see the [Flutter manual build guide](../../docs/user-manual/flutter.md#手动构建-android--ios-native-二进制).
 
 ## Quick Start
 
@@ -37,6 +39,14 @@ void main() async {
     responseTimeoutMs: 30000,
     retry: RetryConfig(maxAttempts: 3, backoff: 'Fixed'),
     pool: PoolConfig(keepAlive: true, maxIdlePerHost: 10),
+    dns: DnsConfig(
+      cacheSize: 512,
+      cacheTtlSecs: 300,
+      staleTtlSecs: 3600,
+      staleOnError: true,
+      hostMapping: {'api.internal': '10.0.0.10'},
+    ),
+    msgpack: true,
   ));
 
   // GET
@@ -63,6 +73,8 @@ void main() async {
     urls: ['wss://echo.example.com'],
     reconnect: WsReconnectConfig(initialDelayMs: 1000, maxDelayMs: 30000),
     heartbeat: WsHeartbeatConfig(intervalMs: 30000, adaptive: true),
+    dns: DnsConfig(cacheTtlSecs: 300, staleOnError: true),
+    msgpack: true,
   ));
 
   // Listen to events
@@ -82,7 +94,7 @@ void main() async {
     }
   });
 
-  ws.sendText('hello');
+  ws.sendText('{"event":"hello"}');
   await Future.delayed(Duration(seconds: 5));
   ws.dispose();
 }
@@ -97,6 +109,24 @@ final packed = pack({'event': 'ping', 'seq': 42}); // Uint8List (msgpack)
 final unpacked = unpack(packed);                   // Map<String, dynamic>
 ```
 
+### DNS and MessagePack Config
+
+```dart
+final config = HttpClientConfig(
+  baseUrl: 'https://api.example.com',
+  dns: DnsConfig(
+    cacheSize: 512,
+    cacheTtlSecs: 300,
+    negativeTtlSecs: 60,
+    staleTtlSecs: 3600,
+    staleOnError: true,
+    nameservers: ['8.8.8.8:53'],
+    hostMapping: {'api.internal': '10.0.0.10'},
+  ),
+  msgpack: true,
+);
+```
+
 ## API Reference
 
 ### HTTP
@@ -104,7 +134,8 @@ final unpacked = unpack(packed);                   // Map<String, dynamic>
 | Type | Description |
 |------|-------------|
 | `CatcherHttpClient` | HTTP client wrapper (get, post, put, delete, patch) |
-| `HttpClientConfig` | Base URL, timeouts, pool, retry, circuit breaker |
+| `HttpClientConfig` | Base URL, timeouts, pool, retry, circuit breaker, `dns`, `msgpack` |
+| `DnsConfig` | cacheSize, cacheTtlSecs, negativeTtlSecs, staleTtlSecs, staleOnError, nameservers, hostMapping |
 | `HttpResponse` | status, headers, body bytes, elapsedMs, bodyAsString |
 | `RetryConfig` | maxAttempts, backoff, jitter |
 | `CircuitBreakerConfig` | failureThreshold, resetTimeoutMs |
@@ -116,7 +147,7 @@ final unpacked = unpack(packed);                   // Map<String, dynamic>
 | Type | Description |
 |------|-------------|
 | `CatcherWsClient` | WebSocket client with event stream |
-| `WsClientConfig` | URLs, reconnect, heartbeat, RFC 7692 permessage-deflate |
+| `WsClientConfig` | URLs, reconnect, heartbeat, DNS, compression, msgpack |
 | `WsApplicationCompressionConfig` | Optional application-layer gzip/zstd fallback |
 | `WsReconnectConfig` | Reconnect timing (initial, max delay, backoff) |
 | `WsHeartbeatConfig` | Heartbeat interval, adaptive, pong timeout |

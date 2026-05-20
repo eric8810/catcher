@@ -18,11 +18,11 @@ pub mod ws;
 pub use codec::{pack, unpack, unpack_value};
 pub use transport::ws_client::{WsHandle, WsTransport};
 pub use types::ws::{
-    ApplicationCompressionAlgorithm, ApplicationCompressionConfig, HeartbeatConfig,
+    ApplicationCompressionAlgorithm, ApplicationCompressionConfig, DnsConfig, HeartbeatConfig,
     ReconnectConfig, WsClientConfig, WsEvent, WsState,
 };
 pub use ws::{
-    build_ws_options, decode_application_compression_frame, encode_application_compression_frame,
+    build_ws_config, decode_application_compression_frame, encode_application_compression_frame,
     ApplicationCompressionFrame, APPLICATION_COMPRESSION_MAGIC,
 };
 pub use ws::{EndpointRacer, HeartbeatManager, ReconnectManager};

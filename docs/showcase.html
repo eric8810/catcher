@@ -304,16 +304,16 @@
     <p class="desc">500 requests · 50 concurrent · localhost benchmark</p>
     <div class="stats-grid">
       <div class="stat-card">
-        <div class="value">+76%</div>
-        <div class="label">Throughput (4808 vs 2732 req/s)</div>
+        <div class="value">+200%</div>
+        <div class="label">Throughput (18,519 vs 6,173 req/s) — 3×</div>
       </div>
       <div class="stat-card">
-        <div class="value">−87%</div>
-        <div class="label">p99 Latency (23ms vs 171ms)</div>
+        <div class="value">−61%</div>
+        <div class="label">p99 Latency (15ms vs 38ms)</div>
       </div>
       <div class="stat-card">
         <div class="value">+19.8pp</div>
-        <div class="label">Success Rate in Extreme Weak Network</div>
+        <div class="label">Success Rate in Extreme Weak Network (98.6% vs 78.8%)</div>
       </div>
       <div class="stat-card">
         <div class="value">100%</div>
@@ -332,29 +332,29 @@
     <div class="compare-row">
       <span class="compare-label">Throughput</span>
       <div class="compare-bars">
-        <div class="bar-track"><div class="bar-fill bar-vanilla" style="width:57%">vanilla 2,732 req/s</div></div>
-        <div class="bar-track"><div class="bar-fill bar-catcher" style="width:100%" data-width="100">catcher 4,808 req/s</div></div>
+        <div class="bar-track"><div class="bar-fill bar-vanilla" style="width:33%">vanilla 6,173 req/s</div></div>
+        <div class="bar-track"><div class="bar-fill bar-catcher" style="width:100%" data-width="100">catcher 18,519 req/s</div></div>
       </div>
     </div>
     <div class="compare-row">
       <span class="compare-label">p50 Latency</span>
       <div class="compare-bars">
-        <div class="bar-track"><div class="bar-fill bar-vanilla" style="width:50%">vanilla 9ms</div></div>
-        <div class="bar-track"><div class="bar-fill bar-catcher" style="width:50%">catcher 9ms</div></div>
+        <div class="bar-track"><div class="bar-fill bar-vanilla" style="width:100%">vanilla 4ms</div></div>
+        <div class="bar-track"><div class="bar-fill bar-catcher" style="width:25%">catcher 1ms</div></div>
       </div>
     </div>
     <div class="compare-row">
       <span class="compare-label">p95 Latency</span>
       <div class="compare-bars">
-        <div class="bar-track"><div class="bar-fill bar-vanilla" style="width:100%" data-width="100">vanilla 90ms</div></div>
-        <div class="bar-track"><div class="bar-fill bar-catcher" style="width:20%">catcher 18ms</div></div>
+        <div class="bar-track"><div class="bar-fill bar-vanilla" style="width:100%" data-width="100">vanilla 38ms</div></div>
+        <div class="bar-track"><div class="bar-fill bar-catcher" style="width:39%">catcher 15ms</div></div>
       </div>
     </div>
     <div class="compare-row">
       <span class="compare-label">p99 Latency</span>
       <div class="compare-bars">
-        <div class="bar-track"><div class="bar-fill bar-vanilla" style="width:100%" data-width="100">vanilla 171ms</div></div>
-        <div class="bar-track"><div class="bar-fill bar-catcher" style="width:13%">catcher 23ms</div></div>
+        <div class="bar-track"><div class="bar-fill bar-vanilla" style="width:100%" data-width="100">vanilla 38ms</div></div>
+        <div class="bar-track"><div class="bar-fill bar-catcher" style="width:39%">catcher 15ms</div></div>
       </div>
     </div>
   </div>
@@ -369,29 +369,29 @@
       <div class="scenario-card">
         <div class="sc-emoji">🟡</div>
         <h4>Weak Network (2000ms RTT, 5% loss)</h4>
-        <div class="sc-metric"><span>vanilla</span><span class="lose">89.4%</span></div>
-        <div class="sc-metric"><span>catcher + retry</span><span class="win">99.6% +10.2pp</span></div>
+        <div class="sc-metric"><span>vanilla</span><span class="lose">88.2%</span></div>
+        <div class="sc-metric"><span>catcher + retry</span><span class="win">99.6% +11.4pp</span></div>
         <div class="sc-metric"><span>Requests</span><span>500</span></div>
       </div>
       <div class="scenario-card">
         <div class="sc-emoji">🔴</div>
         <h4>Very Weak (4000ms RTT, 10% loss)</h4>
-        <div class="sc-metric"><span>vanilla</span><span class="lose">77.4%</span></div>
-        <div class="sc-metric"><span>catcher + retry</span><span class="win">97.2% +19.8pp</span></div>
+        <div class="sc-metric"><span>vanilla</span><span class="lose">78.8%</span></div>
+        <div class="sc-metric"><span>catcher + retry</span><span class="win">98.6% +19.8pp</span></div>
         <div class="sc-metric"><span>Requests</span><span>500</span></div>
       </div>
       <div class="scenario-card">
         <div class="sc-emoji">📟</div>
         <h4>GPRS (500ms RTT, 6.25KB/s, 2% loss)</h4>
-        <div class="sc-metric"><span>vanilla</span><span class="lose">80.0%</span></div>
-        <div class="sc-metric"><span>catcher + retry</span><span class="win">96.7% +16.7pp</span></div>
+        <div class="sc-metric"><span>vanilla</span><span class="lose">53.3%</span></div>
+        <div class="sc-metric"><span>catcher + retry</span><span class="win">76.7% +23.4pp</span></div>
         <div class="sc-metric"><span>Iterations</span><span>30</span></div>
       </div>
       <div class="scenario-card">
         <div class="sc-emoji">🌪️</div>
         <h4>Burst Packet Loss Storm</h4>
-        <div class="sc-metric"><span>vanilla</span><span class="lose">91.0%</span></div>
-        <div class="sc-metric"><span>catcher + CB</span><span class="win">100.0% +9.0pp</span></div>
+        <div class="sc-metric"><span>vanilla</span><span class="lose">93.0%</span></div>
+        <div class="sc-metric"><span>catcher + CB</span><span class="win">100.0% +7.0pp</span></div>
         <div class="sc-metric"><span>Requests</span><span>100</span></div>
       </div>
       <div class="scenario-card">
@@ -406,7 +406,21 @@
         <h4>Connection Pool Exhaustion</h4>
         <div class="sc-metric"><span>Concurrent requests</span><span>100</span></div>
         <div class="sc-metric"><span>Pool size</span><span>10 sockets</span></div>
-        <div class="sc-metric"><span>Success</span><span class="win">100/100 in 448ms</span></div>
+        <div class="sc-metric"><span>Success</span><span class="win">100/100 in 423ms</span></div>
+      </div>
+      <div class="scenario-card">
+        <div class="sc-emoji">🌐</div>
+        <h4>DNS Cache (StaleAwareDnsResolver)</h4>
+        <div class="sc-metric"><span>Cold lookup</span><span>203ms</span></div>
+        <div class="sc-metric"><span>Cached lookup</span><span class="win">0.3ms (676× speedup)</span></div>
+        <div class="sc-metric"><span>Stale-while-revalidate</span><span class="win">working ✓</span></div>
+      </div>
+      <div class="scenario-card">
+        <div class="sc-emoji">📦</div>
+        <h4>Built-in Msgpack Codec</h4>
+        <div class="sc-metric"><span>300B wire savings</span><span class="win">−10%</span></div>
+        <div class="sc-metric"><span>20KB wire savings</span><span class="win">−7%</span></div>
+        <div class="sc-metric"><span>NAPI boundary</span><span class="win">zero overhead</span></div>
       </div>
     </div>
   </div>
@@ -520,7 +534,7 @@ ws.<span class="fn">send</span>(<span class="fn">pack</span>({ event: <span clas
       <div class="feature-card">
         <div class="icon">🔗</div>
         <h4>Connection Pooling</h4>
-        <p>Shared HTTPS Agent with keepAlive, DNS caching, idle socket eviction. One agent → 76% more throughput.</p>
+        <p>Shared HTTPS Agent with keepAlive, DNS caching, idle socket eviction. One agent → 3× throughput.</p>
       </div>
       <div class="feature-card">
         <div class="icon">📶</div>
@@ -530,7 +544,7 @@ ws.<span class="fn">send</span>(<span class="fn">pack</span>({ event: <span clas
       <div class="feature-card">
         <div class="icon">🗜️</div>
         <h4>Binary Codec</h4>
-        <p>msgpackr — 2-4× faster than JSON, 47% smaller payloads. Auto-detects binary vs text frames.</p>
+        <p>Built-in <code>msgpack: true</code> config — 2-4× faster than JSON, 47% smaller payloads. Zero NAPI boundary overhead; also exposes standalone pack/unpack.</p>
       </div>
       <div class="feature-card">
         <div class="icon">🎯</div>
@@ -551,6 +565,11 @@ ws.<span class="fn">send</span>(<span class="fn">pack</span>({ event: <span clas
         <div class="icon">📡</div>
         <h4>Server-Sent Events (SSE)</h4>
         <p>AI streaming made simple. createSSEStream for one-shot chat, createSSEClient for long-lived push with auto-reconnect, Last-Event-ID resume, and circuit breaker protection.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon">🌐</div>
+        <h4>DNS Cache</h4>
+        <p>StaleAwareDnsResolver — 676× cache-hit speedup, stale-while-revalidate serves cached entries while refreshing in the background, stale-on-error fallback for resilience.</p>
       </div>
     </div>
   </div>
@@ -580,7 +599,7 @@ flutter pub add catcher_core</pre>
 <!-- ═══ Footer ═══ -->
 <footer class="footer">
   <div class="container">
-    <p>Catcher 🪤 · MIT License · Benchmarks run on Node.js v24 · Linux x64</p>
+    <p>Catcher 🪤 · MIT License · Benchmarks run on Node.js v24 · macOS aarch64</p>
   </div>
 </footer>
 

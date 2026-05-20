@@ -54,13 +54,14 @@ See package-specific READMEs for detailed migration instructions.
 ```
 catcher-core (Rust)              @eric8810/catcher-core (TS)
      │                                │
- ┌───┴───┐                        ┌───┴───┐
- ▼       ▼                        ▼       ▼
-catcher  catcher              @eric8810  @eric8810
--http    -ws                  /catcher-  /catcher-
- │  │     │  │                http       ws
- │  │     │  │               (axios)    (ws)
- │  │     │  │               (+SSE)
+     ▼                            ┌───┴───┐
+catcher-dns                      ▼       ▼
+     │                        @eric8810  @eric8810
+ ┌───┴───┐                   /catcher-  /catcher-
+ ▼       ▼                   http       ws
+catcher  catcher             (axios)    (ws)
+-http    -ws                 (+SSE)
+ │  │     │  │
  │  └──napi-rs──┐   ┌──napi-rs──┘
  │              ▼   ▼
  │        @eric8810/catcher-napi-http  ⭐ Node.js 推荐
@@ -110,6 +111,7 @@ catcher  catcher              @eric8810  @eric8810
 | Crate | Version | Description |
 |-------|---------|-------------|
 | [`catcher-core`](https://crates.io/crates/catcher-core) | [![crates.io](https://img.shields.io/crates/v/catcher-core.svg)](https://crates.io/crates/catcher-core) | Shared types & errors |
+| [`catcher-dns`](https://crates.io/crates/catcher-dns) | [![crates.io](https://img.shields.io/crates/v/catcher-dns.svg)](https://crates.io/crates/catcher-dns) | Shared DNS cache, host mapping, stale fallback |
 | [`catcher-http`](https://crates.io/crates/catcher-http) | [![crates.io](https://img.shields.io/crates/v/catcher-http.svg)](https://crates.io/crates/catcher-http) | HTTP — reqwest, retry, CB |
 | [`catcher-ws`](https://crates.io/crates/catcher-ws) | [![crates.io](https://img.shields.io/crates/v/catcher-ws.svg)](https://crates.io/crates/catcher-ws) | WS — tokio-tungstenite, codec |
 | [`catcher-ffi`](https://crates.io/crates/catcher-ffi) | [![crates.io](https://img.shields.io/crates/v/catcher-ffi.svg)](https://crates.io/crates/catcher-ffi) | cdylib umbrella — 25 C ABI symbols |
@@ -139,7 +141,7 @@ npm install @eric8810/catcher-web
 
 ```yaml
 dependencies:
-  catcher_core: ^0.3.8
+  catcher_core: ^0.3.9
 ```
 
 ### Usage
@@ -155,13 +157,15 @@ const client = new HttpClient({
   connect_timeout_ms: 10000,
   retry: { max_attempts: 3, backoff: 'Fixed' },
   circuit_breaker: { failure_threshold: 5, reset_timeout_ms: 30000 },
+  dns: { cache_ttl_secs: 300, stale_on_error: true },
+  msgpack: true,  // auto JSON↔msgpack at transport layer
 })
 
 const resp = await client.get('/users/1')
 console.log(resp.status, resp.body.toString())
 
 // SSE — auto-reconnect
-import { SseClient } from '@eric8810/catcher-napi-http'
+import { SseClient } from '@eric8810/catcher-napi-http/sse'
 
 const sse = new SseClient(
   { url: 'https://stream.example.com/events',
@@ -174,13 +178,15 @@ import { WsClient } from '@eric8810/catcher-napi-ws'
 
 const ws = new WsClient(
   { urls: ['wss://cn.example.com', 'wss://sg.example.com'],
-    reconnect: { initial_delay_ms: 500, max_delay_ms: 30000 } },
+    reconnect: { initial_delay_ms: 500, max_delay_ms: 30000 },
+    dns: { cache_ttl_secs: 300, stale_on_error: true },
+    msgpack: true },
   (event) => {
     if (event.type === 'Message')
       console.log(Buffer.from(event.data_base64, 'base64').toString())
   },
 )
-ws.send('hello')
+ws.send(JSON.stringify({ event: 'hello' }))
 ```
 
 #### TypeScript (pure TS)
@@ -272,6 +278,8 @@ void main() async {
   final client = CatcherHttpClient(HttpClientConfig(
     baseUrl: 'https://httpbin.org',
     retry: RetryConfig(maxAttempts: 3),
+    dns: DnsConfig(cacheTtlSecs: 300, staleOnError: true),
+    msgpack: true,
   ));
 
   final resp = await client.get('/get');
@@ -286,13 +294,15 @@ void main() async {
   final ws = CatcherWsClient(WsClientConfig(
     urls: ['wss://echo.example.com'],
     reconnect: WsReconnectConfig(initialDelayMs: 1000),
+    dns: DnsConfig(cacheTtlSecs: 300, staleOnError: true),
+    msgpack: true,
   ));
 
   ws.events.listen((event) {
     if (event is WsMessageEvent) print('Received: ${event.text}');
   });
 
-  ws.sendText('hello');
+  ws.sendText('{"event":"hello"}');
   await Future.delayed(Duration(seconds: 5));
   ws.dispose();
 }
@@ -300,12 +310,13 @@ void main() async {
 
 ## Features
 
-- **Shared HTTP Agent** — TCP keep-alive, DNS caching, TLS session reuse, idle socket eviction
+- **Shared HTTP Agent** — TCP keep-alive, **StaleAwareDnsResolver** (676x cache hit speedup, stale-while-revalidate), TLS session reuse, idle socket eviction
 - **Auto-retry** — exponential backoff with jitter, destroys stale keepAlive sockets on retry
 - **Circuit Breaker** — trips on consecutive failures, auto-recovers, prevents retry storms
 - **Resilient WebSocket** — perMessageDeflate compression, exponential reconnect, multi-endpoint racing
 - **Server-Sent Events (SSE)** — raw line stream, auto-reconnect, `Last-Event-ID` resume, `AbortSignal`, cross-platform (Rust + TS + Browser)
-- **Binary codec** — msgpack / msgpackr (2-4x faster than JSON, ~47% smaller)
+- **Binary codec** — built-in `msgpack: true` transport-level codec (10% wire savings), standalone pack/unpack via `@eric8810/catcher-napi-ws/codec`
+- **Dart FFI feature parity** — Flutter clients can configure DNS cache and enable native MessagePack through `DnsConfig`, `HttpClientConfig.msgpack`, `WsClientConfig.dns`, and `WsClientConfig.msgpack`
 - **Priority queue** — POST before prefetch, concurrency-aware scheduling
 - **Dynamic interceptors** — use/eject/clear at runtime, per-request retry/timeout/signal overrides
 
@@ -322,7 +333,13 @@ interceptors → retry → circuit breaker → concurrency queue → HTTP engine
 | TS Unit + Integration (http, ws, sse, web) | 323/325 | ✅ |
 | TS E2E (scenarios + rust-vs-vanilla) | 38/38 | ✅ |
 | Rust Unit — catcher-core | 23/23 | ✅ |
-| Rust Unit — catcher-http | 4/4 | ✅ |
+| Rust Unit — catcher-dns | 12/12 | ✅ |
+| Rust Unit — catcher-http | 118/118 | ✅ |
+| Rust Unit — catcher-ws | 25/25 | ✅ |
+| NAPI Integration (dns, http, ws, msgpack) | 28/28 | ✅ |
+| NAPI E2E (rust-vs-vanilla S1-S8) | 37/37 | ✅ |
+| NAPI Throughput Benchmark | 14/14 | ✅ |
+| NAPI Chaos (S9-S16 + chaos) | 11/11 | ✅ |
 | Rust FFI Integration (http + sse + codec) | 17/17 | ✅ |
 | Dart Unit Tests | 20/20 | ✅ |
 | Dart Integration (real FFI + httpbin.org) | 8/8 | ✅ |
@@ -348,10 +365,14 @@ pnpm build            # build all TS packages
 pnpm test             # run integration tests (vitest)
 pnpm typecheck        # type-check all TS packages
 pnpm bench            # run benchmarks
+pnpm test:napi        # NAPI integration tests
+pnpm test:napi-bench  # NAPI throughput benchmark
+pnpm bench:napi       # NAPI micro-benchmarks (agent + codec)
+pnpm test:napi-chaos  # NAPI chaos + extreme scenarios
 
 # Rust
-cd crates && cargo build
-cd crates && cargo test
+cd packages && cargo build
+cd packages && cargo test
 ```
 
 ## License

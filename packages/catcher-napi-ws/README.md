@@ -51,7 +51,7 @@ Pre-built binaries available for Linux (x64/arm64 gnu/musl), macOS (x64/arm64), 
 
 ```typescript
 import { WsClient } from '@eric8810/catcher-napi-ws'
-import type { WsEvent } from '@eric8810/catcher-napi-ws'
+import type { WsEvent } from '@eric8810/catcher-napi-ws/types'
 
 // Config as typed object (recommended) or JSON string
 const ws = new WsClient(
@@ -59,6 +59,8 @@ const ws = new WsClient(
     urls: ['wss://echo.example.com'],
     reconnect: { initial_delay_ms: 500, max_delay_ms: 30000 },
     heartbeat: { interval_ms: 30000, adaptive: true },
+    dns: { cache_ttl_secs: 300, stale_on_error: true },
+    msgpack: true,
   },
   (event: WsEvent) => {
     switch (event.type) {
@@ -84,7 +86,7 @@ const ws = new WsClient(
   },
 )
 
-ws.send('hello')
+ws.send(JSON.stringify({ event: 'hello' }))
 // later:
 ws.close()
 ```
@@ -109,8 +111,22 @@ interface WsClientConfig {
   reconnect?: ReconnectConfig
   heartbeat?: HeartbeatConfig
   race_count?: number                         // default: 1
+  dns?: DnsConfig
+  msgpack?: boolean                           // default: false
+}
+
+interface DnsConfig {
+  cache_size?: number                         // default: 512
+  cache_ttl_secs?: number                     // default: 300
+  negative_ttl_secs?: number                  // default: 60
+  stale_ttl_secs?: number                     // default: 3600
+  stale_on_error?: boolean                    // default: true
+  nameservers?: string[]
+  host_mapping?: Record<string, string>
 }
 ```
+
+When `msgpack` is enabled, JSON text messages are sent as MessagePack binary frames. Incoming MessagePack binary frames are decoded and delivered as JSON text.
 
 ### Methods
 
@@ -134,6 +150,15 @@ Events are delivered as typed objects (auto-parsed from JSON):
 | HeartbeatRtt | `{ type: 'HeartbeatRtt', rtt_ms: number }` |
 
 > `data_base64` is the base64-encoded payload. Decode with `Buffer.from(event.data_base64, 'base64')`.
+
+### MessagePack helpers
+
+```typescript
+import { pack, unpack } from '@eric8810/catcher-napi-ws/codec'
+
+const bytes = pack({ event: 'ping', seq: 42 })
+const value = unpack(bytes)
+```
 
 ## Build from Source
 

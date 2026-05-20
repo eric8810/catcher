@@ -5,6 +5,7 @@ import 'dart:ffi';
 import 'package:ffi/ffi.dart';
 
 import 'ffi_bindings.dart';
+import 'http_client.dart' show DnsConfig;
 import 'native_loader.dart';
 
 /// Dart wrapper around the Rust catcher WebSocket client via C ABI.
@@ -41,18 +42,20 @@ class CatcherWsClient {
 
     _create = lib.lookupFunction<CatcherWsCreateNative, CatcherWsCreateDart>(
         'catcher_ws_create');
-    _sendText = lib.lookupFunction<CatcherWsSendTextNative,
-        CatcherWsSendTextDart>('catcher_ws_send_text');
-    _sendBinary = lib.lookupFunction<CatcherWsSendBinaryNative,
-        CatcherWsSendBinaryDart>('catcher_ws_send_binary');
-    _close =
-        lib.lookupFunction<CatcherWsCloseNative, CatcherWsCloseDart>(
-            'catcher_ws_close');
-    _destroy = lib.lookupFunction<CatcherWsDestroyNative,
-        CatcherWsDestroyDart>('catcher_ws_destroy');
+    _sendText =
+        lib.lookupFunction<CatcherWsSendTextNative, CatcherWsSendTextDart>(
+            'catcher_ws_send_text');
+    _sendBinary =
+        lib.lookupFunction<CatcherWsSendBinaryNative, CatcherWsSendBinaryDart>(
+            'catcher_ws_send_binary');
+    _close = lib.lookupFunction<CatcherWsCloseNative, CatcherWsCloseDart>(
+        'catcher_ws_close');
+    _destroy = lib.lookupFunction<CatcherWsDestroyNative, CatcherWsDestroyDart>(
+        'catcher_ws_destroy');
 
-    _freeResultFn = lib.lookupFunction<CatcherFreeResultNative,
-        CatcherFreeResultDart>('catcher_free_result');
+    _freeResultFn =
+        lib.lookupFunction<CatcherFreeResultNative, CatcherFreeResultDart>(
+            'catcher_free_result');
     _freeEventDataFn = lib.lookupFunction<CatcherFreeEventDataNative,
         CatcherFreeEventDataDart>('catcher_free_event_data');
 
@@ -86,8 +89,7 @@ class CatcherWsClient {
       },
     );
 
-    final configJson =
-        jsonEncode(config.toJson()).toNativeUtf8();
+    final configJson = jsonEncode(config.toJson()).toNativeUtf8();
     _handle = _create(
       configJson.cast<Char>(),
       _nativeCallback!.nativeFunction,
@@ -376,6 +378,8 @@ class WsClientConfig {
   final List<String> protocols;
   final int deflateThresholdBytes;
   final WsApplicationCompressionConfig? applicationCompression;
+  final DnsConfig? dns;
+  final bool msgpack;
 
   const WsClientConfig({
     required this.urls,
@@ -389,6 +393,8 @@ class WsClientConfig {
     this.protocols = const [],
     this.deflateThresholdBytes = 1024,
     this.applicationCompression,
+    this.dns,
+    this.msgpack = false,
   });
 
   Map<String, dynamic> toJson() => {
@@ -404,6 +410,8 @@ class WsClientConfig {
         'deflate_threshold_bytes': deflateThresholdBytes,
         if (applicationCompression != null)
           'application_compression': applicationCompression!.toJson(),
+        if (dns != null) 'dns': dns!.toJson(),
+        'msgpack': msgpack,
       };
 }
 

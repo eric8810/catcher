@@ -8,7 +8,7 @@ pub use application_compression::{
     decode_application_compression_frame, encode_application_compression_frame,
     ApplicationCompressionFrame, APPLICATION_COMPRESSION_MAGIC,
 };
-pub use compression::build_ws_options;
+pub use compression::build_ws_config;
 pub use heartbeat::HeartbeatManager;
 pub use multi_endpoint::EndpointRacer;
 pub use reconnect::ReconnectManager;
