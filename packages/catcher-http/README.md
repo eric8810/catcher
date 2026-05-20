@@ -24,7 +24,7 @@ Resilient HTTP client for the [catcher](https://github.com/eric8810/catcher) too
 
 ```toml
 [dependencies]
-catcher-http = { version = "0.2", default-features = true }
+catcher-http = { version = "0.3.9", default-features = true }
 ```
 
 ### Basic HTTP request
@@ -113,6 +113,7 @@ let state = transport.circuit_breaker_state();
 | Type | Source |
 |------|--------|
 | `HttpTransport` | Main async HTTP client |
+| `types::http::DnsConfig` | Shared DNS config from `catcher-dns` |
 | `CircuitBreaker`, `AdaptiveTimeout` | Resilience primitives |
 | `PriorityRequestQueue` | Concurrency scheduler |
 | `MetricsCollector`, `NetworkQualityEvaluator` | Observability |

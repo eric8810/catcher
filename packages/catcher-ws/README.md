@@ -18,6 +18,7 @@ Resilient WebSocket client for the [catcher](https://github.com/eric8810/catcher
 - **Auto-reconnect** — exponential backoff with jitter
 - **Adaptive heartbeat** — configurable ping/pong with RTT tracking
 - **Multi-endpoint racing** — connect to the fastest of N servers
+- **DNS cache config** — shared `DnsConfig` with cache TTL, stale fallback, nameservers, host mapping
 - **Per-message deflate** — compression support
 - **Msgpack codec** — built-in `pack()` / `unpack()` for binary serialization
 - **FFI C ABI** — exported symbols for cross-language bindings
@@ -26,17 +27,22 @@ Resilient WebSocket client for the [catcher](https://github.com/eric8810/catcher
 
 ```toml
 [dependencies]
-catcher-ws = "0.2"
+catcher-ws = "0.3.9"
 ```
 
 ### Basic WebSocket connection
 
 ```rust
-use catcher_ws::{WsTransport, WsHandle, WsEvent};
+use catcher_ws::{DnsConfig, HeartbeatConfig, ReconnectConfig, WsEvent, WsTransport};
 use catcher_ws::types::ws::WsClientConfig;
 
 let config = WsClientConfig {
     urls: vec!["wss://echo.example.com".into()],
+    dns: Some(DnsConfig {
+        cache_ttl_secs: 300,
+        stale_on_error: true,
+        ..Default::default()
+    }),
     reconnect: Some(ReconnectConfig {
         initial_delay_ms: 500,
         max_delay_ms: 30_000,
@@ -99,7 +105,7 @@ let config = WsClientConfig {
 |------|-------------|
 | `WsTransport`, `WsHandle` | Async WebSocket client & handle |
 | `WsEvent`, `WsState` | Event types |
-| `WsClientConfig`, `ReconnectConfig`, `HeartbeatConfig` | Configuration |
+| `WsClientConfig`, `DnsConfig`, `ReconnectConfig`, `HeartbeatConfig` | Configuration |
 | `EndpointRacer` | Multi-endpoint racing |
 | `ReconnectManager`, `HeartbeatManager` | Internal managers |
 | `pack`, `unpack`, `unpack_value` | Msgpack codec |

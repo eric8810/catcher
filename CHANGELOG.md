@@ -2,6 +2,38 @@
 
 All notable changes to this project will be documented in this file. See [release-please](https://github.com/googleapis/release-please) for automated management.
 
+## 0.3.9 (2026-05-20)
+
+### ✨ Features
+
+- **Dart DNS cache controls**: `DnsConfig` now exposes `cacheSize`, `negativeTtlSecs`, `staleTtlSecs`, and `staleOnError` so Flutter clients can configure the native DNS cache and stale fallback behavior.
+- **Dart transport MessagePack switch**: `HttpClientConfig.msgpack` and `WsClientConfig.msgpack` enable native JSON ↔ MessagePack conversion for HTTP bodies and WebSocket messages.
+- **Dart WebSocket DNS config**: `WsClientConfig.dns` passes DNS cache, nameserver, and host mapping settings into the native WebSocket client.
+- **NAPI DNS and MessagePack options**: NAPI HTTP/WS configs now include the expanded DNS fields and `msgpack`; NAPI WS also exposes native `pack()` / `unpack()` helpers.
+- **Shared Rust DNS crate**: Added `catcher-dns` so HTTP and WebSocket share DNS config, cache, host mapping, and stale fallback behavior without depending on each other.
+
+### 🐛 Bug Fixes
+
+- Fixed DNS cache config not being applied through Dart, FFI, and NAPI layers.
+- Fixed built-in MessagePack config not being wired through Dart, FFI, and NAPI clients.
+- Fixed WebSocket DNS failover so a TLS or WebSocket handshake failure can retry the next resolved IP address.
+
+### 📝 Documentation / Packaging
+
+- Documented Dart and NAPI DNS / MessagePack config as new 0.3.9 features.
+- Reduced the Flutter `catcher_core` pub.dev package size so the bundled native libraries stay below pub.dev limits.
+
+## 0.3.8 (2026-05-19)
+
+### ✨ Features
+
+- **Flutter FFI package**: Published `catcher_core` as a Flutter FFI plugin with Android, iOS, macOS, Linux, and Windows native bundle metadata.
+
+### 📝 Documentation / Packaging
+
+- Bundled prebuilt native libraries for `catcher_core` during pub.dev release.
+- Updated Flutter installation and native library loading guidance.
+
 ## 0.3.7 (2026-05-18)
 
 ### 🐛 Bug Fixes

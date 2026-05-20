@@ -1,8 +1,19 @@
 ## 0.3.9
 
-- Add built-in MessagePack codec support to the native bindings.
-- Share DNS cache behavior through the native layers.
-- Keep bundled Flutter native libraries ready for pub.dev publishing.
+### New features
+
+- Add native DNS cache controls to `DnsConfig`: `cacheSize`, `negativeTtlSecs`, `staleTtlSecs`, and `staleOnError`.
+- Add `msgpack` to `HttpClientConfig` for native HTTP JSON ↔ MessagePack body conversion.
+- Add `dns` and `msgpack` to `WsClientConfig` so Flutter WebSocket clients can use DNS cache settings and native MessagePack conversion.
+
+### Fixes
+
+- Fix DNS config not being passed through the Dart FFI layer to the native HTTP and WebSocket clients.
+- Fix built-in MessagePack config not being passed through the Dart FFI layer.
+
+### Packaging
+
+- Keep bundled Android, iOS, macOS, Linux, and Windows native libraries below pub.dev package size limits.
 
 ## 0.3.8
 
