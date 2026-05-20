@@ -86,6 +86,14 @@ build_android() {
   export CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER="$toolchain/armv7a-linux-androideabi${ANDROID_API}-clang"
   export CARGO_TARGET_I686_LINUX_ANDROID_LINKER="$toolchain/i686-linux-android${ANDROID_API}-clang"
   export CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER="$toolchain/x86_64-linux-android${ANDROID_API}-clang"
+  export CC_aarch64_linux_android="$toolchain/aarch64-linux-android${ANDROID_API}-clang"
+  export CC_armv7_linux_androideabi="$toolchain/armv7a-linux-androideabi${ANDROID_API}-clang"
+  export CC_i686_linux_android="$toolchain/i686-linux-android${ANDROID_API}-clang"
+  export CC_x86_64_linux_android="$toolchain/x86_64-linux-android${ANDROID_API}-clang"
+  export AR_aarch64_linux_android="$toolchain/llvm-ar"
+  export AR_armv7_linux_androideabi="$toolchain/llvm-ar"
+  export AR_i686_linux_android="$toolchain/llvm-ar"
+  export AR_x86_64_linux_android="$toolchain/llvm-ar"
 
   rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
   build_catcher_ffi aarch64-linux-android

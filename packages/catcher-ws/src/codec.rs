@@ -14,8 +14,8 @@ pub fn unpack<T: DeserializeOwned>(data: &[u8]) -> Result<T, CatcherError> {
 
 /// 解码为通用 serde_json::Value（兼容 JSON fallback）
 pub fn unpack_value(data: &[u8]) -> Result<serde_json::Value, CatcherError> {
-    let val =
-        rmpv::decode::read_value(&mut &data[..]).map_err(|e| CatcherError::DecodeError(e.to_string()))?;
+    let val = rmpv::decode::read_value(&mut &data[..])
+        .map_err(|e| CatcherError::DecodeError(e.to_string()))?;
     Ok(rmpv_to_json(val))
 }
 
@@ -139,8 +139,14 @@ mod tests {
         let original = Outer {
             name: "test".into(),
             items: vec![
-                Inner { x: 1, y: "a".into() },
-                Inner { x: 2, y: "b".into() },
+                Inner {
+                    x: 1,
+                    y: "a".into(),
+                },
+                Inner {
+                    x: 2,
+                    y: "b".into(),
+                },
             ],
         };
         let packed = pack(&original).unwrap();

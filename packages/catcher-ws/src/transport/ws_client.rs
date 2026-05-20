@@ -1,19 +1,18 @@
 //! WebSocket 传输层 — 完整集成
 //!
-//! 使用 tokio-tungstenite 建立连接，通过 mpsc channel 推送 WsEvent。
+//! 使用 yawc 建立连接，通过 mpsc channel 推送 WsEvent。
 //! 集成：headers/protocols 握手、多端点竞速、自动重连、心跳采样、压缩配置。
 
 use std::fmt;
-use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
-#[cfg(feature = "rustls-tls")]
-use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use futures_util::{SinkExt, StreamExt};
+use http::{HeaderName, HeaderValue};
 use tokio::sync::mpsc;
-use tokio_tungstenite::tungstenite::Message;
+use url::Url;
+use yawc::{Frame, OpCode};
 
 use crate::types::ws::*;
 use crate::ws::{
@@ -26,27 +25,9 @@ use catcher_dns::{build_stale_aware_resolver, DnsResolver};
 // ── 类型别名 ──
 
 /// 底层 WebSocket 流类型
-pub(crate) type WsStream =
-    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+pub(crate) type WsStream = yawc::TcpWebSocket;
 
 pub(crate) type SharedDnsResolver = Arc<DnsResolver>;
-
-// ── TLS 初始化 ──
-
-/// 确保 rustls CryptoProvider 已安装（仅需执行一次）。
-/// rustls 0.23+ 不再内置默认 crypto backend，必须显式安装。
-#[cfg(feature = "rustls-tls")]
-static TLS_PROVIDER_INSTALLED: OnceLock<()> = OnceLock::new();
-
-#[cfg(feature = "rustls-tls")]
-fn ensure_tls_provider() {
-    TLS_PROVIDER_INSTALLED.get_or_init(|| {
-        let _ = rustls::crypto::ring::default_provider().install_default();
-    });
-}
-
-#[cfg(not(feature = "rustls-tls"))]
-fn ensure_tls_provider() {}
 
 // ── 命令（WsHandle → 内部任务）──
 
@@ -131,7 +112,7 @@ fn application_compression_algorithm_name(
     }
 }
 
-fn encode_text_message(text: &str, config: &WsClientConfig) -> Result<Message, CatcherError> {
+fn encode_text_message(text: &str, config: &WsClientConfig) -> Result<Frame, CatcherError> {
     if config.msgpack {
         if let Ok(value) = serde_json::from_str::<serde_json::Value>(text) {
             if let Ok(bin) = rmp_serde::to_vec(&value) {
@@ -145,22 +126,22 @@ fn encode_text_message(text: &str, config: &WsClientConfig) -> Result<Message, C
             if let Some(frame) =
                 encode_application_compression_frame(text.as_bytes(), false, compression)?
             {
-                return Ok(Message::Binary(frame.into()));
+                return Ok(Frame::binary(frame));
             }
         }
     }
-    Ok(Message::Text(text.into()))
+    Ok(Frame::text(text.as_bytes().to_vec()))
 }
 
-fn encode_binary_message(data: &[u8], config: &WsClientConfig) -> Result<Message, CatcherError> {
+fn encode_binary_message(data: &[u8], config: &WsClientConfig) -> Result<Frame, CatcherError> {
     if !config.per_message_deflate {
         if let Some(ref compression) = config.application_compression {
             if let Some(frame) = encode_application_compression_frame(data, true, compression)? {
-                return Ok(Message::Binary(frame.into()));
+                return Ok(Frame::binary(frame));
             }
         }
     }
-    Ok(Message::Binary(data.to_vec().into()))
+    Ok(Frame::binary(data.to_vec()))
 }
 
 fn decode_binary_message(
@@ -186,17 +167,13 @@ fn decode_binary_message(
 
 #[derive(Debug)]
 enum ResolvedAddrConnectError {
-    Tcp {
+    Config {
         addr: SocketAddr,
-        source: io::Error,
-    },
-    TcpOption {
-        addr: SocketAddr,
-        source: io::Error,
+        message: String,
     },
     Handshake {
         addr: SocketAddr,
-        source: tokio_tungstenite::tungstenite::Error,
+        source: yawc::WebSocketError,
     },
     HandshakeTimeout {
         addr: SocketAddr,
@@ -207,10 +184,7 @@ enum ResolvedAddrConnectError {
 impl fmt::Display for ResolvedAddrConnectError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Tcp { addr, source } => write!(f, "{addr}: TCP connect failed: {source}"),
-            Self::TcpOption { addr, source } => {
-                write!(f, "{addr}: set TCP_NODELAY failed: {source}")
-            }
+            Self::Config { addr, message } => write!(f, "{addr}: invalid WS config: {message}"),
             Self::Handshake { addr, source } => write!(f, "{addr}: WS handshake failed: {source}"),
             Self::HandshakeTimeout { addr, timeout_ms } => {
                 write!(f, "{addr}: WS handshake timeout after {timeout_ms}ms")
@@ -221,80 +195,71 @@ impl fmt::Display for ResolvedAddrConnectError {
 
 // ── 底层连接 ──
 
-/// 构建带 headers 和 protocols 的 tungstenite Request。
-fn build_request(
-    url: &str,
+fn parse_ws_url(url: &str) -> Result<Url, CatcherError> {
+    let parsed =
+        Url::parse(url).map_err(|e| CatcherError::Internal(format!("invalid WS URL: {e}")))?;
+    match parsed.scheme() {
+        "ws" | "wss" => Ok(parsed),
+        scheme => Err(CatcherError::InvalidConfig(format!(
+            "unsupported WS URL scheme: {scheme}",
+        ))),
+    }
+}
+
+/// 构建带 headers 和 protocols 的 yawc RequestBuilder。
+fn build_request_builder(
     config: &WsClientConfig,
-) -> Result<tokio_tungstenite::tungstenite::handshake::client::Request, CatcherError> {
-    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-
-    let mut request = url
-        .into_client_request()
-        .map_err(|e| CatcherError::Internal(format!("invalid WS URL: {e}")))?;
-
-    let headers = request.headers_mut();
+) -> Result<yawc::HttpRequestBuilder, CatcherError> {
+    let mut builder = yawc::HttpRequest::builder();
 
     for (k, v) in &config.headers {
-        let name = tokio_tungstenite::tungstenite::http::HeaderName::from_bytes(k.as_bytes())
+        let name = HeaderName::from_bytes(k.as_bytes())
             .map_err(|e| CatcherError::Internal(format!("invalid header name '{k}': {e}")))?;
-        let value = tokio_tungstenite::tungstenite::http::HeaderValue::from_str(v)
+        let value = HeaderValue::from_str(v)
             .map_err(|e| CatcherError::Internal(format!("invalid header value for '{k}': {e}")))?;
-        headers.append(name, value);
+        builder = builder.header(name, value);
     }
 
     if !config.per_message_deflate {
         if let Some(ref compression) = config.application_compression {
             if compression.enabled {
                 let algorithm = application_compression_algorithm_name(compression.algorithm);
-                let value = tokio_tungstenite::tungstenite::http::HeaderValue::from_str(algorithm)
-                    .map_err(|e| {
-                        CatcherError::Internal(format!(
-                            "invalid application compression algorithm header: {e}",
-                        ))
-                    })?;
-                headers.insert("X-Catcher-Application-Compression", value);
+                builder = builder.header("X-Catcher-Application-Compression", algorithm);
 
                 let format = std::str::from_utf8(APPLICATION_COMPRESSION_MAGIC).map_err(|e| {
                     CatcherError::Internal(format!("invalid compression magic: {e}"))
                 })?;
-                let value = tokio_tungstenite::tungstenite::http::HeaderValue::from_str(format)
-                    .map_err(|e| {
-                        CatcherError::Internal(format!(
-                            "invalid application compression format header: {e}",
-                        ))
-                    })?;
-                headers.insert("X-Catcher-Application-Compression-Format", value);
+                builder = builder.header("X-Catcher-Application-Compression-Format", format);
 
-                let value = tokio_tungstenite::tungstenite::http::HeaderValue::from_str(
-                    &compression.threshold_bytes.to_string(),
-                )
-                .map_err(|e| {
-                    CatcherError::Internal(format!(
-                        "invalid application compression threshold header: {e}",
-                    ))
-                })?;
-                headers.insert("X-Catcher-Application-Compression-Threshold", value);
+                builder = builder.header(
+                    "X-Catcher-Application-Compression-Threshold",
+                    compression.threshold_bytes.to_string(),
+                );
             }
         }
     }
 
     if !config.protocols.is_empty() {
-        let value = tokio_tungstenite::tungstenite::http::HeaderValue::from_str(
-            &config.protocols.join(", "),
-        )
-        .map_err(|e| CatcherError::Internal(format!("invalid protocols: {e}")))?;
-        headers.insert(
-            tokio_tungstenite::tungstenite::http::header::SEC_WEBSOCKET_PROTOCOL,
-            value,
-        );
+        let value = HeaderValue::from_str(&config.protocols.join(", "))
+            .map_err(|e| CatcherError::Internal(format!("invalid protocols: {e}")))?;
+        builder = builder.header("Sec-WebSocket-Protocol", value);
     }
 
-    Ok(request)
+    Ok(builder)
 }
 
-fn request_host_port(
-    request: &tokio_tungstenite::tungstenite::handshake::client::Request,
-) -> Result<(String, u16), CatcherError> {
+/// 构建完整请求供配置测试使用；实际握手由 yawc 生成标准 Upgrade 请求。
+#[cfg(test)]
+fn build_request(url: &str, config: &WsClientConfig) -> Result<yawc::HttpRequest, CatcherError> {
+    parse_ws_url(url)?;
+    build_request_builder(config)?
+        .uri(url)
+        .body(())
+        .map_err(|e| CatcherError::Internal(format!("invalid WS request: {e}")))
+}
+
+#[cfg(test)]
+fn request_host_port(request: &yawc::HttpRequest) -> Result<(String, u16), CatcherError> {
     let uri = request.uri();
     let host = uri
         .host()
@@ -317,49 +282,45 @@ fn build_dns_resolver(config: &WsClientConfig) -> Result<SharedDnsResolver, Catc
 }
 
 async fn connect_with_dns(
-    request: tokio_tungstenite::tungstenite::handshake::client::Request,
-    ws_config: tokio_tungstenite::tungstenite::protocol::WebSocketConfig,
+    url: Url,
+    config: &WsClientConfig,
+    ws_config: yawc::Options,
     resolver: &SharedDnsResolver,
     handshake_timeout_ms: u64,
-) -> Result<
-    (
-        WsStream,
-        tokio_tungstenite::tungstenite::handshake::client::Response,
-    ),
-    CatcherError,
-> {
-    let (host, port) = request_host_port(&request)?;
+) -> Result<WsStream, CatcherError> {
+    let host = url
+        .host_str()
+        .ok_or_else(|| CatcherError::InvalidConfig("WS URL missing host".into()))?
+        .to_string();
+    let port = url
+        .port_or_known_default()
+        .ok_or_else(|| CatcherError::InvalidConfig("unsupported WS URL scheme".into()))?;
     let addrs = resolver.resolve_socket_addrs(&host, port).await?;
-    connect_with_resolved_addrs(request, ws_config, &host, port, addrs, handshake_timeout_ms).await
+    connect_with_resolved_addrs(
+        url,
+        config,
+        ws_config,
+        &host,
+        port,
+        addrs,
+        handshake_timeout_ms,
+    )
+    .await
 }
 
 async fn connect_with_resolved_addrs(
-    request: tokio_tungstenite::tungstenite::handshake::client::Request,
-    ws_config: tokio_tungstenite::tungstenite::protocol::WebSocketConfig,
+    url: Url,
+    config: &WsClientConfig,
+    ws_config: yawc::Options,
     host: &str,
     port: u16,
     addrs: Vec<SocketAddr>,
     handshake_timeout_ms: u64,
-) -> Result<
-    (
-        WsStream,
-        tokio_tungstenite::tungstenite::handshake::client::Response,
-    ),
-    CatcherError,
-> {
-    #[cfg(not(any(feature = "rustls-tls", feature = "native-tls")))]
-    {
-        if request.uri().scheme_str() == Some("wss") {
-            return Err(CatcherError::InvalidConfig(
-                "wss requires rustls-tls or native-tls feature".into(),
-            ));
-        }
-    }
-
+) -> Result<WsStream, CatcherError> {
     let mut last_error: Option<ResolvedAddrConnectError> = None;
 
     for addr in addrs {
-        let attempt = connect_to_resolved_addr(request.clone(), ws_config, addr);
+        let attempt = connect_to_resolved_addr(url.clone(), config, ws_config.clone(), addr);
         let result = if handshake_timeout_ms > 0 {
             match tokio::time::timeout(Duration::from_millis(handshake_timeout_ms), attempt).await {
                 Ok(result) => result,
@@ -394,40 +355,23 @@ async fn connect_with_resolved_addrs(
 }
 
 async fn connect_to_resolved_addr(
-    request: tokio_tungstenite::tungstenite::handshake::client::Request,
-    ws_config: tokio_tungstenite::tungstenite::protocol::WebSocketConfig,
+    url: Url,
+    config: &WsClientConfig,
+    ws_config: yawc::Options,
     addr: SocketAddr,
-) -> Result<
-    (
-        WsStream,
-        tokio_tungstenite::tungstenite::handshake::client::Response,
-    ),
-    ResolvedAddrConnectError,
-> {
-    let socket = tokio::net::TcpStream::connect(addr)
-        .await
-        .map_err(|source| ResolvedAddrConnectError::Tcp { addr, source })?;
-    socket
-        .set_nodelay(true)
-        .map_err(|source| ResolvedAddrConnectError::TcpOption { addr, source })?;
+) -> Result<WsStream, ResolvedAddrConnectError> {
+    let request =
+        build_request_builder(config).map_err(|source| ResolvedAddrConnectError::Config {
+            addr,
+            message: source.to_string(),
+        })?;
 
-    #[cfg(any(feature = "rustls-tls", feature = "native-tls"))]
-    {
-        tokio_tungstenite::client_async_tls_with_config(request, socket, Some(ws_config), None)
-            .await
-            .map_err(|source| ResolvedAddrConnectError::Handshake { addr, source })
-    }
-
-    #[cfg(not(any(feature = "rustls-tls", feature = "native-tls")))]
-    {
-        tokio_tungstenite::client_async_with_config(
-            request,
-            tokio_tungstenite::MaybeTlsStream::Plain(socket),
-            Some(ws_config),
-        )
+    yawc::WebSocket::connect(url)
+        .with_tcp_address(addr)
+        .with_options(ws_config)
+        .with_request(request)
         .await
         .map_err(|source| ResolvedAddrConnectError::Handshake { addr, source })
-    }
 }
 
 /// 底层 WebSocket 连接 — 处理 headers/protocols/handshake_timeout/deflate。
@@ -437,15 +381,18 @@ pub(crate) async fn connect_stream_with_resolver(
     config: &WsClientConfig,
     resolver: &SharedDnsResolver,
 ) -> Result<(WsStream, u64), CatcherError> {
-    ensure_tls_provider();
-
-    let request = build_request(url, config)?;
+    let url = parse_ws_url(url)?;
     let ws_config = build_ws_config(config);
 
     let start = Instant::now();
-    let result = connect_with_dns(request, ws_config, resolver, config.handshake_timeout_ms).await;
-
-    let (stream, _response) = result?;
+    let stream = connect_with_dns(
+        url,
+        config,
+        ws_config,
+        resolver,
+        config.handshake_timeout_ms,
+    )
+    .await?;
 
     let latency_ms = start.elapsed().as_millis() as u64;
     Ok((stream, latency_ms))
@@ -619,12 +566,7 @@ async fn connection_manager(
                             }
                         }
                         Some(WsCommand::Close { code, reason }) => {
-                            let msg = Message::Close(Some(
-                                tokio_tungstenite::tungstenite::protocol::CloseFrame {
-                                    code: code.into(),
-                                    reason: reason.into(),
-                                },
-                            ));
+                            let msg = Frame::close(yawc::close::CloseCode::from(code), reason);
                             let _ = writer.send(msg).await;
                             let _ = writer.close().await;
                             break LoopOutcome::CleanClose;
@@ -644,7 +586,7 @@ async fn connection_manager(
                         }
                         state.waiting_for_pong = true;
                         state.ping_sent_at = Some(Instant::now());
-                        let _ = writer.send(Message::Ping(Vec::new().into())).await;
+                        let _ = writer.send(Frame::ping(Vec::new())).await;
                         // 根据自适应间隔重设下一次 ping 时间
                         let next_ms = state.mgr.interval_ms();
                         ping_sleep.as_mut().reset(
@@ -656,14 +598,14 @@ async fn connection_manager(
                     // 收到的消息
                     msg = reader.next() => {
                         match msg {
-                            Some(Ok(Message::Text(t))) => {
+                            Some(frame) if frame.opcode() == OpCode::Text => {
                                 let _ = event_tx.send(WsEvent::Message {
-                                    data: t.as_bytes().to_vec(),
+                                    data: frame.payload().to_vec(),
                                     is_binary: false,
                                 });
                             }
-                            Some(Ok(Message::Binary(d))) => {
-                                match decode_binary_message(&d, config) {
+                            Some(frame) if frame.opcode() == OpCode::Binary => {
+                                match decode_binary_message(frame.payload(), config) {
                                     Ok((data, is_binary)) => {
                                         let _ = event_tx.send(WsEvent::Message { data, is_binary });
                                     }
@@ -674,8 +616,8 @@ async fn connection_manager(
                                     }
                                 }
                             }
-                            Some(Ok(Message::Ping(_))) => {}
-                            Some(Ok(Message::Pong(_))) => {
+                            Some(frame) if frame.opcode() == OpCode::Ping => {}
+                            Some(frame) if frame.opcode() == OpCode::Pong => {
                                 if let Some(ref mut state) = hb_state {
                                     let rtt_ms = state.ping_sent_at
                                         .take()
@@ -686,22 +628,17 @@ async fn connection_manager(
                                     let _ = event_tx.send(WsEvent::HeartbeatRtt { rtt_ms });
                                 }
                             }
-                            Some(Ok(Message::Close(frame))) => {
-                                let (code, reason) = frame
-                                    .map(|f| {
-                                        let c: u16 = f.code.into();
-                                        (c, f.reason.to_string())
-                                    })
-                                    .unwrap_or((1006, "abnormal".into()));
+                            Some(frame) if frame.opcode() == OpCode::Close => {
+                                let code = frame.close_code().map(u16::from).unwrap_or(1006);
+                                let reason = frame
+                                    .close_reason()
+                                    .ok()
+                                    .flatten()
+                                    .unwrap_or("abnormal")
+                                    .to_string();
                                 break LoopOutcome::Disconnected { code, reason };
                             }
-                            Some(Ok(Message::Frame(_))) => {}
-                            Some(Err(e)) => {
-                                break LoopOutcome::Disconnected {
-                                    code: 1006,
-                                    reason: e.to_string(),
-                                };
-                            }
+                            Some(_) => {}
                             None => {
                                 break LoopOutcome::Disconnected {
                                     code: 1006,
@@ -939,10 +876,11 @@ mod tests {
             handshake_timeout_ms: 1_000,
             ..Default::default()
         };
-        let request = build_request(&config.urls[0], &config).unwrap();
+        let url = parse_ws_url(&config.urls[0]).unwrap();
         let ws_config = build_ws_config(&config);
         let result = connect_with_resolved_addrs(
-            request,
+            url,
+            &config,
             ws_config,
             "retry.test",
             good_addr.port(),
@@ -979,10 +917,11 @@ mod tests {
             handshake_timeout_ms: 50,
             ..Default::default()
         };
-        let request = build_request(&config.urls[0], &config).unwrap();
+        let url = parse_ws_url(&config.urls[0]).unwrap();
         let ws_config = build_ws_config(&config);
         let result = connect_with_resolved_addrs(
-            request,
+            url,
+            &config,
             ws_config,
             "retry-timeout.test",
             good_addr.port(),

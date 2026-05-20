@@ -1,3 +1,17 @@
+## 0.3.10
+
+### New features
+
+- Update the native WebSocket transport to use `yawc`, enabling native permessage-deflate support in the bundled Rust implementation.
+
+### Fixes
+
+- Improve Android native build reliability by exporting NDK `CC_*` and `AR_*` variables for cross-compiled native dependencies.
+
+### Packaging
+
+- Refresh bundled native Rust dependency versions for the 0.3.10 release.
+
 ## 0.3.9
 
 ### New features
