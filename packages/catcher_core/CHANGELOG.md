@@ -1,3 +1,9 @@
+## 0.3.9
+
+- Add built-in MessagePack codec support to the native bindings.
+- Share DNS cache behavior through the native layers.
+- Keep bundled Flutter native libraries ready for pub.dev publishing.
+
 ## 0.3.8
 
 - Publish `catcher_core` as a Flutter FFI plugin with platform native bundle metadata.

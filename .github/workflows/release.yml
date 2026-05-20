@@ -395,6 +395,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       ANDROID_NDK_VERSION: "27.0.12077973"
+      CARGO_PROFILE_RELEASE_OPT_LEVEL: "z"
+      CARGO_PROFILE_RELEASE_PANIC: "abort"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -431,6 +433,10 @@ jobs:
           cargo build --release -p catcher-ffi --target armv7-linux-androideabi
           cargo build --release -p catcher-ffi --target i686-linux-android
           cargo build --release -p catcher-ffi --target x86_64-linux-android
+          "$TOOLCHAIN/llvm-strip" --strip-unneeded target/aarch64-linux-android/release/libcatcher_ffi.so
+          "$TOOLCHAIN/llvm-strip" --strip-unneeded target/armv7-linux-androideabi/release/libcatcher_ffi.so
+          "$TOOLCHAIN/llvm-strip" --strip-unneeded target/i686-linux-android/release/libcatcher_ffi.so
+          "$TOOLCHAIN/llvm-strip" --strip-unneeded target/x86_64-linux-android/release/libcatcher_ffi.so
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -447,6 +453,8 @@ jobs:
     runs-on: macos-latest
     env:
       IPHONEOS_DEPLOYMENT_TARGET: "13.0"
+      CARGO_PROFILE_RELEASE_OPT_LEVEL: "z"
+      CARGO_PROFILE_RELEASE_PANIC: "abort"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -458,12 +466,15 @@ jobs:
           rustup target add aarch64-apple-ios
           cd packages
           cargo build --release -p catcher-ffi --target aarch64-apple-ios
+          xcrun strip -x target/aarch64-apple-ios/release/libcatcher_ffi.dylib
       - name: Build for iOS simulator
         run: |
           rustup target add aarch64-apple-ios-sim x86_64-apple-ios
           cd packages
           cargo build --release -p catcher-ffi --target aarch64-apple-ios-sim
           cargo build --release -p catcher-ffi --target x86_64-apple-ios
+          xcrun strip -x target/aarch64-apple-ios-sim/release/libcatcher_ffi.dylib
+          xcrun strip -x target/x86_64-apple-ios/release/libcatcher_ffi.dylib
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -479,6 +490,8 @@ jobs:
     runs-on: macos-latest
     env:
       MACOSX_DEPLOYMENT_TARGET: "10.15"
+      CARGO_PROFILE_RELEASE_OPT_LEVEL: "z"
+      CARGO_PROFILE_RELEASE_PANIC: "abort"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -491,6 +504,8 @@ jobs:
           cd packages
           cargo build --release -p catcher-ffi --target aarch64-apple-darwin
           cargo build --release -p catcher-ffi --target x86_64-apple-darwin
+          xcrun strip -x target/aarch64-apple-darwin/release/libcatcher_ffi.dylib
+          xcrun strip -x target/x86_64-apple-darwin/release/libcatcher_ffi.dylib
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -503,6 +518,9 @@ jobs:
   build-native-windows:
     if: startsWith(github.ref, 'refs/tags/catcher_core-v')
     runs-on: windows-latest
+    env:
+      CARGO_PROFILE_RELEASE_OPT_LEVEL: "z"
+      CARGO_PROFILE_RELEASE_PANIC: "abort"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -522,6 +540,9 @@ jobs:
   build-native-linux:
     if: startsWith(github.ref, 'refs/tags/catcher_core-v')
     runs-on: ubuntu-latest
+    env:
+      CARGO_PROFILE_RELEASE_OPT_LEVEL: "z"
+      CARGO_PROFILE_RELEASE_PANIC: "abort"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -529,7 +550,7 @@ jobs:
         with:
           workspaces: "packages -> target"
       - name: Install Linux cross linker
-        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
       - name: Build for Linux
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
@@ -538,6 +559,8 @@ jobs:
           cd packages
           cargo build --release -p catcher-ffi --target x86_64-unknown-linux-gnu
           cargo build --release -p catcher-ffi --target aarch64-unknown-linux-gnu
+          strip --strip-unneeded target/x86_64-unknown-linux-gnu/release/libcatcher_ffi.so
+          aarch64-linux-gnu-strip --strip-unneeded target/aarch64-unknown-linux-gnu/release/libcatcher_ffi.so
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -614,6 +637,7 @@ jobs:
             mkdir -p "$dst"
             cp "$src" "$dst/catcher_ffi"
             install_name_tool -id "@rpath/catcher_ffi.framework/catcher_ffi" "$dst/catcher_ffi"
+            xcrun strip -x "$dst/catcher_ffi"
             cat > "$dst/Info.plist" <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -679,11 +703,20 @@ jobs:
 
       - name: Verify platform bundles
         run: |
+          du -sh packages/catcher_core/android/src/main/jniLibs
+          du -sh packages/catcher_core/ios/Frameworks
+          du -sh packages/catcher_core/macos/Frameworks
+          du -sh packages/catcher_core/linux/lib
+          du -sh packages/catcher_core/windows/lib
           find packages/catcher_core/android/src/main/jniLibs -type f | sort
           find packages/catcher_core/ios/Frameworks -type f | sort
           find packages/catcher_core/macos/Frameworks -type f | sort
           find packages/catcher_core/linux/lib -type f | sort
           find packages/catcher_core/windows/lib -type f | sort
+
+      - name: Check catcher_core package
+        working-directory: packages/catcher_core
+        run: dart pub publish --dry-run
 
       - name: Publish catcher_core
         working-directory: packages/catcher_core

@@ -1,7 +1,9 @@
 .dart_tool/
 build/
 pubspec.lock
-rust/target/
+rust/
+scripts/
+test/
 native/
 
 !android/src/main/jniLibs/**/*.so
