@@ -70,7 +70,8 @@ async fn s01_sse_stream_basic() {
     LAST_SSE_EVENT.lock().unwrap().clear();
 
     let method = ffi_string("POST");
-    let url = ffi_string("/stream");
+    let stream_url = format!("{}/stream", server.uri());
+    let url = ffi_string(&stream_url);
 
     unsafe {
         sse::catcher_sse_stream(

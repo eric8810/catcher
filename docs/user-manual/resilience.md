@@ -388,6 +388,39 @@ Rust 版支持根据网络质量动态调整并发数：
 
 ---
 
+## 四.五、DNS 缓存（DNS Cache）
+
+### 工作原理
+
+NAPI 版内置 `StaleAwareDnsResolver`，实现 RFC 8767 启发的 stale-while-revalidate 语义：
+
+1. **Fresh hit**（在 TTL 内）→ 直接返回
+2. **Stale hit**（超 TTL 但在 stale 窗口内）→ 返回旧结果 + 后台异步刷新
+3. **Cache miss** → 同步查询，结果写入缓存
+4. **Stale-on-error**（DNS 查询失败 + 有旧缓存）→ 返回旧缓存兜底
+
+冷启动并发查询通过 moka `try_get_with` 合并，同一 hostname 只发一次 DNS 查询。
+
+### 配置
+
+| 参数 | 默认 | 说明 |
+|------|------|------|
+| `cache_size` | 512 | 缓存条目数上限 |
+| `cache_ttl_secs` | 300 | 正常缓存有效期（秒） |
+| `negative_ttl_secs` | 60 | 否定缓存 TTL（秒） |
+| `stale_ttl_secs` | 3600 | 过期后仍可用的宽限期（秒） |
+| `stale_on_error` | true | DNS 失败时是否用旧缓存兜底 |
+
+### Benchmark
+
+| 指标 | 值 |
+|------|------|
+| Cold start (200ms slow DNS proxy) | 203ms |
+| Cached hit (2nd+ request) | 0.3ms |
+| 加速比 | 676x |
+
+---
+
 ## 五、自适应行为
 
 ### 5.1 运行时配置热更新

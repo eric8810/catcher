@@ -18,10 +18,28 @@ void main() {
       final config = HttpClientConfig(
         baseUrl: 'https://api.example.com',
         retry: RetryConfig(maxAttempts: 3),
+        dns: DnsConfig(
+          cacheSize: 1024,
+          cacheTtlSecs: 600,
+          negativeTtlSecs: 30,
+          staleTtlSecs: 1800,
+          staleOnError: false,
+          nameservers: ['1.1.1.1:53'],
+          hostMapping: {'api.example.com': '127.0.0.1'},
+        ),
+        msgpack: true,
       );
       final json = config.toJson();
       expect(json['base_url'], 'https://api.example.com');
       expect(json['retry']['max_attempts'], 3);
+      expect(json['dns']['cache_size'], 1024);
+      expect(json['dns']['cache_ttl_secs'], 600);
+      expect(json['dns']['negative_ttl_secs'], 30);
+      expect(json['dns']['stale_ttl_secs'], 1800);
+      expect(json['dns']['stale_on_error'], false);
+      expect(json['dns']['nameservers'], ['1.1.1.1:53']);
+      expect(json['dns']['host_mapping']['api.example.com'], '127.0.0.1');
+      expect(json['msgpack'], true);
     });
 
     test('custom retry config', () {
@@ -81,6 +99,7 @@ void main() {
       expect(config.perMessageDeflate, false);
       expect(config.handshakeTimeoutMs, 15000);
       expect(config.raceCount, 1);
+      expect(config.msgpack, false);
     });
 
     test('toJson with reconnect', () {
@@ -88,11 +107,15 @@ void main() {
         urls: ['wss://example.com'],
         perMessageDeflate: true,
         reconnect: WsReconnectConfig(maxAttempts: 3),
+        dns: DnsConfig(hostMapping: {'example.com': '127.0.0.1'}),
+        msgpack: true,
       );
       final json = config.toJson();
       expect(json['urls'], ['wss://example.com']);
       expect(json['per_message_deflate'], true);
       expect(json['reconnect']['max_attempts'], 3);
+      expect(json['dns']['host_mapping']['example.com'], '127.0.0.1');
+      expect(json['msgpack'], true);
     });
 
     test('WsReconnectConfig defaults', () {

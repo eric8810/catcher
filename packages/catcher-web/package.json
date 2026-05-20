@@ -1,6 +1,6 @@
 {
   "name": "@eric8810/catcher-web",
-  "version": "0.3.8",
+  "version": "0.3.9",
   "description": "Catcher HTTP client for browsers — fetch-based with retry, circuit breaker & priority queue",
   "type": "module",
   "main": "./dist/index.js",
@@ -11,7 +11,11 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist",
+    "!dist/**/__tests__",
+    "!dist/**/*.test.*"
+  ],
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",

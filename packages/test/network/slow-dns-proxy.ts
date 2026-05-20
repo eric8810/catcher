@@ -20,7 +20,10 @@ export interface SlowDnsProxy {
   stop(): Promise<void>
 }
 
-export function createSlowDnsProxy(delayMs: number = 200): SlowDnsProxy {
+export function createSlowDnsProxy(
+  delayMs: number = 200,
+  overrides?: Record<string, string>,
+): SlowDnsProxy {
   const server = dgram.createSocket('udp4')
   let _port = 0
 
@@ -36,8 +39,11 @@ export function createSlowDnsProxy(delayMs: number = 200): SlowDnsProxy {
         return
       }
 
-      // Resolve using system DNS (native, not the proxy itself)
-      const addresses = await dns.resolve4(domain).catch(() => [])
+      // Check overrides first (for fake domains like catcher.test)
+      const overrideIp = overrides?.[domain]
+      const addresses = overrideIp
+        ? [overrideIp]
+        : await dns.resolve4(domain).catch(() => [] as string[])
 
       if (addresses.length === 0) return
 

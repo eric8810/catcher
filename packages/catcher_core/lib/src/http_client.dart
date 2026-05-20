@@ -978,18 +978,30 @@ class TlsConfig {
 
 /// DNS configuration
 class DnsConfig {
+  final int cacheSize;
   final int cacheTtlSecs;
+  final int negativeTtlSecs;
+  final int staleTtlSecs;
+  final bool staleOnError;
   final List<String> nameservers;
   final Map<String, String> hostMapping;
 
   const DnsConfig({
+    this.cacheSize = 512,
     this.cacheTtlSecs = 300,
+    this.negativeTtlSecs = 60,
+    this.staleTtlSecs = 3600,
+    this.staleOnError = true,
     this.nameservers = const [],
     this.hostMapping = const {},
   });
 
   Map<String, dynamic> toJson() => {
+        'cache_size': cacheSize,
         'cache_ttl_secs': cacheTtlSecs,
+        'negative_ttl_secs': negativeTtlSecs,
+        'stale_ttl_secs': staleTtlSecs,
+        'stale_on_error': staleOnError,
         'nameservers': nameservers,
         'host_mapping': hostMapping,
       };
@@ -1058,6 +1070,7 @@ class HttpClientConfig {
   final RedirectConfig? redirect;
   final ProxyAuth? auth;
   final String? bearerToken;
+  final bool msgpack;
 
   const HttpClientConfig({
     required this.baseUrl,
@@ -1074,6 +1087,7 @@ class HttpClientConfig {
     this.redirect,
     this.auth,
     this.bearerToken,
+    this.msgpack = false,
   });
 
   Map<String, dynamic> toJson() => {
@@ -1091,6 +1105,7 @@ class HttpClientConfig {
         if (redirect != null) 'redirect': redirect!.toJson(),
         if (auth != null) 'auth': auth!.toJson(),
         if (bearerToken != null) 'bearer_token': bearerToken,
+        'msgpack': msgpack,
       };
 }
 

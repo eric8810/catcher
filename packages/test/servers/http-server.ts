@@ -21,6 +21,7 @@ export interface TestServer {
 
 export function createHttpTestServer(): Promise<TestServer> {
   return new Promise((resolve) => {
+    const connections = new Set<import('net').Socket>()
     const server = http.createServer((req, res) => {
       const url = new URL(req.url ?? '/', `http://${req.headers.host}`)
       const delay = parseInt(url.searchParams.get('delay') ?? '0', 10)
@@ -116,12 +117,20 @@ export function createHttpTestServer(): Promise<TestServer> {
       }
     })
 
+    server.on('connection', (socket) => {
+      connections.add(socket)
+      socket.on('close', () => connections.delete(socket))
+    })
+
     server.listen(0, '127.0.0.1', () => {
       const addr = server.address() as { port: number }
       resolve({
         url: `http://127.0.0.1:${addr.port}`,
         port: addr.port,
-        close: () => new Promise((res) => server.close(() => res())),
+        close: () => new Promise<void>((res) => {
+          for (const socket of connections) socket.destroy()
+          server.close(() => res())
+        }),
       })
     })
   })

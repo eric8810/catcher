@@ -189,7 +189,7 @@ jobs:
 
   publish-napi-assemble:
     needs: [publish-napi-http, publish-napi-ws]
-    if: always() && !startsWith(github.ref, 'refs/tags/catcher_core-v')
+    if: "!startsWith(github.ref, 'refs/tags/catcher_core-v')"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -205,14 +205,49 @@ jobs:
         with:
           path: napi-artifacts
           merge-multiple: false
-      - name: Abort if no artifacts were produced
+      - name: Verify napi artifacts
         run: |
+          set -euo pipefail
+          targets=(
+            "x86_64-unknown-linux-gnu"
+            "x86_64-unknown-linux-musl"
+            "aarch64-unknown-linux-gnu"
+            "aarch64-unknown-linux-musl"
+            "aarch64-apple-darwin"
+            "x86_64-apple-darwin"
+            "x86_64-pc-windows-msvc"
+            "aarch64-pc-windows-msvc"
+          )
+
+          count_node_files() {
+            local dir="$1"
+            if [ ! -d "$dir" ]; then
+              echo 0
+              return 0
+            fi
+            find "$dir" -maxdepth 1 -name "*.node" | wc -l | tr -d ' '
+          }
+
           HTTP_COUNT=$(find napi-artifacts -name "*.node" -path "*/napi-http-*" 2>/dev/null | wc -l)
           WS_COUNT=$(find napi-artifacts -name "*.node" -path "*/napi-ws-*" 2>/dev/null | wc -l)
           echo "napi-http .node files: $HTTP_COUNT"
           echo "napi-ws .node files: $WS_COUNT"
-          if [ "$HTTP_COUNT" -eq 0 ] && [ "$WS_COUNT" -eq 0 ]; then
-            echo "::error::No .node artifacts found — all build jobs failed. Aborting publish."
+
+          missing=0
+          for target in "${targets[@]}"; do
+            http_files=$(count_node_files "napi-artifacts/napi-http-$target")
+            ws_files=$(count_node_files "napi-artifacts/napi-ws-$target")
+            if [ "$http_files" -ne 1 ]; then
+              echo "::error::Expected 1 napi-http .node artifact for $target, found $http_files"
+              missing=1
+            fi
+            if [ "$ws_files" -ne 1 ]; then
+              echo "::error::Expected 1 napi-ws .node artifact for $target, found $ws_files"
+              missing=1
+            fi
+          done
+
+          if [ "$missing" -ne 0 ]; then
             exit 1
           fi
 
@@ -307,25 +342,48 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: packages -> target
-      # Publish in dependency order (tolerate already-published versions)
-      - name: Publish catcher-core
-        run: cd packages/catcher-core && cargo publish || true
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-      - name: Publish catcher-http
-        run: cd packages/catcher-http && cargo publish || true
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-      - name: Publish catcher-ws
-        run: cd packages/catcher-ws && cargo publish || true
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-      - name: Publish catcher-ffi
-        run: cd packages/catcher-ffi && cargo publish || true
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-      - name: Publish catcher-uniffi
-        run: cd packages/catcher-uniffi && cargo publish || true
+      - name: Publish Rust crates
+        working-directory: packages
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          publish_crate() {
+            local crate_dir="$1"
+            local attempts=5
+
+            for attempt in $(seq 1 "$attempts"); do
+              echo "Publishing $crate_dir (attempt $attempt/$attempts)"
+              set +e
+              output=$(cd "$crate_dir" && cargo publish 2>&1)
+              status=$?
+              set -e
+              echo "$output"
+
+              if [ "$status" -eq 0 ]; then
+                return 0
+              fi
+
+              if echo "$output" | grep -Eiq "already (uploaded|exists)|crate version .* is already uploaded"; then
+                echo "$crate_dir is already published; continuing."
+                return 0
+              fi
+
+              if [ "$attempt" -lt "$attempts" ]; then
+                echo "Publish failed; waiting for crates.io index before retrying."
+                sleep 60
+              else
+                return "$status"
+              fi
+            done
+          }
+
+          publish_crate catcher-core
+          publish_crate catcher-dns
+          publish_crate catcher-http
+          publish_crate catcher-ws
+          publish_crate catcher-ffi
+          publish_crate catcher-uniffi
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 

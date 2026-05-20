@@ -1,4 +1,5 @@
 use catcher_core::types::default_true;
+pub use catcher_dns::DnsConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -26,7 +27,8 @@ impl WsEvent {
                     "type": "Message",
                     "data_base64": data_b64,
                     "is_binary": is_binary,
-                }).to_string()
+                })
+                .to_string()
             }
             _ => serde_json::to_string(self).unwrap_or_default(),
         }
@@ -163,6 +165,14 @@ pub struct WsClientConfig {
     /// 同时竞速的端点数
     #[serde(alias = "raceCount", default = "default_race_count")]
     pub race_count: u32,
+
+    /// 启用 msgpack 编解码 — send 自动 JSON→msgpack, receive 自动 msgpack→JSON
+    #[serde(default)]
+    pub msgpack: bool,
+
+    /// DNS 配置
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dns: Option<DnsConfig>,
 }
 
 fn default_deflate_threshold() -> u32 {
@@ -191,6 +201,8 @@ impl Default for WsClientConfig {
             reconnect: None,
             heartbeat: None,
             race_count: default_race_count(),
+            msgpack: false,
+            dns: None,
         }
     }
 }
