@@ -1,3 +1,10 @@
+## 0.3.10
+
+### Packaging
+
+- Bump the Flutter package to `0.3.10` to keep it aligned with the fresh npm and Rust release.
+- Rebuild the native bundles through the full release workflow.
+
 ## 0.3.9
 
 ### New features

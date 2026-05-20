@@ -1,6 +1,6 @@
 # catcher 架构文档总索引
 
-> v0.3.8 — 按协议分层，Rust / TS / napi-rs / Dart 四层统一拆分
+> v0.3.10 — 按协议分层，Rust / TS / napi-rs / Dart 四层统一拆分
 > 代码位置：`packages/`
 
 ---
@@ -27,7 +27,7 @@ catcher 是一个跨平台网络韧性库，覆盖 HTTP、WebSocket、Codec 三�
 
 | 文档 | 内容 |
 |------|------|
-| [`arch-rs/`](./arch-rs/) | Rust workspace 架构（4 个 lib crate + 1 个 cdylib + 2 个 napi-rs + 1 个 uniffi） |
+| [`arch-rs/`](./arch-rs/) | Rust workspace 架构（5 个 lib crate + 1 个 cdylib + 2 个 napi-rs + 1 个 uniffi） |
 | [`arch-ts/`](./arch-ts/) | TypeScript 包架构（5 个 npm 包） |
 | [`research/`](./research/) | 调研与决策分析 |
 
