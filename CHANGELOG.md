@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file. See [release-please](https://github.com/googleapis/release-please) for automated management.
 
-## 0.3.10 (2026-05-20)
+## 0.3.11 (2026-05-20)
 
 ### ✨ Features
 
@@ -15,6 +15,13 @@ All notable changes to this project will be documented in this file. See [releas
 ### 🔄 Dependencies
 
 - Replaced runtime `tokio-tungstenite` usage in `catcher-ws` with `yawc`; `tokio-tungstenite` remains only as a test dependency for local WebSocket server fixtures.
+
+## 0.3.10 (2026-05-20)
+
+### 📝 Documentation / Packaging
+
+- Bump all packages to `0.3.10` so npm, crates.io, pub.dev, and native NAPI packages can be rebuilt and published from one clean release run.
+- Repackage the NAPI platform packages and main NAPI packages under a fresh patch version after the `0.3.9` npm publish was blocked by npm token authentication.
 
 ## 0.3.9 (2026-05-20)
 

@@ -24,7 +24,7 @@ Resilient HTTP client for the [catcher](https://github.com/eric8810/catcher) too
 
 ```toml
 [dependencies]
-catcher-http = { version = "0.3.9", default-features = true }
+catcher-http = { version = "0.3.11", default-features = true }
 ```
 
 ### Basic HTTP request

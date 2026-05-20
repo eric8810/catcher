@@ -1,4 +1,4 @@
-## 0.3.10
+## 0.3.11
 
 ### New features
 
@@ -10,7 +10,14 @@
 
 ### Packaging
 
-- Refresh bundled native Rust dependency versions for the 0.3.10 release.
+- Refresh bundled native Rust dependency versions for the 0.3.11 release.
+
+## 0.3.10
+
+### Packaging
+
+- Bump the Flutter package to `0.3.10` to keep it aligned with the fresh npm and Rust release.
+- Rebuild the native bundles through the full release workflow.
 
 ## 0.3.9
 
