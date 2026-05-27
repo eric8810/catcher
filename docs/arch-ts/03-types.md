@@ -1,6 +1,6 @@
 # 03 — 类型系统
 
-> 对应源文件：`src/types.ts`（120 行）
+> 对应源文件：`src/types.ts`（443 行）
 
 ## SharedAgentOptions — Agent 配置
 

@@ -68,26 +68,55 @@ pub enum ErrorCategory {
 impl CatcherError {
     pub fn category(&self) -> ErrorCategory {
         match self {
+            // ── 超时 + WS 断开 + CB 拒绝 → 可重试 ──
             CatcherError::ConnectionTimeout(_)
             | CatcherError::RequestTimeout(_)
-            | CatcherError::TlsError(_)
-            | CatcherError::DnsError { .. }
+            | CatcherError::WsHandshakeTimeout(_)
             | CatcherError::WsDisconnected { .. }
             | CatcherError::WsAllEndpointsFailed { .. }
             | CatcherError::CircuitBreakerOpen => ErrorCategory::Retryable,
 
-            CatcherError::HttpError { status, .. } => {
-                if *status >= 500 { ErrorCategory::Retryable }
-                else              { ErrorCategory::NonRetryable }
+            // ── TLS: 区分握手超时（可重试）和证书错误（不可重试）──
+            CatcherError::TlsError(msg) => {
+                let msg_lower = msg.to_lowercase();
+                if msg_lower.contains("certificate")
+                    || msg_lower.contains("cert")
+                    || msg_lower.contains("expired")
+                    || msg_lower.contains("mismatch")
+                    || msg_lower.contains("unknown issuer")
+                    || msg_lower.contains("self signed")
+                {
+                    ErrorCategory::NonRetryable
+                } else {
+                    ErrorCategory::Retryable
+                }
             }
 
+            // ── DNS: 区分 NXDOMAIN（不可重试）和 SERVFAIL/超时（可重试）──
+            CatcherError::DnsError { reason, .. } => {
+                if reason.to_lowercase().contains("nxdomain") {
+                    ErrorCategory::NonRetryable
+                } else {
+                    ErrorCategory::Retryable
+                }
+            }
+
+            // ── HTTP: 408/429/5xx 可重试，其他 4xx 不可重试 ──
+            CatcherError::HttpError { status, .. } => {
+                if *status == 408 || *status == 429 || *status >= 500 {
+                    ErrorCategory::Retryable
+                } else {
+                    ErrorCategory::NonRetryable
+                }
+            }
+
+            // ── 永久性错误 → 不可重试 ──
             CatcherError::RetryExhausted { .. }
             | CatcherError::QueueTimeout(_)
             | CatcherError::EncodeError(_)
             | CatcherError::DecodeError(_)
             | CatcherError::InvalidConfig(_)
-            | CatcherError::Internal(_)
-            | CatcherError::WsHandshakeTimeout(_) => ErrorCategory::NonRetryable,
+            | CatcherError::Internal(_) => ErrorCategory::NonRetryable,
         }
     }
 }
@@ -292,53 +321,87 @@ pub struct DeflateConfig {
 
 ```rust
 use serde::{Deserialize, Serialize};
-use crate::error::ErrorCategory;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+/// 退避策略种类
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum BackoffKind {
+    /// 固定延迟
     Fixed,
+    /// 指数退避 (delay * 2^attempt)
     Exponential,
+    /// 去相关抖动退避 (decorrelated jitter) — 推荐默认策略
+    /// 参考: AWS Builder's Library + Google SRE + 学术 SLR 一致结论
+    #[default]
     DecorrelatedJitter,
 }
 
+/// 重试配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RetryConfig {
+    /// 最大重试次数（默认 3）
     pub max_attempts: u32,
+
+    /// 退避策略（默认 DecorrelatedJitter）
     pub backoff: BackoffKind,
+
+    /// 最小退避延迟（毫秒，默认 100）
     pub min_backoff_ms: u64,
+
+    /// 最大退避延迟（毫秒，默认 10,000）
     pub max_backoff_ms: u64,
+
+    /// 是否添加抖动 jitter（默认 true）
     pub jitter: bool,
-    pub retry_on_status: Vec<u16>,
-    pub retry_on_category: Vec<ErrorCategory>,
 }
 
 impl Default for RetryConfig {
     fn default() -> Self {
         Self {
             max_attempts: 3,
-            backoff: BackoffKind::Exponential,
-            min_backoff_ms: 500,
-            max_backoff_ms: 30_000,
+            backoff: BackoffKind::default(),   // DecorrelatedJitter
+            min_backoff_ms: 100,
+            max_backoff_ms: 10_000,
             jitter: true,
-            retry_on_status: vec![],
-            retry_on_category: vec![],
         }
     }
 }
 
+/// 熔断器配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CircuitBreakerConfig {
+    /// 连续失败多少次触发熔断（默认 5）
     pub failure_threshold: u32,
+
+    /// HALF_OPEN 状态下连续成功多少次恢复（默认 2）
     pub success_threshold: u32,
+
+    /// 熔断后多久进入 HALF_OPEN（毫秒，默认 30,000）
     pub reset_timeout_ms: u64,
+
+    /// HALF_OPEN 期间允许的最大试探请求数（默认 5）
     pub half_open_max_requests: u32,
 }
 
 impl Default for CircuitBreakerConfig {
     fn default() -> Self {
-        Self { failure_threshold: 5, success_threshold: 2, reset_timeout_ms: 30_000, half_open_max_requests: 3 }
+        Self {
+            failure_threshold: 5,
+            success_threshold: 2,
+            reset_timeout_ms: 30_000,
+            half_open_max_requests: 5,
+        }
     }
+}
+
+/// 熔断器状态
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CbState {
+    /// 正常状态，请求通过
+    Closed,
+    /// 熔断状态，请求被拒绝
+    Open,
+    /// 半开状态，试探性放行少量请求
+    HalfOpen,
 }
 ```
 

@@ -1,22 +1,22 @@
 # 05 — 韧性层
 
-> 对应源文件：`src/resilience/`
+> 对应源文件：`catcher-http/src/resilience/retry.rs`、`circuit_breaker.rs`
+> 更新于 2026-05 — v3 调研闭环后同步实际实现
 
 ---
 
-## RetryScheduler (`src/resilience/retry.rs`)
+## RetryScheduler (`catcher-http/src/resilience/retry.rs`)
 
-> **适用范围**：此函数用于**非 HTTP 场景**（WebSocket 连接重试、DNS 解析重试等）。
-> HTTP 路径的重试由 `reqwest-retry` 中间件在 Transport 层处理（见 04-transport）。
-> 两者互补，不可混用。
+> 依赖 `backon` crate 提供退避策略（ConstantBuilder / ExponentialBuilder）。
+> 按 `BackoffKind` 分三路分支：Fixed / Exponential / DecorrelatedJitter。
 
 ```rust
-use backon::{Retryable, ExponentialBuilder, ConstantBuilder};
+use catcher_core::{CatcherError, ErrorCategory};
+use catcher_core::types::resilience::{BackoffKind, RetryConfig};
+use backon::{ConstantBuilder, ExponentialBuilder, Retryable};
+use std::cell::Cell;
 use std::time::Duration;
-use crate::error::{CatcherError, ErrorCategory};
-use crate::types::resilience::*;
 
-/// 对异步操作执行重试，带指数退避 + jitter
 pub async fn retry_with_backoff<T, F, Fut>(
     config: &RetryConfig,
     mut operation: F,
@@ -27,52 +27,62 @@ where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = Result<T, CatcherError>>,
 {
-    let mut attempt = 0u32;
-
-    let backoff = match config.backoff {
-        BackoffKind::Fixed => {
-            let dur = Duration::from_millis(config.min_backoff_ms);
-            // Use ConstantBuilder with fixed delay
-            let mut builder = ConstantBuilder::default();
-            builder.with_delay(dur);
-            // Wrap in same interface: we use ExponentialBuilder with factor=1 for fixed
-            ExponentialBuilder::default()
-                .with_min_delay(dur)
-                .with_max_delay(dur)
-                .with_factor(1.0)
-        }
-        BackoffKind::Exponential => {
-            ExponentialBuilder::default()
-                .with_min_delay(Duration::from_millis(config.min_backoff_ms))
-                .with_max_delay(Duration::from_millis(config.max_backoff_ms))
-                .with_factor(2.0)
-        }
-        BackoffKind::DecorrelatedJitter => {
-            ExponentialBuilder::default()
-                .with_min_delay(Duration::from_millis(config.min_backoff_ms))
-                .with_max_delay(Duration::from_millis(config.max_backoff_ms))
-                .with_jitter()
-        }
-    };
+    let max_attempts = config.max_attempts;
+    let min_delay = Duration::from_millis(config.min_backoff_ms);
+    let max_delay = Duration::from_millis(config.max_backoff_ms);
+    let attempt = Cell::new(0u32);
 
     let action = || {
-        attempt += 1;
+        let a = attempt.get() + 1;
+        attempt.set(a);
         operation()
     };
 
-    let result = action
-        .retry(backoff)
-        .when(|e: &CatcherError| {
-            let should = e.category() == ErrorCategory::Retryable
-                && retry_if(e)
-                && attempt <= config.max_attempts;
-            if should {
-                on_retry(attempt, e);
-            }
-            should
-        })
-        .sleep(tokio::time::sleep)
-        .await;
+    let result = match config.backoff {
+        BackoffKind::Fixed => {
+            let backoff = ConstantBuilder::default().with_delay(min_delay);
+            action.retry(backoff)
+                .when(|e: &CatcherError| {
+                    let a = attempt.get();
+                    let should = e.category() == ErrorCategory::Retryable
+                        && retry_if(e) && a < max_attempts;
+                    if should { on_retry(a, e); }
+                    should
+                })
+                .sleep(tokio::time::sleep).await
+        }
+        BackoffKind::Exponential => {
+            let backoff = ExponentialBuilder::default()
+                .with_min_delay(min_delay)
+                .with_max_delay(max_delay)
+                .with_factor(2.0);
+            action.retry(backoff)
+                .when(|e: &CatcherError| {
+                    let a = attempt.get();
+                    let should = e.category() == ErrorCategory::Retryable
+                        && retry_if(e) && a < max_attempts;
+                    if should { on_retry(a, e); }
+                    should
+                })
+                .sleep(tokio::time::sleep).await
+        }
+        BackoffKind::DecorrelatedJitter => {
+            let backoff = ExponentialBuilder::default()
+                .with_min_delay(min_delay)
+                .with_max_delay(max_delay)
+                .with_factor(2.0)
+                .with_jitter();
+            action.retry(backoff)
+                .when(|e: &CatcherError| {
+                    let a = attempt.get();
+                    let should = e.category() == ErrorCategory::Retryable
+                        && retry_if(e) && a < max_attempts;
+                    if should { on_retry(a, e); }
+                    should
+                })
+                .sleep(tokio::time::sleep).await
+        }
+    };
 
     result.map_err(|e| CatcherError::RetryExhausted {
         attempts: config.max_attempts,
@@ -81,57 +91,89 @@ where
 }
 ```
 
+### 设计要点
+
+| 要点 | 说明 |
+|------|------|
+| **Cell<u32> 计数** | 使用 `std::cell::Cell` 而非局部变量 mut borrow，使 `action` 闭包可多次调用 |
+| **attempt < max_attempts** | max_attempts=3 意味着最多 3 次尝试（1 次原始 + 2 次重试） |
+| **category() 预过滤** | 只在 `Retryable` 时才检查 `retry_if`，NonRetryable 错误不会进入重试判断 |
+| **DecorrelatedJitter** | 默认策略。`ExponentialBuilder.with_jitter()` 提供 decorrelated jitter |
+
 ---
 
-## CircuitBreaker (`src/resilience/circuit_breaker.rs`)
+## CircuitBreaker (`catcher-http/src/resilience/circuit_breaker.rs`)
+
+> 自研实现，不依赖外部 CB crate。手写状态机 + `parking_lot::Mutex` + Atomic 计数器。
 
 ```rust
-use circuitbreaker_rs::{CircuitBreaker as Cb, CircuitBreakerBuilder};
-use std::time::Duration;
-use crate::error::CatcherError;
-use crate::types::resilience::CircuitBreakerConfig;
+use catcher_core::CatcherError;
+use catcher_core::types::resilience::{CbState, CircuitBreakerConfig};
+use parking_lot::Mutex;
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CbState {
-    Closed,
-    Open,
-    HalfOpen,
-}
-
-/// 熔断器包装：circuitbreaker-rs + 状态查询
+/// 熔断器状态机
+///
+/// 状态迁移：
+/// CLOSED    ──(consecutive_failures >= threshold)──▶ OPEN
+/// OPEN      ──(after reset_timeout)────────────────▶ HALF_OPEN
+/// HALF_OPEN ──(consecutive_success >= threshold)────▶ CLOSED
+/// HALF_OPEN ──(any failure)─────────────────────────▶ OPEN
 pub struct CircuitBreaker {
-    inner: Cb,
     config: CircuitBreakerConfig,
+    state: Mutex<CbState>,
+    failure_count: AtomicU32,
+    success_count: AtomicU32,
+    opened_at_ms: AtomicU64,
+    half_open_requests: AtomicU32,
 }
 
 impl CircuitBreaker {
     pub fn new(config: CircuitBreakerConfig) -> Self {
-        let inner = CircuitBreakerBuilder::new()
-            .failure_threshold(config.failure_threshold as u64)
-            .success_threshold(config.success_threshold as u64)
-            .half_open_timeout(Duration::from_millis(config.reset_timeout_ms))
-            .build();
-        Self { inner, config }
+        Self {
+            config,
+            state: Mutex::new(CbState::Closed),
+            failure_count: AtomicU32::new(0),
+            success_count: AtomicU32::new(0),
+            opened_at_ms: AtomicU64::new(0),
+            half_open_requests: AtomicU32::new(0),
+        }
     }
 
-    /// 受熔断器保护的异步操作
-    pub async fn call<T, F, Fut>(&self, operation: F) -> Result<T, CatcherError>
-    where
-        F: FnOnce() -> Fut,
-        Fut: std::future::Future<Output = Result<T, CatcherError>>,
-    {
-        self.inner.call(|| operation()).await.map_err(|e| {
-            match e.downcast::<CatcherError>() {
-                Ok(ce) => *ce,
-                Err(other) => {
-                    // If CB itself rejects (OPEN state), return CircuitBreakerOpen
-                    CatcherError::CircuitBreakerOpen
-                }
-            }
-        })
-    }
+    /// 请求前检查：返回 Err(CircuitBreakerOpen) 如果熔断
+    pub fn before_request(&self) -> Result<(), CatcherError> { ... }
+    /// 请求成功后调用
+    pub fn on_success(&self) { ... }
+    /// 请求失败后调用
+    pub fn on_failure(&self) { ... }
+    /// 当前状态（用于 metrics）
+    pub fn state(&self) -> CbState { ... }
+    /// 强制重置到 CLOSED 状态
+    pub fn reset(&self) { ... }
 }
 ```
+
+### 使用模式（与 `retry_with_backoff` 配合）
+
+```rust
+// 1. 请求前检查
+cb.before_request()?;
+
+// 2. 执行请求
+let result = retry_with_backoff(&retry_config, || do_request(), ...).await;
+
+// 3. 上报结果（请求级别的成败，不是单次尝试）
+match &result {
+    Ok(_) => cb.on_success(),
+    Err(_) => cb.on_failure(),
+}
+```
+
+### 并发安全
+
+- `state` 使用 `parking_lot::Mutex`（同步锁），临界区极短（~几十 ns）
+- `AtomicU32`/`AtomicU64` 统计计数器用 `Relaxed` 排序（纯统计，无 synchronizes-with 关系）
 
 ---
 
