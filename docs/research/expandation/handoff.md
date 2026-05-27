@@ -93,11 +93,16 @@ docs/
 
 ### 3.3 最重要的 5 个发现（TL;DR）
 
-1. **HTTP 408 应重试** — `ErrorCategory` 将所有 4xx 判为 NonRetryable，但 408 是 keepalive race 的正常信号
-2. **msgpack 无输入限制** — 恶意数据包可 OOM 或栈溢出，需加 `max_unpack_size` 和 `max_depth`
-3. **header value 无 CRLF 过滤** — 可能被注入构造 HTTP Response Splitting
+1. **HTTP 408 应重试** — `ErrorCategory` 将所有 4xx 判为 NonRetryable，但 408 是 keepalive race 的正常信号（已验证：`error.rs:82-88`）
+2. **msgpack 无输入限制** — 恶意数据包可 OOM 或栈溢出，需加 `max_unpack_size` 和 `max_depth`（已验证：`codec.rs` 无任何限制）
+3. **header value 无 CRLF 过滤** — 可能被注入构造 HTTP Response Splitting（已验证：`http_client.rs` 无校验）
 4. **WS send 无背压** — 依赖 tokio-tungstenite 的已知缺陷，发送队列无限增长
 5. **CGNAT 空闲超时** — 默认 keepAlive 30s 在某些 ISP 下可能不够，需文档说明
+
+> **2025-07-21 验证更新**：
+> - SSE 跨 chunk UTF-8 在 TS 侧已有测试（S8），但 Rust `SseStream` 仍用 `String::from_utf8_lossy` 有 Bug。
+> - IPv6 host_mapping 代码已支持（`IpAddr::parse` 天然处理 IPv6），仅缺测试。
+> - msgpack codec 位于 `packages/catcher-ws/src/codec.rs`，非 `catcher-core`。
 
 ---
 
@@ -120,13 +125,14 @@ docs/
 
 按紧迫度排序的代码变更（详见 `00-summary.md` 第四节）：
 
-1. `catcher-core/src/error.rs` — 408 → Retryable
-2. `catcher-core/src/codec/msgpack.rs` — 增加 `max_unpack_size` / `max_depth`
-3. `catcher-http/src/transport/http_client.rs` — CRLF 过滤
-4. `catcher-ws/src/transport/ws_client.rs` — send backpressure
-5. `catcher-core/src/types/resilience.rs` — `RetryConfig.respect_retry_after`
-6. `catcher-http/src/transport/dns.rs` — IPv6 host_mapping
-7. `catcher-http/src/resilience/circuit_breaker.rs` — `min_failure_window_ms`
+1. `catcher-core/src/error.rs` — 408 → Retryable（1 行）
+2. `packages/catcher-ws/src/codec.rs` — 增加 `max_unpack_size` / `max_depth`（~20 行）
+3. `catcher-http/src/sse/stream.rs` — 字节级 buffering 替换 `String::from_utf8_lossy`（Rust 侧 Bug）
+4. `catcher-http/src/transport/http_client.rs` — CRLF 过滤
+5. `catcher-ws/src/transport/ws_client.rs` — send backpressure
+6. `catcher-core/src/types/resilience.rs` — `RetryConfig.respect_retry_after`
+7. ~~`catcher-http/src/transport/dns.rs` — IPv6 host_mapping~~（已支持，仅缺测试）
+8. `catcher-http/src/resilience/circuit_breaker.rs` — `min_failure_window_ms`
 
 ### 4.3 如果你想写测试用例
 

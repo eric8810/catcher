@@ -73,7 +73,9 @@ catcher 当前已支持 HTTP 代理和 SOCKS5 代理。但生产环境中代理�
 | **IPv6 链路本地地址** | ❌ | `fe80::` 地址，需指定 scope_id (interface index) |
 | **IPv6 地址中的 zone ID** | ❌ | `http://[fe80::1%eth0]:8080/` 格式解析 |
 
-**关键发现**：reqwest 0.13 使用 `hickory-resolver` 时支持 Happy Eyeballs，但 catcher 的自定义 `host_mapping` 目前可能不支持 IPv6 映射（`api.internal → ::1`）。
+**关键发现**：reqwest 0.13 使用 `hickory-resolver` 时支持 Happy Eyeballs，但 catcher 的自定义 `host_mapping` 对 IPv6 的支持需要验证。
+
+> **2025-07-21 验证**：`dns.rs:155` 使用 `IpAddr::parse(ip_str)` 解析映射值，`IpAddr` 枚举天然支持 IPv6（如 `::1`）。代码层面已就绪，但缺少 IPv6 host_mapping 的专项测试用例。
 
 ---
 
@@ -178,7 +180,7 @@ catcher 的 E2E 测试已覆盖 7 种预设网络条件（good→metro），以�
 
 1. **CGNAT 空闲超时** — keepAlive interval 应可配置并建议 < 60s
 2. **HTTP 407 Proxy Auth Required** — 需明确定义为非 retryable
-3. **IPv6-only 环境** — DNS host_mapping 需支持 IPv6 映射
+3. **IPv6-only 环境** — DNS host_mapping 代码已支持 IPv6（`IpAddr::parse`），需补充测试
 4. **LB idle timeout < client keepAlive** — 文档警告
 5. **代理返回非预期 Content-Type** — 不 panic，错误信息清晰
 6. **网络闪断时 CB 误触发** — CB 阈值需考虑网络闪断模式

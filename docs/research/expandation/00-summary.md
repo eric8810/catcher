@@ -1,6 +1,7 @@
 # 00 — 网络场景扩展调研汇总报告
 
 > 调研日期：2025-07-18
+> 代码验证日期：2025-07-21（逐项对照源码确认实现状态）
 > 覆盖 6 个维度，42+ 个细分场景领域
 > 各阶段详细报告：`01-protocols.md` ~ `06-security.md`
 
@@ -24,50 +25,55 @@
 
 ## 二、按严重度分级的关键发现
 
+> **验证标记说明**：
+> - ✅ 已确认不存在，需新增
+> - ⚠️ 部分已有防御但未测试
+> - 🔀 问题分裂：TS 侧已修复/Rust 侧仍有 Bug
+
 ### 🔴 高优先级（应立即产生测试用例或代码变更）：共 25 项
 
 #### 协议层面（来自阶段一）
 
-1. **HTTP 408 Request Timeout 应重试** — 当前所有 4xx 为 NonRetryable，但 408 是 keepalive race 信号。需修改 `ErrorCategory::category()` 将 408 归为 Retryable。
-2. **HTTP 429 Retry-After 支持** — retry 策略需读取 `Retry-After` header 并延迟重试。
-3. **WS 连接断开时 send() 不应无限排队** — 参考 tokio-tungstenite Issue #35，需增加 backpressure 或 max_pending_frames。
-4. **SSE 跨 chunk UTF-8 码点** — 3 字节字符被切在 chunk 边界时，需使用字节级 buffering 而非 `String::from_utf8_lossy`。
-5. **HTTP/2 GOAWAY 后重试** — 确保 GOAWAY 前已发送但未收到响应的请求被正确重试。
-6. **SSE BOM (U+FEFF) 处理** — 流开头 BOM 应被静默过滤。
-7. **重定向时 Authorization header 剥离** — 验证 reqwest 在跨域重定向时移除敏感 header。
-8. **多端点竞速 DNS 去重** — 多个端点解析到同一 IP 时应检测并去重。
+1. ✅ **HTTP 408 Request Timeout 应重试** — `error.rs:82-88`：当前所有 4xx 为 NonRetryable，无 408 特判。需修改 `ErrorCategory::category()`。
+2. ✅ **HTTP 429 Retry-After 支持** — 搜索 `429`/`RetryAfter`/`retry_after` 全仓零命中。retry 策略需读取 `Retry-After` header。
+3. ✅ **WS 连接断开时 send() 不应无限排队** — `ws_client.rs` 中无 `max_pending_frames`、无 `send_queue` 背压。参考 tokio-tungstenite Issue #35。
+4. 🔀 **SSE 跨 chunk UTF-8 码点** — **TS 侧已有测试**（`stream.test.ts` S8，用 `Uint8Array` 模拟跨 chunk "é"），但 **Rust 侧仍有 Bug**：`stream.rs:131` 使用 `String::from_utf8_lossy` 在码点被切时损坏字符。需改 Rust 实现为字节级 buffering。
+5. ✅ **HTTP/2 GOAWAY 后重试** — 确保 GOAWAY 前已发送但未收到响应的请求被正确重试。
+6. ✅ **SSE BOM (U+FEFF) 处理** — 搜索 `BOM`/`0xFEFF`/`byte.order.mark` 全仓零命中。流开头 BOM 应被静默过滤。
+7. ✅ **重定向时 Authorization header 剥离** — 无相关测试。需验证 reqwest 在跨域重定向时移除敏感 header。
+8. ✅ **多端点竞速 DNS 去重** — `ws_client.rs` 中无 IP 去重逻辑。多个端点解析到同一 IP 时应检测并去重。
 
 #### 网络环境（来自阶段二）
 
-9. **CGNAT 空闲超时** — keepAlive interval 默认 30s，需文档说明应配置为 < 60s 以兼容 CGNAT。
-10. **IPv6 host_mapping** — `host_mapping` 需支持 IPv6 地址映射。
-11. **LB idle timeout < client keepAlive** — 文档警告：需对齐客户端和服务端空闲超时。
-12. **代理返回非预期 Content-Type** — 代理返回 HTML 而非 JSON 时的错误信息需清晰。
-13. **网络闪断时 CB 误触发** — 短断连 (100-500ms) 不应触发 circuit breaker。
+9. ✅ **CGNAT 空闲超时** — keepAlive interval 默认 30s，需文档说明应配置为 < 60s 以兼容 CGNAT。
+10. ⚠️ **IPv6 host_mapping** — `dns.rs:155` 的 `IpAddr::parse(ip_str)` 理论上**已支持** `::1` 等 IPv6 地址（`IpAddr` 是 V4/V6 枚举），但无 IPv6 专项测试。降级为🟡（代码已就绪，缺测试）。
+11. ✅ **LB idle timeout < client keepAlive** — 文档警告：需对齐客户端和服务端空闲超时。
+12. ✅ **代理返回非预期 Content-Type** — `proxy.test.ts` P9 被 skip，无 Content-Type 校验测试。
+13. ✅ **网络闪断时 CB 误触发** — 搜索 `min_failure_window` 全仓零命中。短断连 (100-500ms) 不应触发 circuit breaker。
 
 #### 硬件与设备（来自阶段三）
 
-14. **ARM64 Linux/aarch64-unknown-linux-gnu CI** — musl build 未在 CI 中覆盖。
-15. **移动 OS 后台 SSE/WS 连接** — 需文档说明 iOS/Android 后台限制。
+14. ✅ **ARM64 Linux/aarch64-unknown-linux-gnu CI** — musl build 未在 CI 中覆盖。
+15. ✅ **移动 OS 后台 SSE/WS 连接** — 需文档说明 iOS/Android 后台限制。
 
 #### 软件环境（来自阶段四）
 
-16. **Alpine/musl DNS 差异** — DNS 超时和 `search domains` 行为与 glibc 不同。
-17. **WKWebView cookie 阻止** — `credentials: 'include'` 在 iOS WKWebView 可能被静默忽略。
+16. ✅ **Alpine/musl DNS 差异** — DNS 超时和 `search domains` 行为与 glibc 不同。
+17. ✅ **WKWebView cookie 阻止** — `credentials: 'include'` 在 iOS WKWebView 可能被静默忽略。
 
 #### 用户交互（来自阶段五）
 
-18. **双重 destroy 幂等性** — destroy 调用两次不应 panic 或 double-free。
-19. **429 限流风暴** — 所有请求同时收到 429 时不应同时重试（需全局抑制）。
-20. **重连与手动 close 竞态** — close 优先级必须高于 reconnect。
-21. **null 回调/参数在 FFI 边界** — 验证 `EventCallback` 为 null 时不调用。
+18. ✅ **双重 destroy 幂等性** — `http_ffi.rs` destroy 后 `Box::from_raw` 已释放内存，二次调用是 use-after-free。TS 侧 `shared-agent.test.ts` 中有 `agent.destroy()` 但未专门测试二次调用。
+19. ✅ **429 限流风暴** — 无全局限流状态机。所有请求同时收到 429 时不应同时重试。
+20. ✅ **重连与手动 close 竞态** — close 优先级必须高于 reconnect。
+21. ⚠️ **null 回调/参数在 FFI 边界** — FFI 入口均有 `is_null()` 检查，但未系统测试 `EventCallback` 为 null 时不调用。
 
 #### 安全（来自阶段六）
 
-22. **CRLF 注入检查** — header value 和 URL 参数中不应允许 `\r` `\n`。
-23. **msgpack `max_unpack_size`** — 防止恶意超大数据包 OOM。
-24. **msgpack 嵌套深度限制** — 防止栈溢出（深度 > 100 层）。
-25. **并发 FFI 调用线程安全** — 验证多线程同时调用 C ABI 函数的安全性。
+22. ✅ **CRLF 注入检查** — `http_client.rs` 中无 `\r`/`\n` 校验。header value 和 URL 参数需过滤。
+23. ✅ **msgpack `max_unpack_size`** — `codec.rs:11`：`rmp_serde::from_slice(data)` 无任何大小限制。防止恶意超大数据包 OOM。
+24. ✅ **msgpack 嵌套深度限制** — `codec.rs:23-70`：`rmpv_to_json` 无界递归，无深度检查。防止栈溢出（深度 > 100 层）。
+25. ✅ **并发 FFI 调用线程安全** — 无并发测试。验证多线程同时调用 C ABI 函数的安全性。
 
 ---
 
@@ -98,23 +104,25 @@
 
 ### 3.1 已有测试设计需补充的用例
 
-在现有 `arch-ts/11-http-tests.md`、`arch-ts/13-api-gap-tests.md` 基础上增加：
+在现有测试文件基础上增加：
 
-| 编号 | 类别 | 用例 | 严重度 |
-|:----:|------|------|:------:|
-| R14 | Retry | 408 Request Timeout 应重试 | 🔴 |
-| R15 | Retry | 429 读取 Retry-After header 延迟 | 🔴 |
-| R16 | Retry | 429 风暴全局抑制（同一 host 收到 429 后暂停所有请求） | 🔴 |
-| H20 | HTTP | 响应 Content-Type 非预期时不 panic | 🔴 |
-| H21 | HTTP | CRLF 注入 header value 被拒绝 | 🔴 |
-| H22 | HTTP | URL 中 CRLF 被过滤 | 🔴 |
-| C10 | CORS | WKWebView credentials include 文档说明 | 🟡 |
-| P10 | Proxy | 代理返回 HTML 时错误信息可读 | 🔴 |
-| P11 | Proxy | 代理认证失败 407 正确分类 | 🔴 |
-| ST7 | Stream | 大文件下载中途 cancel 后资源释放 | 🔴 |
-| DNS5 | DNS | IPv6 host_mapping 映射 | 🔴 |
-| DNS6 | DNS | 多 A 记录时第一个 IP 失败尝试其余 | 🟡 |
-| RD9 | Redirect | 跨域重定向 Authorization 剥离验证 | 🔴 |
+| 编号 | 类别 | 用例 | 严重度 | 验证 |
+|:----:|------|------|:------:|:----:|
+| R14 | Retry | 408 Request Timeout 应重试 | 🔴 | ✅ 需改 `error.rs` |
+| R15 | Retry | 429 读取 Retry-After header 延迟 | 🔴 | ✅ 需新增 TS+Rust |
+| R16 | Retry | 429 风暴全局抑制（同一 host 收到 429 后暂停所有请求） | 🔴 | ✅ 需新增 |
+| H20 | HTTP | 响应 Content-Type 非预期时不 panic | 🔴 | ✅ 需新增 |
+| H21 | HTTP | CRLF 注入 header value 被拒绝 | 🔴 | ✅ 需新增 |
+| H22 | HTTP | URL 中 CRLF 被过滤 | 🔴 | ✅ 需新增 |
+| C10 | CORS | WKWebView credentials include 文档说明 | 🟡 | — |
+| P10 | Proxy | 代理返回 HTML 时错误信息可读 | 🔴 | ✅ 需新增 |
+| P11 | Proxy | 代理认证失败 407 正确分类 | 🔴 | ✅ 需新增 |
+| ST7 | Stream | 大文件下载中途 cancel 后资源释放 | 🔴 | ✅ 需新增 |
+| DNS5 | DNS | IPv6 host_mapping 映射（代码已支持，缺测试） | 🟡 | ⚠️ 降级：`IpAddr::parse` 已支持 |
+| DNS6 | DNS | 多 A 记录时第一个 IP 失败尝试其余 | 🟡 | — |
+| RD9 | Redirect | 跨域重定向 Authorization 剥离验证 | 🔴 | ✅ 需新增 |
+| ST8 | SSE | **Rust** SSE 跨 chunk UTF-8 字节级 buffering（TS 侧已有测试） | 🔴 | 🔀 分裂：TS 已测/Rust 有 Bug |
+| ST9 | SSE | BOM (U+FEFF) 静默过滤 | 🔴 | ✅ 需新增 TS+Rust |
 
 ### 3.2 新增测试类别
 
@@ -137,13 +145,15 @@
 | FFI4 | 多线程并发调用 — 不 data race | 🔴 |
 | FFI5 | callback 单次触发 — 不 use-after-free | 🟡 |
 
-#### msgpack 安全测试（新增用例在 `src/codec/msgpack.rs`）
+#### msgpack 安全测试（新增用例在 `packages/catcher-ws/src/codec.rs` 的 `#[cfg(test)]`）
 
-| 编号 | 用例 | 严重度 |
-|:----:|------|:------:|
-| MP1 | unpack 超大数据包 — max_unpack_size 限制 | 🔴 |
-| MP2 | unpack 深度嵌套 (>100 层) — 拒绝或截断 | 🔴 |
-| MP3 | unpack ext 类型 — 正确处理 | 🟡 |
+> **注意**：msgpack codec 实际位于 `packages/catcher-ws/src/codec.rs`，非 `catcher-core`。
+
+| 编号 | 用例 | 严重度 | 验证 |
+|:----:|------|:------:|:----:|
+| MP1 | unpack 超大数据包 — max_unpack_size 限制 | 🔴 | ✅ 当前无限制 |
+| MP2 | unpack 深度嵌套 (>100 层) — 拒绝或截断 | 🔴 | ✅ `rmpv_to_json` 无界递归 |
+| MP3 | unpack ext 类型 — 正确处理 | 🟡 | ⚠️ ext 被转为 u8 数组，缺专项测试 |
 
 #### 网络拓扑模拟测试（利用现有 NetworkProxy 扩展）
 
@@ -158,16 +168,16 @@
 
 ## 四、需要代码变更的关键项
 
-| 变更 | 影响文件 | 严重度 |
-|------|---------|:------:|
-| `ErrorCategory::category()` 将 HTTP 408 归为 Retryable | `catcher-core/src/error.rs` | 🔴 |
-| RetryConfig 增加 `respect_retry_after: bool` 字段 | `catcher-core/src/types/resilience.rs` | 🔴 |
-| WS send 增加 `max_pending_frames` 限制 | `catcher-ws/src/transport/ws_client.rs` | 🔴 |
-| SSE chunk buffer 改用字节级 buffering (处理跨 chunk UTF-8) | `catcher-http/src/sse/` | 🔴 |
-| msgpack unpack 增加 `max_size` 和 `max_depth` 参数 | `catcher-core/src/codec/` | 🔴 |
-| host_mapping 支持 IPv6 地址 | `catcher-http/src/transport/dns.rs` | 🔴 |
-| Header value CRLF 过滤 | `catcher-http/src/transport/http_client.rs` | 🔴 |
-| CB 增加 `min_failure_window_ms` 防止闪断误触发 | `catcher-http/src/resilience/circuit_breaker.rs` | 🟡 |
+| 变更 | 影响文件 | 严重度 | 验证 |
+|------|---------|:------:|:----:|
+| `ErrorCategory::category()` 将 HTTP 408 归为 Retryable | `catcher-core/src/error.rs` | 🔴 | ✅ 1 行改动 |
+| RetryConfig 增加 `respect_retry_after: bool` 字段 | `catcher-core/src/types/resilience.rs` | 🔴 | ✅ 全仓零命中 |
+| WS send 增加 `max_pending_frames` 限制 | `catcher-ws/src/transport/ws_client.rs` | 🔴 | ✅ 无背压 |
+| **Rust** SSE chunk buffer 改用字节级 buffering | `catcher-http/src/sse/stream.rs` | 🔴 | 🔀 TS 已修，Rust 有 Bug |
+| msgpack unpack 增加 `max_size` 和 `max_depth` 参数 | `packages/catcher-ws/src/codec.rs` | 🔴 | ✅ 当前无限制 |
+| ~~host_mapping 支持 IPv6 地址~~ | ~~`catcher-http/src/transport/dns.rs`~~ | ~~🔴~~ | ⚠️ **已支持**：`IpAddr::parse` 天然处理 V6，仅缺测试 |
+| Header value CRLF 过滤 | `catcher-http/src/transport/http_client.rs` | 🔴 | ✅ 无校验 |
+| CB 增加 `min_failure_window_ms` 防止闪断误触发 | `catcher-http/src/resilience/circuit_breaker.rs` | 🟡 | ✅ 全仓零命中 |
 
 ---
 
@@ -216,14 +226,21 @@
 
 ## 八、结论
 
-本次调研通过 6 个维度、42+ 个细分领域，系统性地识别了 catcher 当前设计中未覆盖的** 25 个高优先级**和 **16 个中优先级**场景。
+本次调研通过 6 个维度、42+ 个细分领域，系统性地识别了 catcher 当前设计中未覆盖的** 23 个高优先级**和 **16 个中优先级**场景。
 
-最紧迫的行动项：
+> **2025-07-21 代码验证**：逐项对照源码确认了每个发现的实现状态。2 项在原报告中被高估：
+> - **IPv6 host_mapping** (#10)：`IpAddr::parse` 已天然支持 V6，仅缺测试，降级为🟡。
+> - **SSE 跨 chunk UTF-8** (#4)：TS 侧已有测试（S8），但 Rust 侧 `SseStream` 仍用 `String::from_utf8_lossy`，需修 Rust 实现。
+> 
+> 另外纠正了 msgpack codec 的实际路径（在 `catcher-ws/src/codec.rs` 而非 `catcher-core`）。
+
+最紧迫的行动项（按实际可行性排序）：
 
 1. **修改 HTTP 408 的重试分类** — 1 行代码变更，解决 keepalive race 的真实生产问题
-2. **增加 msgpack 输入大小和深度限制** — 防止 DoS 攻击
-3. **header value CRLF 过滤** — 防止 HTTP 注入
-4. **FFI 边界 null 安全** — 已有 ISSUE #14 的教训，需系统性加固
-5. **CGNAT/NAT 空闲超时文档** — 帮助用户正确配置 keepAlive interval
+2. **增加 msgpack 输入大小和深度限制** — 防止 DoS 攻击（`codec.rs` 当前无任何限制）
+3. **修复 Rust SSE 跨 chunk UTF-8** — `stream.rs` 用字节 buffer 替换 `String::from_utf8_lossy`
+4. **header value CRLF 过滤** — 防止 HTTP 注入
+5. **FFI 边界 null 安全测试** — FFI 入口已有 is_null 检查但缺系统性测试
+6. **CGNAT/NAT 空闲超时文档** — 帮助用户正确配置 keepAlive interval
 
 建议在下一轮迭代中优先修复 `🔴 高优先级` 的代码变更项，其余纳入测试 backlog。

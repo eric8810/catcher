@@ -142,7 +142,7 @@
 | 超长行 (>64KB) | 单行超大 JSON | ❌ | 可能需要可配置的 max_line_length |
 | UTF-8 非法序列 | 非 UTF-8 字节 | ⚠️ Issue #22 | 验证 UTF-8 lossy 行为 |
 | `\r`, `\r\n`, `\n` | 混合换行格式 | ✅ chunk buffer | 验证 Windows 格式 |
-| 跨 chunk 的 UTF-8 码点 | 3 字节字符被切在 chunk 边界 | ❌ | `String::from_utf8_lossy` 可能损坏字符 |
+| 跨 chunk 的 UTF-8 码点 | 3 字节字符被切在 chunk 边界 | 🔀 TS 已测 / Rust 有 Bug | **TS**：`stream.test.ts` S8 已用 `Uint8Array` 验证跨 chunk "é" 正确组装。<br>**Rust**：`stream.rs:131` 用 `String::from_utf8_lossy`，在码点边界仍会损坏字符。需改用字节级 buffering。 |
 | BOM (U+FEFF) | 流开头有 BOM | ❌ | 验证 BOM 是否被过滤 |
 
 ---
@@ -187,16 +187,16 @@
 
 ### 高优先级（可直接产生测试用例）
 
-1. **HTTP 408 应重试** — 当前 4xx 全部 NonRetryable，但 408 是 keepalive race 信号
-2. **HTTP 429 Retry-After** — retry 策略需支持读取 `Retry-After` header
+1. **HTTP 408 应重试** — 当前 4xx 全部 NonRetryable，但 408 是 keepalive race 信号（已验证：`error.rs:82-88`）
+2. **HTTP 429 Retry-After** — retry 策略需支持读取 `Retry-After` header（已验证：全仓零命中）
 3. **WS send 后立即 close** — 发送缓冲区未刷新时关闭的竞态
-4. **WS 连接断开时 send()** — 不应无限排队
-5. **SSE 跨 chunk UTF-8** — 多字节字符被切在 chunk 边界
+4. **WS 连接断开时 send()** — 不应无限排队（已验证：无 `max_pending_frames`）
+5. **Rust SSE 跨 chunk UTF-8** — `stream.rs` 用 `String::from_utf8_lossy` 在码点边界损坏字符（TS 侧已有测试 S8）
 6. **HTTP/2 GOAWAY 重试** — 确保 GOAWAY 前的请求被正确重试
-7. **SSE BOM 处理** — 流开头 BOM 字符过滤
+7. **SSE BOM 处理** — 流开头 BOM 字符过滤（已验证：全仓零命中）
 8. **重定向时 auth header 剥离** — 跨域重定向安全性验证
-9. **多端点竞速中 DNS 指向同一 IP** — 去重检测
-10. **超大 msgpack 嵌套深度** — 栈溢出防护
+9. **多端点竞速中 DNS 指向同一 IP** — 去重检测（已验证：无去重逻辑）
+10. **超大 msgpack 嵌套深度** — 栈溢出防护（已验证：`codec.rs` 中 `rmpv_to_json` 无界递归）
 
 ### 中优先级（文档或设计层面）
 
