@@ -1,0 +1,12 @@
+[package]
+name = "catcher-experiments"
+version = "0.1.0"
+edition = "2021"
+description = "独立实验 — 验证 Catcher 网络韧性调研中的定量假设"
+
+[dependencies]
+rand = "0.8"
+rand_distr = "0.4"
+
+[dev-dependencies]
+proptest = "1.0"

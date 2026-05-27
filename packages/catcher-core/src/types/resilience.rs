@@ -3,12 +3,13 @@ use serde::{Deserialize, Serialize};
 /// 退避策略种类
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum BackoffKind {
-    /// 固定延迟 (默认)
-    #[default]
+    /// 固定延迟
     Fixed,
     /// 指数退避 (delay * 2^attempt)
     Exponential,
-    /// 去相关抖动退避 (decorrelated jitter)
+    /// 去相关抖动退避 (decorrelated jitter) — 推荐默认策略
+    /// 参考: AWS Builder's Library + Google SRE + 学术 SLR 一致结论
+    #[default]
     DecorrelatedJitter,
 }
 

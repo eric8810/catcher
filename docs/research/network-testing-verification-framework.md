@@ -1,90 +1,159 @@
 # 网络条件标准、模拟方案与测试机制 — 完整调研框架
 
-> 创建日期：2026-07
-> 核心命题：catcher 的目标是为**绝大多数网络场景**提供最佳的韧性配置和托底方案。
-> 要达成这个目标，必须先回答：**业界到底有多少种网络条件？它们的权威标准是什么？业界用什么方式模拟和验证？**
+> 版本：v3 — 方法论重构（7 轮迭代闭环完成）
+> 创建日期：2025-07 | 重构日期：2026-05 | 最终闭环：2026-05
+> 
+> v3 重构要点：循环模型、故障本质分类、边界定义、Phase 0 发现机制
+>
+> 7 轮迭代产出：
+> - 49 项故障模式（Q0-Q2 全部可追溯，Q3 6/7 有方案，Q4 待代码落地）
+> - 7 个 P0 缺口全部完成标准溯源 + 实测数据对标
+> - 4 个被推翻的设计假设
+> - 竞品 9 Bug 模式 + 7 Postmortem 案例 + 7 极端场景推导
 
 ---
 
 ## 〇、核心逻辑链
 
+### 0.1 前置条件：定义物理边界
+
+在探索"网络世界有什么"之前，必须先回答一个更根本的问题：
+
+> **Catcher 作为应用层韧性库，物理上能感知什么、能改变什么？**
+
+只有在这个边界内的条件才是调研对象。边界外的条件虽然真实存在，但 Catcher 无法干预——调研它们只能帮助理解"为什么做不到"，不能转化为产品能力。
+
+这个边界决定了整个调研的范围和有效性。没有边界定义的调研会无休止地膨胀，最终失去聚焦。
+
+### 0.2 调研循环（非线性的、持续的）
+
 ```
-网络条件分类学              权威标准                  模拟方案                  测试机制
-(Condition Taxonomy)  →   (Industry Standards)  →  (Simulation Methods)  →  (Verification)
-
-  「真实世界有什么」        「谁定义的、参数从哪来」    「怎么在实验室复现」      「怎么证明复现有效」
+                    ┌────────────────────────────────────────────┐
+                    │     ←── 验证暴露新盲区，触发新一轮发现 ──←    │
+                    ▼                                            │
+  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐
+  │ ①发现    │  │ ②分类    │  │ ③溯源    │  │ ④模拟    │  │ ⑤验证    │
+  │          │  │          │  │          │  │          │  │          │
+  │ 未知的   │→│ 故障本质  │→│ 标准+实测 │→│ 可复现的  │→│ 可证明的  │
+  │ 未知     │  │ 正交矩阵  │  │ 数据交叉  │  │ 损伤注入  │  │ 效果度量  │
+  └──────────┘  └──────────┘  └──────────┘  └──────────┘  └──────────┘
+       ↑                                                             │
+       │         ┌──────────────────────────────────────────┐        │
+       └─────────│  ←── 验证结果推翻假设，修正分类体系 ──←  │←───────┘
+                 └──────────────────────────────────────────┘
 ```
 
-catcher 的每个 profile、每个损伤参数、每个测试场景，都应该能沿着这条链追溯到权威来源。
-当前状态：
+五个环节，各自有独立的**核心问题**和**方法论**：
 
-| 环节 | 现状 | 差距 |
-|------|------|------|
-| 条件分类学 | 分散在 6 份扩研报告中，未统一 | 缺系统性的分类体系 |
-| 权威标准 | 部分引用（Chrome DevTools / WebPageTest） | 大量参数无标准溯源，RTT/带宽/丢包取值靠"合理估计" |
-| 模拟方案 | proxy.ts 实现 12 种损伤 | 未对标行业工具，未做真实度校验 |
-| 测试机制 | S1-S16 + harness 对比 | 无法回答"模拟和真实差多少" |
+| 环节 | 核心问题 | 方法论 | 当前状态 |
+|------|---------|--------|---------|
+| **①发现** | 我们不知道什么？ | 跨行业方法论深层提取、postmortem 挖掘、竞品 bug 数据库分析、真实测量数据收集 | 仅 1 次探索性调研，无系统化机制 |
+| **②分类** | 如何组织已知的故障？ | 按故障本质（时间/完整度/可达性/身份/策略）为经，网络位置为纬，建立正交矩阵 | 当前按 OSI 层次分类，需翻转为故障优先 |
+| **③溯源** | 参数凭什么取这个值？ | 标准文档 + 真实测量数据的交叉验证，区分"设计目标"与"统计现实" | 有标准溯源，缺实测数据对标 |
+| **④模拟** | 如何在实验室可信复现？ | 工具功能对标 + 保真度校验（与真实链路的统计对比） | 有功能列表对标，缺保真度校验 |
+| **⑤验证** | 如何证明 Catcher 有效？ | 不变量验证 + 统计假设检验 + 因果模型预测 vs 实测 | 有基础测试，缺属性验证和因果模型 |
+
+### 0.3 关键区别
+
+这不是一次性的线性流程，而是一个**持续循环**。每轮验证都会暴露新的盲区，触发下一轮发现——分类随之修正，溯源随之更新。当前框架最大的问题是把它当成了线性流程：先分类、再溯源、再模拟、再验证。但正确的顺序是：**先发现（看看我们不知道什么），再分类（组织已知），然后溯源→模拟→验证，验证结果回到发现**。
 
 ---
 
-## 一、网络条件分类学（Condition Taxonomy）
+## 一、条件分类学（Condition Taxonomy）
 
-### 1.1 顶层分类框架
+### 1.1 前置：定义 Catcher 的物理边界
+
+在分类网络条件之前，必须先回答：**Catcher 能感知什么、能改变什么？**
 
 ```
-网络条件
-├── L1: 物理链路层
-│   ├── 有线接入 (DSL / Cable / Fiber / Ethernet / Powerline)
-│   ├── 无线蜂窝 (2G / 2.5G / 3G / 4G / 5G NSA / 5G SA)
-│   ├── 无线局域网 (WiFi a/b/g/n/ac/ax/be)
-│   ├── 卫星通信 (GEO / MEO / LEO)
-│   ├── LPWAN / IoT (LoRa / NB-IoT / LTE-M / Sigfox)
-│   └── 特殊链路 (蓝牙 PAN / 无人机图传 / 水下声学)
-│
-├── L2: 网络拓扑层
-│   ├── 局域网 (LAN / VLAN / SD-LAN)
-│   ├── 广域网 (WAN / SD-WAN / MPLS)
-│   ├── 隧道 (VPN / IPSec / WireGuard / SSH Tunnel)
-│   ├── 覆盖网络 (CDN / Edge / Mesh / P2P)
-│   └── 虚拟网络 (容器网络 / Service Mesh / VPC / Overlay)
-│
-├── L3: 中间件层
-│   ├── 代理 (Forward / Reverse / Transparent / SOCKS / PAC / WPAD)
-│   ├── 负载均衡 (L4 / L7 / DNS-based)
-│   ├── NAT (Full Cone / Restricted / Symmetric / CGNAT)
-│   ├── 防火墙 (Stateful / DPI / WAF / 协议白名单)
-│   └── 网关 (API Gateway / 协议转换 / TLS Termination)
-│
-├── L4: 协议行为层
-│   ├── TCP (拥塞控制变体 / KeepAlive / Selective ACK / ECN)
-│   ├── TLS (版本协商 / 证书链 / OCSP / 0-RTT)
-│   ├── DNS (递归/迭代 / EDNS / DNSSEC / DNS-over-TLS / DNS-over-HTTPS)
-│   ├── HTTP (1.0 / 1.1 / 2 / 3 / 版本协商 / GOAWAY)
-│   └── 应用协议 (WebSocket / SSE / gRPC / WebTransport / MQTT)
-│
-└── L5: 运行时环境层
-    ├── OS 网络栈 (Linux TCP stack / macOS Network.framework / Windows Winsock)
-    ├── 移动 OS (iOS 后台限制 / Android Doze / Data Saver)
-    ├── 浏览器引擎 (V8 fetch / WKWebView / Web Worker)
-    ├── 容器与编排 (Docker DNS 127.0.0.11 / K8s CNI / Service Mesh sidecar)
-    └── Serverless (Lambda / Workers / 连接池无意义)
+Catcher 的管辖范围：应用层能感知、能介入、能改变结果的
+
+  能做 ✅：
+    - 应用层超时检测与重试（TCP 连接建立之后的一切）
+    - 连接断开后重连（包括 IP 地址变更后的重建）
+    - 多端点竞速 / 故障转移
+    - Circuit breaker 熔断保护
+    - 退避策略控制（间隔、抖动、上限）
+
+  不能做 ❌：
+    - 改善 TCP 拥塞控制行为（内核态，Catcher 不可达）
+    - 加快 TCP 重传检测速度（同上）
+    - 修复 OS 网络栈 bug（超出范围）
+    - 绕过运营商限速 / 封锁（不可抗力）
+    - 在 iOS 后台维持长连接（物理约束）
+
+  模糊地带 ⚠️（需要逐个决策）：
+    - DNS 解析失败 → 应接管（已有）
+    - TLS 握手失败 → 应分类并选择性重试
+    - 代理认证失败 (407) → 应正确分类但不重试
+    - 省电模式导致断连 → 应快速检测并重连，但不保证不断
 ```
 
-### 1.2 各层级的关键退化模式
+**调研的边界规则**：一个条件是否纳入调研范围，取决于它是否落在"能做 ✅"或"模糊地带 ⚠️"内。落在"不能做 ❌"内的，不纳入调研——调研它们不能转化为产品能力。
 
-| 层级 | 退化类型 | 具体表现 | 对 catcher 的影响 |
-|------|---------|---------|------------------|
-| L1 物理 | 带宽受限 | 50bps (SMS) → 20Gbps (5G mmWave) | 1:400,000,000 的动态范围 |
-| L1 物理 | 延迟变化 | 0.1ms (LAN) → 1200ms (GEO 卫星) | 1:12,000 的动态范围 |
-| L1 物理 | 丢包模式 | 0.001% (光纤) → 30% (战场无线电) | 独立丢包 vs 突发丢包 vs 周期性丢包 |
-| L2 拓扑 | 路由黑洞 | 上游设备静默丢弃 | 无 RST，hang 到超时 |
-| L2 拓扑 | 非对称路由 | 去程/回程不同路径 | 一个方向丢包，另一个正常 |
-| L2 拓扑 | 间歇连通 | 网络 flapping | CB 状态机压力 |
-| L3 中间件 | 空闲超时 | LB/NAT/代理主动断开 | 僵尸连接 / keepAlive race |
-| L3 中间件 | 缓冲/改写 | 代理缓冲 chunked 响应 | SSE 阻塞 / Content-Type 被改 |
-| L4 协议 | 版本不匹配 | HTTP/2 协商失败 / TLS 降级 | 协议回退行为 |
-| L4 协议 | 实现 Bug | 特定 OS/设备的 TCP 栈缺陷 | 非标准行为需容错 |
-| L5 环境 | 资源限制 | CPU throttling / OOM / fd 耗尽 | 请求失败分类 |
+### 1.2 第一性分类：故障的本质维度（主分类轴）
+
+从"一个数据包从 A 到 B 到底有几种失败方式"出发，而非从"网络有几层"出发：
+
+```
+故障的根本维度（正交于任何网络层次）：
+
+1. 时间故障（Timing）
+   ├── 绝对延迟过高（GEO 卫星 600ms RTT）
+   ├── 延迟突变（WiFi 漫游中断 50-100ms）
+   ├── 延迟抖动（队列波动、无线衰落）
+   └── 延迟漂移（网络条件缓慢劣化）
+
+2. 完整度故障（Integrity）
+   ├── 丢失 — 独立丢包 / 突发丢包 / 周期性丢包
+   ├── 损坏 — bit flip、校验和错误
+   ├── 重复 — 中间设备重放
+   └── 乱序 — 多路径传输、队列重排
+
+3. 可达性故障（Reachability）
+   ├── 永远不可达 — DNS NXDOMAIN、IP 不可路由、端口未监听
+   ├── 暂时不可达 — 路由黑洞、conntrack 表满、中间设备静默丢弃
+   ├── 部分可达 — 非对称路由（去程通回程不通）、gray failure
+   └── 可达但不可用 — TCP 握手成功但应用层无响应
+
+4. 身份故障（Identity）
+   ├── 端点身份变更 — WiFi↔Cellular 切换 IP 变、DHCP 续租
+   ├── 凭证失效 — TLS 证书过期、Token 过期、Session 超时
+   └── 中间人介入 — 代理劫持、TLS MITM、 captive portal
+
+5. 策略故障（Policy）
+   ├── 速率限制 — HTTP 429、代理限流、运营商 QoS
+   ├── 访问控制 — HTTP 403/407、防火墙 ACL
+   ├── 资源配额 — 连接数上限、fd 耗尽、内存不足
+   └── 省电策略 — Android Doze、iOS 后台挂起、Data Saver
+```
+
+### 1.3 交叉定位：故障模式 × 网络位置（正交矩阵）
+
+以上五种故障模式是**经线**。网络位置是**纬线**（即原有 L1-L5 的层次结构，作为辅助定位）。调研产出应是一个**正交矩阵**而非一棵树：
+
+```
+              时间故障    完整度故障   可达性故障   身份故障    策略故障
+  L1 物理       ✓           ✓           ✓          —          —
+  L2 拓扑       ✓           —           ✓          —          —
+  L3 中间件     ✓           ✓           ✓          ✓          ✓
+  L4 协议       ✓           ✓           ✓          ✓          ✓
+  L5 运行环境   ✓           —           ✓          ✓          ✓
+```
+
+每个交叉格定义：该故障在该网络位置的典型表现、Catcher 能做什么、哪些有物理限制无法干预。
+
+### 1.4 各网络位置的关键退化模式（辅助参考）
+
+以下按网络位置（L1-L5）列出典型退化——**不作为主分类，仅作为交叉矩阵中"网络位置"轴的展开**：
+
+| 网络位置 | 典型退化 | 故障本质 | 对 Catcher 的影响 |
+|---------|---------|---------|------------------|
+| L1 物理 | 带宽 50bps→20Gbps、延迟 0.1ms→1200ms、丢包 0.001%→30% | 时间 + 完整度 | Catcher 只能在上层应对，无法改善物理层 |
+| L2 拓扑 | 路由黑洞（无 RST hang 到超时）、非对称路由、间歇连通 | 可达性 | CB 状态机压力；需区分"短暂中断"和"永久断开" |
+| L3 中间件 | NAT/CGNAT 空闲超时、代理缓冲 chunked、LB 主动断开 | 可达性 + 策略 | keepAlive 策略；SSE 企业兼容性 |
+| L4 协议 | HTTP/2 GOAWAY、TLS 降级、DNS SERVFAIL、keepAlive race | 身份 + 策略 | 错误分类和重试策略 |
+| L5 环境 | Android Doze、iOS 30s 后台、conntrack 满、CPU throttling | 策略 + 可达性 | 重连后状态恢复；不继承休眠期间的退避状态 |
 
 ---
 
@@ -285,123 +354,119 @@ catcher 当前覆盖：Layer 1-2 充分，Layer 3 缺失（无属性基测试）
 
 ## 五、调研路线图
 
-### Phase 1：标准溯源（优先级 🔴）
+> 路线图对应核心逻辑链的五个环节。Phase 0 是当前最大短板——没有系统化的"发现未知"机制，
+> 后续 Phase 1-4 都只在填补已知维度内的缺口。
 
-**目标**：catcher 的每个 profile 参数都有权威标准可追溯。
+### Phase 0：发现未知（优先级 🔴 最高 — 方法论建设）
 
-| 任务 | 产出 | 工作量 |
-|------|------|:------:|
-| **蜂窝网络标准溯源**：3GPP TS 45/25/36/38 系列中与 RTT、带宽、丢包相关的参数 | `docs/research/standards/cellular-3gpp.md` | 3 天 |
-| **WiFi 标准 + 特有损伤建模**：802.11 系列 + BSS Transition / DFS / 干扰模式 | `docs/research/standards/wifi-ieee80211.md` | 2 天 |
-| **卫星通信标准**：ITU-R + Starlink 实测数据 | `docs/research/standards/satellite-itu.md` | 1 天 |
-| **Profile 参数溯源表**：所有 14 个 profile 的每个数值标注标准来源 | 更新 `docs/test/02-profiles.md` | 1 天 |
+**目标**：建立系统化的"发现我们不知道的事"的机制，而非一次性探索。
 
-### Phase 2：模拟方案对标（优先级 🔴）
+| 任务 | 方法 | 产出 |
+|------|------|------|
+| **跨行业深层方法论提取** | 不只是对比"做了什么"，而是提取背后的**理论**——为什么游戏行业 2 个预设就够了？SRE 错误预算的数学基础是什么？ | 已产出 `exploratory/industry-methodology-survey.md`，需深化为理论提取 |
+| **Postmortem 系统挖掘** | 搜索 GitHub Issues / Hacker News / 生产事故报告中与"网络导致的失败"相关的案例；分类、统计频率、提取模式 | Postmortem 模式库 |
+| **竞品 Bug 数据库分析** | curl / chromium / OkHttp / reqwest 的 issue tracker 中标记为 network/timeout/retry/race 的 closed issues | 常见陷阱清单 |
+| **真实测量数据收集** | Cloudflare Radar / Google CrUX / OpenSignal 等平台的全球 RTT、丢包、带宽分布 | 实测数据对标基准 |
+| **物理约束推导** | 从第一性原理推导极限场景：WiFi + 蓝牙 + 微波炉干扰叠加的最坏情况？GEO 卫星 + CGNAT + iOS 后台的累积效应？ | 边界测试场景 |
 
-**目标**：知道 proxy.ts 和业界工具的差距，确定补强方向。
-
-| 任务 | 产出 | 工作量 |
-|------|------|:------:|
-| **tc netem 完整能力对标**：逐项对比 proxy.ts 和 netem 的损伤模型 | `docs/research/simulation/tc-netem-benchmark.md` | 2 天 |
-| **MahiMahi trace replay 调研**：评估引入真实网络 trace 回放的可行性 | `docs/research/simulation/trace-replay-feasibility.md` | 1 天 |
-| **ns-3 模型参考**：从中提取比 Markov 2-state 更真实但又不至于过重的模型 | `docs/research/simulation/ns3-models-reference.md` | 2 天 |
-| **Comcast / toxiproxy 对标**：看看 Go 生态的损伤代理有什么 proxy.ts 没做的 | `docs/research/simulation/industry-proxy-comparison.md` | 1 天 |
-
-### Phase 3：协议合规矩阵（优先级 🟡）
-
-**目标**：每个 RFC 中"客户端应该做什么"与 catcher 行为的对照。
-
-| 任务 | 产出 | 工作量 |
-|------|------|:------:|
-| **HTTP/1.1 合规**：RFC 7230-7235 客户端行为检查 | `docs/research/compliance/http11-rfc.md` | 2 天 |
-| **HTTP/2 合规**：RFC 7540 客户端行为检查 | `docs/research/compliance/http2-rfc.md` | 1 天 |
-| **WebSocket 合规**：RFC 6455 客户端行为检查 | `docs/research/compliance/ws-rfc.md` | 1 天 |
-| **SSE 合规**：WHATWG HTML Standard §9.2 | `docs/research/compliance/sse-whatwg.md` | 1 天 |
-
-### Phase 4：验证机制补齐（优先级 🟡 → 🟢）
-
-**目标**：引入属性基测试、统计验证、生产验证等新范式。
-
-| 任务 | 产出 | 工作量 |
-|------|------|:------:|
-| **PBT 原型（TS 层）**：用 fast-check 验证 retry/CB 的不变量 | PoC 代码 | 2 天 |
-| **统计功效分析**：确定 E2E 测试的最小迭代次数 | 分析报告 | 1 天 |
-| **SLO 定义**：catcher 库的 SLO（成功率/延迟/CB 恢复时间） | SLO 文档 | 1 天 |
-| **Flaky test 检测**：CI 中自动标记不稳定测试 | CI 脚本 | 1 天 |
-
-### Phase 5：缺失条件补充（优先级 🟢 长期）
-
-**目标**：补充“完全未覆盖”类型的网络条件。
-
-目前已知的完全未覆盖：
-
-| 缺失条件 | 所属层级 | 重要性 | 原因 |
-|---------|:------:|:------:|------|
-| TCP 拥塞控制交互 (CUBIC/BBR/Reno) | L4 协议 | 中 | proxy 无法模拟内核行为 |
-| WiFi BSS Transition (漫游中断 50-100ms) | L1 物理 | 中 | 短暂丢包与独立丢包不同 |
-| 5G NR / URLLC 超低延迟 | L1 物理 | 低 | 用户群小 |
-| LPWAN (LoRa / NB-IoT) | L1 物理 | 低 | IoT 场景，catcher 可能不适合 |
-| DNS over HTTPS / DNS over TLS | L4 协议 | 中 | 代理绕过场景 |
-| MTU 变化 (PPPoE / VPN / IPv6-in-IPv4) | L1 物理 | 中 | 分片问题 |
-| 容器 CNI 网络 (Calico/Cilium/Flannel) | L2 拓扑 | 低 | 对客户端透明 |
-| 企业 NTLM/Kerberos 代理认证 | L3 中间件 | 低 | 超出范围 |
-
----
-
-## 五、探索性调研路线图（未完待续）
-
-> 详细报告见 `exploratory/industry-methodology-survey.md`
-
-### 5.1 已完成探索
+**已有的探索成果**（见 `exploratory/industry-methodology-survey.md`）：
 
 | 方向 | 关键发现 | 对 Catcher 的影响 |
 |------|---------|-----------------|
-| 🎮 **游戏引擎** (Unreal/Unity/Godot) | 引擎内置 Network Emulation, 2-3 个预设够用, 按平台分类 | 双分类法 (技术+场景), 预设精简 |
-| 🔥 **混沌工程** (Netflix/Shopify) | 40.9% 实验是网络故障, Toxiproxy/Chaos Mesh 主流, 应用层注入仅 3% | Catcher 填补的就是这 3% |
-| 📐 **Google SRE** | 测试分级 + Zero MTTR bugs + 测试与 MTBF 数学关系 | SLO 定义方法论 |
-| 📡 **电信设备** (Keysight/Spirent) | 确定性损伤 + RFC 2544 全参数 | proxy.ts 对标基准 |
-| 💰 **金融交易** | <1μs HFT, FIX over TCP | Catcher 不覆盖 |
-| 🌐 **IoT/LPWAN** | 极高丢包容忍 (30%+), 省电优先 | 不同韧性语义 |
+| 🎮 游戏引擎 (Unreal/Unity/Godot) | 引擎内置 Network Emulation，2-3 个预设够用，按平台分类 | 双分类法 (技术+场景)，预设精简 |
+| 🔥 混沌工程 (Netflix/Shopify) | 40.9% 实验是网络故障，应用层注入仅 3% | Catcher 填补的就是这 3% |
+| 📐 Google SRE | 测试分级 + Zero MTTR bugs + 错误预算理论 | SLO 定义方法论 |
+| 📡 电信设备 (Keysight/Spirent) | 确定性损伤 + RFC 2544 全参数 | proxy.ts 对标基准 |
 
-### 5.2 颠覆性发现
+**颠覆性发现**：
+- Presets 应该少而精（游戏行业 2 个预设就够了）—— 挑战 Catcher 的 14 个 Profile 设计
+- 按使用场景分类比按技术分类更重要 —— 挑战按 3GPP/WiFi 分类的根本假设
+- 游戏行业不测带宽 —— 某些参数对特定场景是噪音
+- 不同行业的"韧性"定义互相冲突 —— 通用 Profile 体系需要按应用类型分化
 
-1. **Presets 应该少而精**: 游戏行业用 2 个预设解决问题, Catcher 的 14 个是过度设计了
-2. **按使用场景分类比按技术分类更重要**: "移动端弱网"比 "gprs profile" 对开发者更有用
-3. **动态条件变化是标配**: Unreal/Unity/Godot 都支持在测试过程中改变条件, Catcher 的 `setConditions()` 已支持但缺测试场景
-4. **PktIncomingLoss (接收方向单独丢包)** 是 Catcher 缺失的关键参数
-5. **游戏行业不测带宽** — Catcher 的 `bandwidth` 对某些场景是噪音
+### Phase 1：边界定义与故障分类（优先级 🔴）
 
-### 5.3 待探索方向
+**目标**：明确 Catcher 负责什么、不负责什么，按故障本质（非网络层次）建立正交分类矩阵。
 
-| 方向 | 关键问题 |
-|------|---------|
-| 流媒体行业 (Netflix/YouTube) | 自适应码率的网络测试方法论 |
-| 车联网 (V2X) | 3GPP TS 22.186, 低延迟 + 高移动性 |
-| 工业自动化 (TSN/OPC-UA) | IEEE 802.1 TSN 确定延迟要求 |
-| eHealth/远程手术 | ITU-T Y.4110 系列, 超低延迟 + 极高可靠性 |
-| 航天/深空通信 | DTN (Delay-Tolerant Networking), RFC 4838 |
+| 任务 | 产出 |
+|------|------|
+| **Catcher 物理边界文档化**：列出所有"能做 / 不能做 / 模糊地带"的决策 | 边界文档（见 §1.1 前置） |
+| **故障模式 × 网络位置正交矩阵**：5 种故障本质 × 5 层网络位置 = 25 个交叉格 | 正交矩阵表格 |
+
+### Phase 2：标准溯源 + 实测数据交叉验证（优先级 🔴）
+
+**目标**：每个参数既有标准来源，又有实测数据验证——区分"设计目标"和"统计现实"。
+
+| 任务 | 产出 | 已产出 |
+|------|------|:------:|
+| 蜂窝 3GPP 标准溯源 | `standards/cellular-3gpp.md` | ✅ |
+| WiFi IEEE 802.11 标准溯源 | `standards/wifi-ieee80211.md` | ✅ |
+| 协议行为 RFC 对照 | `standards/protocol-behaviors.md` | ✅ |
+| OS/硬件陷阱 | `standards/os-hardware-quirks.md` | ✅ |
+| 卫星 ITU-R 标准 | `standards/satellite-itu.md` | ❌ |
+| 有线接入 ITU 标准 | `standards/wired-itu-ieee.md` | ❌ |
+| **实测数据对标**：Cloudflare Radar / CrUX / OpenSignal 数据 vs Profile 参数 | 实测对标表 | ❌ |
+
+### Phase 3：模拟对标 + 保真度校验（优先级 🟡）
+
+**目标**：不仅知道 proxy.ts 缺什么功能，还要知道现有功能的模拟与真实有多大偏差。
+
+| 任务 | 产出 | 已产出 |
+|------|------|:------:|
+| tc netem / ns-3 / MahiMahi / toxiproxy / Comcast 对标 | `simulation/tools-benchmark.md` | ✅ |
+| **proxy.ts 保真度校验**：proxy.ts 模拟 5% 丢包时，TCP 行为与真实 5% 丢包链路的统计偏差 | 保真度校验报告 | ❌ |
+
+### Phase 4：协议合规矩阵（优先级 🟡）
+
+**目标**：每个 RFC 中"客户端应该做什么"与 Catcher 行为的对照。
+
+| 任务 | 产出 | 已产出 |
+|------|------|:------:|
+| HTTP/1.1 合规 (RFC 9110) | `compliance/http11-rfc.md` | ❌ |
+| HTTP/2 合规 (RFC 9113) | `compliance/http2-rfc.md` | ❌ |
+| WebSocket 合规 (RFC 6455) | `compliance/ws-rfc.md` | ❌ |
+| SSE 合规 (WHATWG HTML §9.2) | `compliance/sse-whatwg.md` | ❌ |
+
+### Phase 5：验证机制补齐（优先级 🟢）
+
+**目标**：引入不变量验证、统计假设检验、因果模型预测等新范式。
+
+| 任务 | 产出 |
+|------|------|
+| PBT 原型 — 用 fast-check / proptest 验证 retry/CB 的不变量 | PoC 代码 |
+| SLO 定义 — Catcher 库的成功率/延迟/CB 恢复时间 SLO | SLO 文档 |
+| 因果模型 — 给定故障模式和 Catcher 配置，预测成功率期望值 | 因果模型 + 实测验证
 
 ---
 
-## 六、最终目标：完整的追溯链
+## 六、最终目标：循环追溯链
 
-调研完成后，catcher 的每个测试决策都应该能回答四个问题：
+> 调研不是一次性的——每轮验证都会暴露新盲区，触发新一轮追溯。
+
+catcher 的每个测试决策都应该能回答五个问题（其中 Q0 是前置过滤，Q1-Q4 形成闭环）：
 
 ```
+Q0: 这个条件在 Catcher 的物理边界内吗？
+A0: 是 → 继续 Q1。否 → 不纳入调研（调研不能转化为产品能力）。
+
 Q1: 为什么要测试这个条件？
-A1: 因为它对应 3GPP TS 38.101 §7.2 定义的 4G LTE 延迟特性（标准溯源）
+A1: 因为它对应一种故障本质（时间/完整度/可达性/身份/策略）× 一个网络位置，
+    有标准定义 + 实测数据证明其真实发生频率。
 
 Q2: 这个模拟参数凭什么？
-A2: 与 tc netem "delay 20ms 5ms distribution normal" 对标（模拟标标）
+A2: 参数来自标准文档（设计值）与实测数据（统计值）的交叉验证，
+    并与 tc netem / ns-3 等工具的对应损伤模型对标。
 
 Q3: 怎么证明模拟是有效的？
-A3: 对比 ns-3 LTE 模型仿真结果，proxy.ts 延迟分布在 p50/p95/p99 上偏差 < 15%（真实度校验）
+A3: 对比真实网络 trace 与 proxy.ts 模拟输出，在关键统计量上偏差 < 可接受阈值。
 
-Q4: 怎么验证 catcher 在这个条件下表现得当？
-A4: PBT 验证 retry count ≤ max_attempts + S1-S16 场景对比统计显著（测试机制）
+Q4: 怎么验证 Catcher 在这个条件下表现得当？
+A4: 不变量验证（PBT）+ 统计假设检验（harness 对比）+ 因果模型预测 vs 实测。
+
+    └→ 验证结果反馈回 Q1：是否有新的故障模式暴露？分类是否需要修正？
 ```
 
-当前能完整回答这四个问题的 profile：0 个。这是差距，也是方向。
+当前能完整回答 Q0-Q4 的测试场景：**0 个**。这是差距，也是方向。
 
 ---
 
@@ -409,44 +474,35 @@ A4: PBT 验证 retry count ≤ max_attempts + S1-S16 场景对比统计显著（
 
 ```
 docs/research/
-├── network-testing-verification-framework.md    ← 调研框架总纲 (v2 — 已整合探索性发现)
+├── network-testing-verification-framework.md    ← 调研框架总纲 v3
+├── phase0-discovery-report.md                   ← 🆕 环节① 发现 — 真实测量/Postmortem/Bug/方法论/极端场景
+├── phase1-orthogonal-matrix.md                  ← 🆕 环节② 分类 — 5×5 正交矩阵 (49 项故障)
+├── phase-final-synthesis.md                     ← 🆕 最终综合报告 — 全五环节闭环总结
 │
-├── exploratory/                                  ← 🆕 探索性调研
-│   └── industry-methodology-survey.md            ← 跨行业方法论对比 (游戏/混沌/SRE/电信/IoT/金融)
+├── exploratory/                                  ← 探索性调研
+│   └── industry-methodology-survey.md            ← 跨行业方法论对比
 │
 ├── standards/                                    ← 标准溯源
-│   ├── cellular-3gpp.md                          ← 蜂窝 2G→5G + 切换 + 一致性测试
-│   ├── wifi-ieee80211.md                         ← WiFi (BSS/DFS/PS/MAC重试)
+│   ├── cellular-3gpp.md                          ← 蜂窝 2G→5G
+│   ├── wifi-ieee80211.md                         ← WiFi 损伤建模
 │   ├── protocol-behaviors.md                     ← TCP/TLS/DNS/HTTP/WS/SSE/QUIC RFC 对照
-│   ├── os-hardware-quirks.md                     ← OS/移动端/硬件陷阱 + S17-S25
-│   ├── satellite-itu.md                          ← (待补充)
-│   └── wired-itu-ieee.md                         ← (待补充)
+│   └── os-hardware-quirks.md                     ← OS/移动端/硬件陷阱
 │
 ├── simulation/                                   ← 模拟工具对标
 │   └── tools-benchmark.md                        ← tc netem/ns-3/MahiMahi/toxiproxy/Comcast
 │
-└── (现有文件保持不变)
-    ├── test-strategy-gaps.md
-    └── expandation/
-        ├── 00-summary.md
-        ├── 01-protocols.md
-        ├── 02-network-env.md
-        ├── 03-hardware.md
-        ├── 04-software-env.md
-        ├── 05-user-interaction.md
-        └── 06-security.md
+└── expandation/                                  ← 早期扩研（6 维度 × 42+ 细分领域）
+    ├── 00-summary.md
+    ├── 01-protocols.md
+    ├── 02-network-env.md
+    ├── 03-hardware.md
+    ├── 04-software-env.md
+    ├── 05-user-interaction.md
+    ├── 06-security.md
+    └── handoff.md
 ```
 
-### 调研统计数据
-
-| 维度 | 覆盖项 | 新增 Profile 建议 | 新增测试场景建议 | 🔴 发现 |
-|------|:-----:|:-------------:|:-------------:|:-----:|
-| 蜂窝 3GPP | 10 代 (2G→5G SA) | 6 个 (5g_sa, 5g_urllc, lte_weak, lte_highspeed, irat_4g_to_3g, irat_4g_to_2g) | 4 个 (切换中断/RRC状态) | 12 |
-| WiFi 802.11 | 7 代 + 5 种特有损伤 | 5 个 (weak_signal, interference, bss_transition, dfs_switch, powersave) | 3 个 (DFS/BSS/干扰) | 6 |
-| 协议行为 | 40+ RFC 章节对照 | — | — | 8 (408/425/429/SRVFAIL/GOAWAY/BOM/0-RTT/连接迁移) |
-| OS/硬件 | 5 大类 (Android/iOS/Linux/macOS/Windows) | 5 个 (cg_nat, wifi_cellular_switch, doze_recovery, grey_failure, enterprise_proxy) | 9 个 (S17-S25) | 15 |
-| 模拟工具 | 5 工具 × 8 损伤维度 | — | — | 5 (correlation/pareto/4-state/slot/slicer 缺失) |
-| **合计** | **62+** | **16** | **16** | **46** |
+> 具体统计数据（覆盖项、Profile 建议、测试场景建议、发现数）见各子文档，不在此框架总纲中重复。
 
 ---
 

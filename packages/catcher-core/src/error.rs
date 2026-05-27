@@ -62,9 +62,13 @@ pub enum ErrorCategory {
 impl CatcherError {
     /// 判断此错误是否可重试
     ///
-    /// - 网络层错误（超时/DNS/TLS/断开）→ 可重试
+    /// - 网络层错误（超时/DNS瞬态/TLS握手/断开）→ 可重试
     /// - 5xx HTTP 错误 → 可重试
-    /// - 4xx HTTP 错误 → 不可重试（客户端错误重试无意义）
+    /// - HTTP 408 Request Timeout → 可重试（RFC 9110 §15.5.7: MAY retry on new connection）
+    /// - HTTP 429 Too Many Requests → 可重试（遵循 Retry-After）
+    /// - 其他 4xx HTTP 错误 → 不可重试（客户端错误重试无意义）
+    /// - DNS NXDOMAIN（域名不存在）→ 不可重试（永久性错误）
+    /// - TLS 证书错误 → 不可重试（配置错误，重试无法修复）
     /// - 编解码错误 → 不可重试（重试也不会变正确）
     /// - 熔断器打开 → 可重试（等恢复后重试）
     /// - 配置/内部错误 → 不可重试（需修复）
@@ -72,15 +76,39 @@ impl CatcherError {
         match self {
             CatcherError::ConnectionTimeout(_)
             | CatcherError::RequestTimeout(_)
-            | CatcherError::TlsError(_)
-            | CatcherError::DnsError { .. }
             | CatcherError::WsHandshakeTimeout(_)
             | CatcherError::WsDisconnected { .. }
             | CatcherError::WsAllEndpointsFailed { .. }
             | CatcherError::CircuitBreakerOpen => ErrorCategory::Retryable,
 
+            // ── TLS: 区分握手超时（可重试）和证书错误（不可重试）──
+            CatcherError::TlsError(msg) => {
+                let msg_lower = msg.to_lowercase();
+                if msg_lower.contains("certificate")
+                    || msg_lower.contains("cert")
+                    || msg_lower.contains("expired")
+                    || msg_lower.contains("mismatch")
+                    || msg_lower.contains("unknown issuer")
+                    || msg_lower.contains("self signed")
+                {
+                    ErrorCategory::NonRetryable
+                } else {
+                    ErrorCategory::Retryable
+                }
+            }
+
+            // ── DNS: 区分 NXDOMAIN（不可重试）和 SERVFAIL/超时（可重试）──
+            CatcherError::DnsError { reason, .. } => {
+                if reason.to_lowercase().contains("nxdomain") {
+                    ErrorCategory::NonRetryable
+                } else {
+                    ErrorCategory::Retryable
+                }
+            }
+
+            // ── HTTP: 408/429/5xx 可重试，其他 4xx 不可重试 ──
             CatcherError::HttpError { status, .. } => {
-                if *status >= 500 {
+                if *status == 408 || *status == 429 || *status >= 500 {
                     ErrorCategory::Retryable
                 } else {
                     ErrorCategory::NonRetryable
@@ -117,18 +145,46 @@ mod tests {
     }
 
     #[test]
-    fn tls_error_is_retryable() {
-        let err = CatcherError::TlsError("cert expired".into());
+    fn tls_handshake_error_is_retryable() {
+        let err = CatcherError::TlsError("handshake timed out".into());
         assert_eq!(err.category(), ErrorCategory::Retryable);
     }
 
     #[test]
-    fn dns_error_is_retryable() {
+    fn tls_cert_error_is_non_retryable() {
+        // Self-signed → permanent config error, retry won't help
+        let err = CatcherError::TlsError("self signed certificate".into());
+        assert_eq!(err.category(), ErrorCategory::NonRetryable);
+    }
+
+    #[test]
+    fn tls_expired_cert_is_non_retryable() {
+        let err = CatcherError::TlsError("certificate expired".into());
+        assert_eq!(err.category(), ErrorCategory::NonRetryable);
+    }
+
+    #[test]
+    fn tls_hostname_mismatch_is_non_retryable() {
+        let err = CatcherError::TlsError("hostname mismatch in certificate".into());
+        assert_eq!(err.category(), ErrorCategory::NonRetryable);
+    }
+
+    #[test]
+    fn dns_error_is_retryable_for_servfail() {
+        let err = CatcherError::DnsError {
+            host: "example.com".into(),
+            reason: "SERVFAIL".into(),
+        };
+        assert_eq!(err.category(), ErrorCategory::Retryable);
+    }
+
+    #[test]
+    fn dns_nxdomain_is_non_retryable() {
         let err = CatcherError::DnsError {
             host: "example.com".into(),
             reason: "NXDOMAIN".into(),
         };
-        assert_eq!(err.category(), ErrorCategory::Retryable);
+        assert_eq!(err.category(), ErrorCategory::NonRetryable);
     }
 
     #[test]
@@ -147,6 +203,26 @@ mod tests {
             body: "Not Found".into(),
         };
         assert_eq!(err.category(), ErrorCategory::NonRetryable);
+    }
+
+    #[test]
+    fn http_408_is_retryable() {
+        // RFC 9110 §15.5.7: 408 MAY be retried on a new connection
+        let err = CatcherError::HttpError {
+            status: 408,
+            body: "Request Timeout".into(),
+        };
+        assert_eq!(err.category(), ErrorCategory::Retryable);
+    }
+
+    #[test]
+    fn http_429_is_retryable() {
+        // RFC 6585: 429 should be retried after Retry-After
+        let err = CatcherError::HttpError {
+            status: 429,
+            body: "Too Many Requests".into(),
+        };
+        assert_eq!(err.category(), ErrorCategory::Retryable);
     }
 
     #[test]
