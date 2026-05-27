@@ -348,6 +348,41 @@ catcher 当前覆盖：Layer 1-2 充分，Layer 3 缺失（无属性基测试）
 
 ---
 
+## 五、探索性调研路线图（未完待续）
+
+> 详细报告见 `exploratory/industry-methodology-survey.md`
+
+### 5.1 已完成探索
+
+| 方向 | 关键发现 | 对 Catcher 的影响 |
+|------|---------|-----------------|
+| 🎮 **游戏引擎** (Unreal/Unity/Godot) | 引擎内置 Network Emulation, 2-3 个预设够用, 按平台分类 | 双分类法 (技术+场景), 预设精简 |
+| 🔥 **混沌工程** (Netflix/Shopify) | 40.9% 实验是网络故障, Toxiproxy/Chaos Mesh 主流, 应用层注入仅 3% | Catcher 填补的就是这 3% |
+| 📐 **Google SRE** | 测试分级 + Zero MTTR bugs + 测试与 MTBF 数学关系 | SLO 定义方法论 |
+| 📡 **电信设备** (Keysight/Spirent) | 确定性损伤 + RFC 2544 全参数 | proxy.ts 对标基准 |
+| 💰 **金融交易** | <1μs HFT, FIX over TCP | Catcher 不覆盖 |
+| 🌐 **IoT/LPWAN** | 极高丢包容忍 (30%+), 省电优先 | 不同韧性语义 |
+
+### 5.2 颠覆性发现
+
+1. **Presets 应该少而精**: 游戏行业用 2 个预设解决问题, Catcher 的 14 个是过度设计了
+2. **按使用场景分类比按技术分类更重要**: "移动端弱网"比 "gprs profile" 对开发者更有用
+3. **动态条件变化是标配**: Unreal/Unity/Godot 都支持在测试过程中改变条件, Catcher 的 `setConditions()` 已支持但缺测试场景
+4. **PktIncomingLoss (接收方向单独丢包)** 是 Catcher 缺失的关键参数
+5. **游戏行业不测带宽** — Catcher 的 `bandwidth` 对某些场景是噪音
+
+### 5.3 待探索方向
+
+| 方向 | 关键问题 |
+|------|---------|
+| 流媒体行业 (Netflix/YouTube) | 自适应码率的网络测试方法论 |
+| 车联网 (V2X) | 3GPP TS 22.186, 低延迟 + 高移动性 |
+| 工业自动化 (TSN/OPC-UA) | IEEE 802.1 TSN 确定延迟要求 |
+| eHealth/远程手术 | ITU-T Y.4110 系列, 超低延迟 + 极高可靠性 |
+| 航天/深空通信 | DTN (Delay-Tolerant Networking), RFC 4838 |
+
+---
+
 ## 六、最终目标：完整的追溯链
 
 调研完成后，catcher 的每个测试决策都应该能回答四个问题：
@@ -374,30 +409,32 @@ A4: PBT 验证 retry count ≤ max_attempts + S1-S16 场景对比统计显著（
 
 ```
 docs/research/
-├── network-testing-verification-framework.md   ← 调研框架总纲
+├── network-testing-verification-framework.md    ← 调研框架总纲 (v2 — 已整合探索性发现)
 │
-├── standards/                                   ← ✅ 已完成
-│   ├── cellular-3gpp.md                         ← 蜂窝 2G→5G 标准溯源 + 切换 + 一致性测试
-│   ├── wifi-ieee80211.md                        ← WiFi 损伤模式 (BSS/DFS/PS/MAC重试)
-│   ├── protocol-behaviors.md                    ← TCP/TLS/DNS/HTTP/WS/SSE/QUIC RFC 行为对照
-│   ├── os-hardware-quirks.md                    ← OS底层/移动端/硬件网络栈陷阱与测试案例
-│   ├── satellite-itu.md                         ← (待补充)
-│   └── wired-itu-ieee.md                        ← (待补充)
+├── exploratory/                                  ← 🆕 探索性调研
+│   └── industry-methodology-survey.md            ← 跨行业方法论对比 (游戏/混沌/SRE/电信/IoT/金融)
 │
-├── simulation/                                  ← ✅ 已完成
-│   └── tools-benchmark.md                       ← tc netem/ns-3/MahiMahi/toxiproxy/Comcast 完整对标
+├── standards/                                    ← 标准溯源
+│   ├── cellular-3gpp.md                          ← 蜂窝 2G→5G + 切换 + 一致性测试
+│   ├── wifi-ieee80211.md                         ← WiFi (BSS/DFS/PS/MAC重试)
+│   ├── protocol-behaviors.md                     ← TCP/TLS/DNS/HTTP/WS/SSE/QUIC RFC 对照
+│   ├── os-hardware-quirks.md                     ← OS/移动端/硬件陷阱 + S17-S25
+│   ├── satellite-itu.md                          ← (待补充)
+│   └── wired-itu-ieee.md                         ← (待补充)
 │
-├── (现有文件保持不变)
-│   ├── test-strategy-gaps.md
-│   ├── expandation/
-│   │   ├── 00-summary.md
-│   │   ├── 01-protocols.md
-│   │   ├── 02-network-env.md
-│   │   ├── 03-hardware.md
-│   │   ├── 04-software-env.md
-│   │   ├── 05-user-interaction.md
-│   │   └── 06-security.md
-│   └── ... (其他现有研究)
+├── simulation/                                   ← 模拟工具对标
+│   └── tools-benchmark.md                        ← tc netem/ns-3/MahiMahi/toxiproxy/Comcast
+│
+└── (现有文件保持不变)
+    ├── test-strategy-gaps.md
+    └── expandation/
+        ├── 00-summary.md
+        ├── 01-protocols.md
+        ├── 02-network-env.md
+        ├── 03-hardware.md
+        ├── 04-software-env.md
+        ├── 05-user-interaction.md
+        └── 06-security.md
 ```
 
 ### 调研统计数据
