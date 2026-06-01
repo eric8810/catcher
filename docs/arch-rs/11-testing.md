@@ -10,7 +10,7 @@
 | 层级 | 工具 | 目标 | 覆盖 |
 |------|------|------|------|
 | 单元测试 | tokio::test | 每个模块纯逻辑 | 100% 公开 API |
-| 集成测试 | wiremock + tokio-tungstenite | Transport 层真实收发 | 正向+错误路径 |
+| 集成测试 | wiremock + tokio-tungstenite (dev-only echo server) | Transport 层真实收发 | 正向+错误路径 |
 | 韧性测试 | 模拟网络故障 | Retry/CB 状态机 | 状态迁移覆盖 |
 | FFI 测试 | cargo test (C ABI) / dart test | FFI 边界正确性 | 序列化/回调 |
 | 绑定测试 | napi-test / dart test | Napi / UniFFI / Dart FFI 绑定 | smoke test |
@@ -67,7 +67,7 @@ async fn decode_error_is_non_retryable() {
 ## 集成测试
 
 - 使用 `wiremock` 启动本地模拟 HTTP 服务器，验证 Transport 层完整的请求-响应流程。
-- 使用 `tokio-tungstenite` 搭建 WebSocket mock，验证连接建立、心跳、断开重连。
+- 使用 `tokio-tungstenite`（dev-only）搭建 WebSocket echo server，验证 yawc 客户端连接建立、消息收发、断开重连与断线期间消息缓冲重放。
 - 覆盖场景：正常响应、超时、5xx 重试、4xx 快速失败、连接被拒绝。
 
 ---

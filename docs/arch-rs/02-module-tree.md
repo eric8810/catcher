@@ -76,20 +76,21 @@ catcher-ws/
     │
     ├── transport/
     │   ├── mod.rs
-    │   └── ws_client.rs            # WsTransport: tokio-tungstenite 封装, WsHandle
+    │   └── ws_client.rs            # WsTransport: yawc 封装, WsHandle
     │
     ├── ws/                         # WebSocket 高级功能
     │   ├── mod.rs
-    │   ├── reconnect.rs            # ReconnectManager: 重连状态机
+    │   ├── reconnect.rs            # ReconnectManager: 重连状态机 + 断线期间消息缓冲重放
     │   ├── heartbeat.rs            # HeartbeatManager: 自适应心跳
     │   ├── multi_endpoint.rs       # EndpointRacer: 多端点竞速
-    │   └── compression.rs          # DeflateConfig 适配 tungstenite WebSocketConfig
+    │   ├── compression.rs          # per-message-deflate: WsClientConfig → yawc Options
+    │   └── application_compression.rs  # 应用层 gzip/zstd 压缩（Magic + Algorithm + Length 帧格式）
     │
     └── ffi/
         └── ws_ffi.rs               # WS C ABI
 ```
 
-依赖：`catcher-core`, `tokio-tungstenite`, `futures-util`, `backon`
+依赖：`catcher-core`, `catcher-dns`, `yawc`, `futures-util`, `flate2`, `zstd`, `backon`；dev-only: `tokio-tungstenite`
 
 ## catcher-uniffi (UniFFI bindings)
 

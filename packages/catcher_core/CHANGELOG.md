@@ -2,11 +2,17 @@
 
 ### New features
 
-- Update the native WebSocket transport to use `yawc`, enabling native permessage-deflate support in the bundled Rust implementation.
+- Update the native WebSocket transport to use `yawc`, enabling native permessage-deflate (RFC 7692) support in the bundled Rust implementation.
+- Add `application_compression` config to `WsClientConfig` with gzip and zstd support for application-layer compression fallback.
 
 ### Fixes
 
 - Improve Android native build reliability by exporting NDK `CC_*` and `AR_*` variables for cross-compiled native dependencies.
+- Buffer and replay messages sent during WebSocket reconnection instead of silently dropping them.
+- Add fast pong timeout detection within a single heartbeat cycle.
+- Echo Close frames on receipt before disconnecting (RFC 6455 §5.5.1).
+- Report actual reconnect latency in `Connected` events instead of 0 ms.
+- Remove `native-tls` feature; TLS is handled entirely by `yawc/rustls-ring`.
 
 ### Packaging
 

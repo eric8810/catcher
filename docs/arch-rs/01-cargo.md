@@ -42,7 +42,6 @@ edition = "2021"
 [features]
 default = ["rustls-tls", "hickory-dns"]
 rustls-tls = ["reqwest/rustls", "dep:rustls", "dep:rustls-pki-types", "dep:sha2", "dep:base64", "dep:webpki-roots"]
-native-tls = ["reqwest/native-tls"]
 hickory-dns = ["reqwest/hickory-dns", "dep:hickory-resolver", "dep:hickory-proto"]
 napi = ["dep:napi", "dep:napi-derive"]
 
@@ -81,14 +80,27 @@ name = "catcher-ws"
 version = "0.3.11"
 edition = "2021"
 
+[features]
+default = ["rustls-tls"]
+rustls-tls = ["yawc/rustls-ring"]
+
 [dependencies]
 catcher-core = { path = "../catcher-core", version = "0.3.11" }
+catcher-dns = { path = "../catcher-dns", version = "0.3.11" }
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "net", "io-util", "macros"] }
-tokio-tungstenite = "0.29"
+yawc = { version = "0.3.3", default-features = false }
 futures-util = "0.3"
 backon = "1"
 rmp-serde = "1"
 rmpv = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+base64 = "0.22"
+flate2 = "1"
+zstd = "0.13"
+http = "1"
+url = "2"
+
+[dev-dependencies]
+tokio-tungstenite = { version = "0.29", default-features = false, features = ["handshake"] }
 ```
