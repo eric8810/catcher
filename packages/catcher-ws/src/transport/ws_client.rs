@@ -482,24 +482,17 @@ async fn connection_manager(
         .as_ref()
         .map(|c| ReconnectManager::new(c.clone()));
 
-    let first_latency = initial_latency_ms;
-    let mut first_connect = true;
+    let mut first_latency = initial_latency_ms;
 
     loop {
         // 发送 Connected 事件
         {
-            let lat = if first_connect {
-                first_latency
-            } else {
-                0 // 重连时无精确延迟测量
-            };
+            let lat = first_latency;
             let _ = event_tx.send(WsEvent::Connected {
                 url: current_url.clone(),
                 latency_ms: lat,
             });
         }
-        first_connect = false;
-
         // 设置心跳
         let mut hb_state = config.heartbeat.as_ref().map(|hb_config| HeartbeatState {
             mgr: HeartbeatManager::new(hb_config.clone()),
@@ -579,6 +572,10 @@ async fn connection_manager(
                 _ = &mut ping_sleep, if hb_state.is_some() => {
                     if let Some(ref mut state) = hb_state {
                         if state.waiting_for_pong {
+                            // pong_timeout_ms 快速超时检测
+                            if state.mgr.is_timed_out() {
+                                break LoopOutcome::HeartbeatTimeout;
+                            }
                             state.mgr.on_missed_pong();
                             if state.mgr.is_missed_pongs_exceeded() {
                                 break LoopOutcome::HeartbeatTimeout;
@@ -636,6 +633,13 @@ async fn connection_manager(
                                     .flatten()
                                     .unwrap_or("abnormal")
                                     .to_string();
+                                // RFC 6455 §5.5.1: 收到 Close 帧必须回一个 Close 帧
+                                let _ = writer
+                                    .send(Frame::close(
+                                        yawc::close::CloseCode::from(code),
+                                        &reason,
+                                    ))
+                                    .await;
                                 break LoopOutcome::Disconnected { code, reason };
                             }
                             Some(_) => {}
@@ -668,6 +672,8 @@ async fn connection_manager(
         // ── 尝试重连 ──
         if let Some(ref mut mgr) = reconnect_mgr {
             let mut reconnected = false;
+            let mut buffered_commands: Vec<WsCommand> = Vec::new();
+            let mut reconnect_latency_ms: u64 = 0;
 
             while let Some(delay) = mgr.on_disconnect() {
                 let attempt = mgr.attempt();
@@ -678,14 +684,30 @@ async fn connection_manager(
 
                 tokio::time::sleep(Duration::from_millis(delay)).await;
 
-                // 检查用户是否已经发出 close 命令
-                if cmd_rx.try_recv().is_ok() {
+                // 排空待处理命令：Close 中止重连，其余缓存等待重放
+                let mut abort = false;
+                loop {
+                    match cmd_rx.try_recv() {
+                        Ok(WsCommand::Close { .. }) => {
+                            abort = true;
+                            break;
+                        }
+                        Ok(cmd) => buffered_commands.push(cmd),
+                        Err(mpsc::error::TryRecvError::Empty) => break,
+                        Err(mpsc::error::TryRecvError::Disconnected) => {
+                            abort = true;
+                            break;
+                        }
+                    }
+                }
+                if abort {
                     break;
                 }
 
                 match connect_stream_with_resolver(&current_url, config, &dns_resolver).await {
-                    Ok((stream, _lat)) => {
+                    Ok((stream, lat)) => {
                         stream_opt = Some(stream);
+                        reconnect_latency_ms = lat;
                         mgr.on_connected();
                         reconnected = true;
                         break;
@@ -695,6 +717,29 @@ async fn connection_manager(
             }
 
             if reconnected {
+                // 重连后回放缓存的命令（Close 已被过滤，不会到达这里）
+                if !buffered_commands.is_empty() {
+                    if let Some(mut stream) = stream_opt.take() {
+                        for cmd in buffered_commands {
+                            match cmd {
+                                WsCommand::Text(t) => {
+                                    if let Ok(msg) = encode_text_message(&t, config) {
+                                        let _ = futures_util::SinkExt::send(&mut stream, msg).await;
+                                    }
+                                }
+                                WsCommand::Binary(d) => {
+                                    if let Ok(msg) = encode_binary_message(&d, config) {
+                                        let _ = futures_util::SinkExt::send(&mut stream, msg).await;
+                                    }
+                                }
+                                WsCommand::Close { .. } => {}
+                            }
+                        }
+                        stream_opt = Some(stream);
+                    }
+                }
+                // 更新延迟供下一轮 Connected 事件使用
+                first_latency = reconnect_latency_ms;
                 continue; // 回到外层循环 → 新的 select loop
             }
         }

@@ -9,7 +9,6 @@ repository = "https://github.com/eric8810/catcher"
 [features]
 default = ["rustls-tls"]
 rustls-tls = ["yawc/rustls-ring"]
-native-tls = ["rustls-tls"]
 
 [dependencies]
 catcher-core = { path = "../catcher-core", version = "0.3.11" }
