@@ -58,7 +58,7 @@ impl HeartbeatManager {
             let elapsed = last.elapsed().as_millis() as u64;
             elapsed > self.config.pong_timeout_ms
         } else {
-            // 从未收到过 pong，用连接后的时间判断
+            // 从未收到过 pong，无法判断超时（由 is_missed_pongs_exceeded 兜底）
             false
         }
     }
@@ -171,5 +171,29 @@ mod tests {
         let mut mgr = HeartbeatManager::new(test_config());
         mgr.on_pong(42);
         assert_eq!(mgr.p90_rtt(), Some(42));
+    }
+
+    #[test]
+    fn is_timed_out_no_pong_yet_returns_false() {
+        let mgr = HeartbeatManager::new(test_config());
+        assert!(!mgr.is_timed_out());
+    }
+
+    #[test]
+    fn is_timed_out_with_fresh_pong_returns_false() {
+        let mut mgr = HeartbeatManager::new(test_config());
+        mgr.on_pong(100);
+        assert!(!mgr.is_timed_out());
+    }
+
+    #[test]
+    fn is_timed_out_after_pong_timeout_expired() {
+        let mut mgr = HeartbeatManager::new(HeartbeatConfig {
+            pong_timeout_ms: 1,
+            ..test_config()
+        });
+        mgr.on_pong(100);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        assert!(mgr.is_timed_out());
     }
 }
