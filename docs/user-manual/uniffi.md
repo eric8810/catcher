@@ -331,7 +331,7 @@ for event in events {
   "urls": ["wss://primary.example.com", "wss://fallback.example.com"],
   "headers": {},
   "protocols": [],
-  "per_message_deflate": false,
+  "per_message_deflate": true,
   "reconnect": {
     "initial_delay_ms": 1000,
     "max_delay_ms": 30000,

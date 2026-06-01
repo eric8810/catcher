@@ -33,12 +33,7 @@ fn error_json(msg: &str) -> String {
 }
 
 /// Invoke an FFI event callback with ownership-transferred CStrings.
-fn invoke_event_callback(
-    cb: EventCallback,
-    event_name: &str,
-    json: String,
-    user_data: usize,
-) {
+fn invoke_event_callback(cb: EventCallback, event_name: &str, json: String, user_data: usize) {
     let c_event = CString::new(event_name.replace('\0', "")).unwrap_or_default();
     let c_json = CString::new(json.replace('\0', "")).unwrap_or_default();
     let json_len = c_json.as_bytes().len();
@@ -97,7 +92,10 @@ pub unsafe extern "C" fn catcher_ws_create(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn catcher_ws_send_text(handle: *mut c_void, message: FfiString) -> FfiResult {
+pub unsafe extern "C" fn catcher_ws_send_text(
+    handle: *mut c_void,
+    message: FfiString,
+) -> FfiResult {
     if handle.is_null() {
         return FfiResult::error(1, "null handle");
     }

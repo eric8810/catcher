@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file. See [release-please](https://github.com/googleapis/release-please) for automated management.
 
+## 0.3.11 (2026-05-20)
+
+### ✨ Features
+
+- **WebSocket yawc transport**: Migrated the Rust WebSocket client transport from `tokio-tungstenite` to `yawc`, enabling native permessage-deflate negotiation while preserving DNS failover, reconnect, heartbeat, custom headers, subprotocols, and application-level compression fallback.
+
+### 🐛 Bug Fixes
+
+- **Android native builds**: Export Android NDK `CC_*` and `AR_*` variables so native dependencies with C build scripts use the correct cross-compilation toolchain.
+
+### 🔄 Dependencies
+
+- Replaced runtime `tokio-tungstenite` usage in `catcher-ws` with `yawc`; `tokio-tungstenite` remains only as a test dependency for local WebSocket server fixtures.
+
 ## 0.3.10 (2026-05-20)
 
 ### 📝 Documentation / Packaging

@@ -97,7 +97,7 @@ uniffi-bindgen generate --library ../target/release/libcatcher_uniffi.so --langu
   "urls": ["wss://echo.example.com"],
   "reconnect": { "initial_delay_ms": 500, "max_delay_ms": 30000 },
   "heartbeat": { "interval_ms": 30000, "adaptive": true },
-  "per_message_deflate": false
+  "per_message_deflate": true
 }
 ```
 

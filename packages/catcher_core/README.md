@@ -20,7 +20,7 @@ Resilient HTTP/WebSocket client for **Flutter** — powered by a **Rust core** v
 
 ```yaml
 dependencies:
-  catcher_core: ^0.3.10
+  catcher_core: ^0.3.11
 ```
 
 > **Note:** The pub.dev package includes the native Rust libraries for supported platforms. If you build from a source checkout or need custom targets, see the [Flutter manual build guide](../../docs/user-manual/flutter.md#手动构建-android--ios-native-二进制).
@@ -148,6 +148,7 @@ final config = HttpClientConfig(
 |------|-------------|
 | `CatcherWsClient` | WebSocket client with event stream |
 | `WsClientConfig` | URLs, reconnect, heartbeat, DNS, compression, msgpack |
+| `WsApplicationCompressionConfig` | Optional application-layer gzip/zstd fallback |
 | `WsReconnectConfig` | Reconnect timing (initial, max delay, backoff) |
 | `WsHeartbeatConfig` | Heartbeat interval, adaptive, pong timeout |
 | `WsEvent` | Base event class |

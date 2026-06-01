@@ -147,7 +147,11 @@ class CatcherWsClient {
 | 参数 | 类型 | 默认 | 说明 |
 |------|------|------|------|
 | `urls` | `List<String>` | **必填** | WebSocket URL(s) |
-| `perMessageDeflate` | `bool` | `false` | per-message deflate |
+| `perMessageDeflate` | `bool` | `true` | 标准 RFC 7692 permessage-deflate，和 Node.js `ws` 路径对齐 |
+| `applicationCompression` | `WsApplicationCompressionConfig?` | — | 应用层 gzip/zstd fallback；`perMessageDeflate` 开启时不会叠加使用 |
+| `applicationCompression.enabled` | `bool` | `true` | 是否启用应用层压缩 |
+| `applicationCompression.algorithm` | `WsApplicationCompressionAlgorithm` | `gzip` | `gzip` 或 `zstd` |
+| `applicationCompression.thresholdBytes` | `int` | `1024` | 大于等于此大小才压缩 |
 | `reconnect` | `ReconnectConfig?` | — | 重连 |
 | `reconnect.initialDelayMs` | `int` | `1000` | 初始延迟（ms） |
 | `reconnect.maxDelayMs` | `int` | `30000` | 最大延迟（ms） |

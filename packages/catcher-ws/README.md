@@ -3,12 +3,12 @@
 [![crates.io](https://img.shields.io/crates/v/catcher-ws.svg)](https://crates.io/crates/catcher-ws)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Resilient WebSocket client for the [catcher](https://github.com/eric8810/catcher) toolkit — built on **tokio-tungstenite** with automatic reconnection, heartbeat, and multi-endpoint racing.
+Resilient WebSocket client for the [catcher](https://github.com/eric8810/catcher) toolkit — built on **tokio-tungstenite** with automatic reconnection, heartbeat, DNS-aware endpoint racing, and compression controls.
 
 > **⚠️ Breaking Change (0.3.0)**:
 > - `WsClientConfig` field renames: `deflate_threshold` → `deflate_threshold_bytes`, `max_message_size` → `max_payload_bytes`
 > - `HeartbeatConfig`: `ping_timeout_ms` → `pong_timeout_ms`, added `max_missed_pongs` field
-> - `per_message_deflate` default changed from `true` to `false`
+> - `per_message_deflate` default is `true`
 > - `handshake_timeout_ms` default changed from `10000` to `15000`
 > - `initial_delay_ms` default changed from `1000` to `500`
 > - All config structs accept `camelCase` via `#[serde(alias)]`
@@ -18,8 +18,9 @@ Resilient WebSocket client for the [catcher](https://github.com/eric8810/catcher
 - **Auto-reconnect** — exponential backoff with jitter
 - **Adaptive heartbeat** — configurable ping/pong with RTT tracking
 - **Multi-endpoint racing** — connect to the fastest of N servers
+- **Per-message deflate** — standard RFC 7692 negotiation via `Sec-WebSocket-Extensions`
+- **Application compression** — optional gzip/zstd envelope fallback for Flutter/Rust clients
 - **DNS cache config** — shared `DnsConfig` with cache TTL, stale fallback, nameservers, host mapping
-- **Per-message deflate** — compression support
 - **Msgpack codec** — built-in `pack()` / `unpack()` for binary serialization
 - **FFI C ABI** — exported symbols for cross-language bindings
 
@@ -27,7 +28,7 @@ Resilient WebSocket client for the [catcher](https://github.com/eric8810/catcher
 
 ```toml
 [dependencies]
-catcher-ws = "0.3.10"
+catcher-ws = "0.3.11"
 ```
 
 ### Basic WebSocket connection
@@ -58,7 +59,7 @@ let config = WsClientConfig {
     ..Default::default()
 };
 
-let (handle, mut rx) = WsTransport::connect("wss://echo.example.com", &config).await?;
+let (handle, mut rx) = WsTransport::connect(&config).await?;
 
 // Send
 handle.send_text("hello")?;
@@ -83,6 +84,44 @@ use serde_json::json;
 let value = json!({"event": "ping", "seq": 42});
 let packed: Vec<u8> = pack(&value)?;  // msgpack binary
 let unpacked = unpack(&packed)?;      // back to serde_json::Value
+```
+
+### Application compression
+
+```rust
+use catcher_ws::{
+    ApplicationCompressionAlgorithm, ApplicationCompressionConfig,
+    WsClientConfig,
+};
+
+let config = WsClientConfig {
+    urls: vec!["wss://api.example.com/ws".into()],
+    per_message_deflate: false,
+    application_compression: Some(ApplicationCompressionConfig {
+        enabled: true,
+        algorithm: ApplicationCompressionAlgorithm::Zstd,
+        threshold_bytes: 2048,
+    }),
+    ..Default::default()
+};
+```
+
+Compressed frames use the catcher application envelope:
+
+```text
+"CATCHER-CMP-1" | algorithm(1=gzip,2=zstd) | kind(1=text,2=binary) | len_be_u32 | compressed_payload
+```
+
+Servers should accept both normal WebSocket text/binary frames and enveloped binary frames. The Rust client also decodes the same envelope on inbound binary messages.
+
+Standard `per_message_deflate` takes precedence over this fallback. When it is enabled, application compression headers and envelopes are skipped to avoid double compression.
+
+When application compression is enabled, the handshake request also includes:
+
+```text
+X-Catcher-Application-Compression: gzip | zstd
+X-Catcher-Application-Compression-Format: CATCHER-CMP-1
+X-Catcher-Application-Compression-Threshold: <bytes>
 ```
 
 ### Multi-endpoint racing

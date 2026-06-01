@@ -42,18 +42,20 @@ class CatcherWsClient {
 
     _create = lib.lookupFunction<CatcherWsCreateNative, CatcherWsCreateDart>(
         'catcher_ws_create');
-    _sendText = lib.lookupFunction<CatcherWsSendTextNative,
-        CatcherWsSendTextDart>('catcher_ws_send_text');
-    _sendBinary = lib.lookupFunction<CatcherWsSendBinaryNative,
-        CatcherWsSendBinaryDart>('catcher_ws_send_binary');
-    _close =
-        lib.lookupFunction<CatcherWsCloseNative, CatcherWsCloseDart>(
-            'catcher_ws_close');
-    _destroy = lib.lookupFunction<CatcherWsDestroyNative,
-        CatcherWsDestroyDart>('catcher_ws_destroy');
+    _sendText =
+        lib.lookupFunction<CatcherWsSendTextNative, CatcherWsSendTextDart>(
+            'catcher_ws_send_text');
+    _sendBinary =
+        lib.lookupFunction<CatcherWsSendBinaryNative, CatcherWsSendBinaryDart>(
+            'catcher_ws_send_binary');
+    _close = lib.lookupFunction<CatcherWsCloseNative, CatcherWsCloseDart>(
+        'catcher_ws_close');
+    _destroy = lib.lookupFunction<CatcherWsDestroyNative, CatcherWsDestroyDart>(
+        'catcher_ws_destroy');
 
-    _freeResultFn = lib.lookupFunction<CatcherFreeResultNative,
-        CatcherFreeResultDart>('catcher_free_result');
+    _freeResultFn =
+        lib.lookupFunction<CatcherFreeResultNative, CatcherFreeResultDart>(
+            'catcher_free_result');
     _freeEventDataFn = lib.lookupFunction<CatcherFreeEventDataNative,
         CatcherFreeEventDataDart>('catcher_free_event_data');
 
@@ -87,8 +89,7 @@ class CatcherWsClient {
       },
     );
 
-    final configJson =
-        jsonEncode(config.toJson()).toNativeUtf8();
+    final configJson = jsonEncode(config.toJson()).toNativeUtf8();
     _handle = _create(
       configJson.cast<Char>(),
       _nativeCallback!.nativeFunction,
@@ -339,6 +340,32 @@ class WsHeartbeatConfig {
       };
 }
 
+enum WsApplicationCompressionAlgorithm {
+  gzip('gzip'),
+  zstd('zstd');
+
+  final String wireName;
+  const WsApplicationCompressionAlgorithm(this.wireName);
+}
+
+class WsApplicationCompressionConfig {
+  final bool enabled;
+  final WsApplicationCompressionAlgorithm algorithm;
+  final int thresholdBytes;
+
+  const WsApplicationCompressionConfig({
+    this.enabled = true,
+    this.algorithm = WsApplicationCompressionAlgorithm.gzip,
+    this.thresholdBytes = 1024,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'enabled': enabled,
+        'algorithm': algorithm.wireName,
+        'threshold_bytes': thresholdBytes,
+      };
+}
+
 class WsClientConfig {
   final List<String> urls;
   final bool perMessageDeflate;
@@ -350,12 +377,13 @@ class WsClientConfig {
   final Map<String, String> headers;
   final List<String> protocols;
   final int deflateThresholdBytes;
+  final WsApplicationCompressionConfig? applicationCompression;
   final DnsConfig? dns;
   final bool msgpack;
 
   const WsClientConfig({
     required this.urls,
-    this.perMessageDeflate = false,
+    this.perMessageDeflate = true,
     this.handshakeTimeoutMs = 15000,
     this.maxPayloadBytes = 67108864, // 64MB
     this.reconnect,
@@ -363,7 +391,8 @@ class WsClientConfig {
     this.raceCount = 1,
     this.headers = const {},
     this.protocols = const [],
-    this.deflateThresholdBytes = 256,
+    this.deflateThresholdBytes = 1024,
+    this.applicationCompression,
     this.dns,
     this.msgpack = false,
   });
@@ -379,6 +408,8 @@ class WsClientConfig {
         'headers': headers,
         'protocols': protocols,
         'deflate_threshold_bytes': deflateThresholdBytes,
+        if (applicationCompression != null)
+          'application_compression': applicationCompression!.toJson(),
         if (dns != null) 'dns': dns!.toJson(),
         'msgpack': msgpack,
       };

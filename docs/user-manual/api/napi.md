@@ -305,7 +305,7 @@ const ws = new WsClient(
 | 字段 | 类型 | 默认 | 说明 |
 |------|------|------|------|
 | `urls` | `string[]` | **必填** | WebSocket URL(s) |
-| `per_message_deflate` | `boolean` | `false` | per-message deflate |
+| `per_message_deflate` | `boolean` | `true` | 标准 RFC 7692 permessage-deflate |
 | `deflate_threshold_bytes` | `number` | `1024` | 压缩阈值 |
 | `handshake_timeout_ms` | `number` | `15000` | 握手超时 |
 | `max_payload_bytes` | `number` | `67108864` | 最大 payload（64MB） |

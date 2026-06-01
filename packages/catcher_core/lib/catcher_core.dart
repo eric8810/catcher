@@ -65,6 +65,8 @@ export 'src/ws_client.dart'
     show
         CatcherWsClient,
         WsClientConfig,
+        WsApplicationCompressionAlgorithm,
+        WsApplicationCompressionConfig,
         WsReconnectConfig,
         WsHeartbeatConfig,
         WsEvent,

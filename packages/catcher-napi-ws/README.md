@@ -5,7 +5,7 @@
 
 **Rust-powered WebSocket client** for Node.js via [napi-rs](https://napi.rs). Part of the [catcher](https://github.com/eric8810/catcher) toolkit.
 
-Wraps `catcher-ws`'s `WsTransport` — tokio-tungstenite + auto-reconnect + heartbeat, compiled to a native addon. Includes typed TypeScript wrappers with auto-generated `.d.ts`.
+Wraps `catcher-ws`'s `WsTransport` — yawc + RFC 7692 permessage-deflate + auto-reconnect + heartbeat, compiled to a native addon. Includes typed TypeScript wrappers with auto-generated `.d.ts`.
 
 ## ⚠️ Breaking Changes (0.3.0+)
 
@@ -21,7 +21,7 @@ Wraps `catcher-ws`'s `WsTransport` — tokio-tungstenite + auto-reconnect + hear
 | Callback events | Raw JSON strings, need `JSON.parse()` | Typed objects, auto-parsed |
 | Message event data | `event.data` (raw) | `event.data_base64` (base64 encoded) |
 | Default `handshake_timeout_ms` | `10000` | `15000` |
-| Default `per_message_deflate` | `true` | `false` |
+| Default `per_message_deflate` | `true` | `true` |
 | Default `initial_delay_ms` | `1000` | `500` |
 | camelCase fields | Not supported | `#[serde(alias)]` — both `snake_case` and `camelCase` accepted |
 
@@ -104,7 +104,7 @@ interface WsClientConfig {
   urls: string[]                              // required
   protocols?: string[]
   headers?: Record<string, string>
-  per_message_deflate?: boolean               // default: false
+  per_message_deflate?: boolean               // default: true
   deflate_threshold_bytes?: number            // default: 1024
   handshake_timeout_ms?: number               // default: 15000
   max_payload_bytes?: number                  // default: 67108864 (64MB)

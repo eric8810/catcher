@@ -400,7 +400,7 @@ pub trait WsEventObserver: Send + Sync {
     fn on_event(&self, event: WsEventDto);
 }
 
-/// Resilient WebSocket client backed by Rust tokio-tungstenite
+/// Resilient WebSocket client backed by Rust yawc
 #[derive(uniffi::Object)]
 pub struct WsClient {
     handle: Arc<WsHandle>,

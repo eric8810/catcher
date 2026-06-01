@@ -38,7 +38,7 @@ impl JsWsClient {
     /// Event shapes (JSON):
     ///   {"type":"Connected","url":"...","latency_ms":5}
     ///   {"type":"Disconnected","code":1000,"reason":"..."}
-    ///   {"type":"Message","data":"...","is_binary":false}
+    ///   {"type":"Message","data_base64":"...","is_binary":false}
     ///   {"type":"Error","message":"..."}
     ///   {"type":"Reconnecting","attempt":1,"delay_ms":500}
     ///   {"type":"HeartbeatRtt","rtt_ms":12}
@@ -219,7 +219,7 @@ mod tests {
         let config: WsClientConfig = serde_json::from_str(json).unwrap();
         assert!(config.headers.is_empty());
         assert!(config.protocols.is_empty());
-        assert!(!config.per_message_deflate);
+        assert!(config.per_message_deflate);
         assert!(!config.msgpack);
         assert!(config.dns.is_none());
         assert!(config.reconnect.is_none());
