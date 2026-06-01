@@ -177,7 +177,9 @@ pub struct WsClientConfig {
     #[serde(alias = "perMessageDeflate", default = "default_true")]
     pub per_message_deflate: bool,
 
-    /// 压缩阈值（字节，大于此值的消息才压缩）
+    /// 压缩阈值（字节，大于此值的消息才压缩）。
+    /// 仅对应用层压缩（application_compression）生效；
+    /// permessage-deflate 由 yawc 自动协商，不通过此阈值控制。
     #[serde(alias = "deflateThresholdBytes", default = "default_deflate_threshold")]
     pub deflate_threshold_bytes: u32,
 
