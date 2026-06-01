@@ -379,3 +379,8 @@ cd packages && cargo test
 ## License
 
 MIT
+
+### Third-party licenses
+
+This project uses the following third-party libraries:
+- [`yawc`](https://github.com/infinitefield/yawc) - Licensed under [MPL-2.0](https://www.mozilla.org/en-US/MPL/2.0/)
