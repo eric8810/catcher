@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name             = 'catcher_core'
-  s.version          = '0.3.11'
+  s.version          = '0.3.12'
   s.summary          = 'Resilient HTTP/WebSocket client backed by Rust core for Flutter.'
   s.description      = <<-DESC
 Resilient HTTP/WebSocket client backed by Rust core for Flutter.
@@ -11,7 +11,7 @@ Resilient HTTP/WebSocket client backed by Rust core for Flutter.
   s.source           = { :path => '.' }
 
   s.dependency 'Flutter'
-  s.platform = :ios, '13.0'
+  s.platform = :ios, '15.0'
   s.vendored_frameworks = 'Frameworks/catcher_ffi.xcframework'
   s.preserve_paths = 'Frameworks/catcher_ffi.xcframework'
   s.pod_target_xcconfig = {

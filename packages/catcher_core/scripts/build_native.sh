@@ -7,7 +7,7 @@ PACKAGES_DIR="$REPO_ROOT/packages"
 
 ANDROID_API="${ANDROID_API:-24}"
 ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-${ANDROID_NDK:-}}}"
-IPHONEOS_DEPLOYMENT_TARGET="${IPHONEOS_DEPLOYMENT_TARGET:-13.0}"
+IPHONEOS_DEPLOYMENT_TARGET="15.0"
 MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-10.15}"
 
 build_catcher_ffi() {
@@ -63,6 +63,8 @@ create_framework() {
   <string>1.0</string>
   <key>CFBundleVersion</key>
   <string>1</string>
+  <key>MinimumOSVersion</key>
+  <string>15.0</string>
 </dict>
 </plist>
 PLIST
