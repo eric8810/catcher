@@ -1,6 +1,6 @@
 [package]
 name = "catcher-http"
-version = "0.3.11"
+version = "0.3.12"
 edition = "2021"
 description = "HTTP client for catcher — resilient transport with retry, circuit breaker, priority scheduling"
 license = "MIT"
@@ -14,8 +14,8 @@ hickory-dns = ["reqwest/hickory-dns", "catcher-dns/hickory-dns"]
 napi = ["dep:napi", "dep:napi-derive"]
 
 [dependencies]
-catcher-core = { path = "../catcher-core", version = "0.3.11" }
-catcher-dns = { path = "../catcher-dns", version = "0.3.11", default-features = false }
+catcher-core = { path = "../catcher-core", version = "0.3.12" }
+catcher-dns = { path = "../catcher-dns", version = "0.3.12", default-features = false }
 
 # ── 异步运行时 ──
 tokio = { version = "1", features = ["sync", "time", "net", "io-util", "macros"] }

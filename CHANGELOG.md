@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file. See [release-please](https://github.com/googleapis/release-please) for automated management.
 
+## 0.3.12 (2026-06-08)
+
+### 🐛 Bug Fixes
+
+- **iOS App Store**: Set `MinimumOSVersion` 15.0 in the bundled iOS `catcher_ffi.framework` Info.plist for App Store upload validation.
+
+### 📝 Documentation / Packaging
+
+- Add third-party license declaration for `yawc` (MPL-2.0).
+- Rebuild bundled Apple native frameworks with updated minimum OS version.
+
 ## 0.3.11 (2026-06-01)
 
 ### ✨ Features
