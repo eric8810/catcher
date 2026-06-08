@@ -1,3 +1,10 @@
+## 0.3.12
+
+### Packaging
+
+- Add `MinimumOSVersion` 15.0 to the bundled iOS `catcher_ffi.framework` Info.plist for App Store upload validation.
+- Rebuild the bundled Apple native frameworks.
+
 ## 0.3.11
 
 ### New features
