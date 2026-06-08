@@ -28,10 +28,10 @@
 ├──────────────────────────────────────────────────────┤
 │  Rust 核心层                                          │
 │                                                      │
-│  ✅ 传输层 (reqwest / tokio-tungstenite)               │
+│  ✅ 传输层 (reqwest / yawc)                            │
 │  ✅ 连接池 (pool_max_idle, pool_idle_timeout)          │
 │  ✅ DNS 解析 (hickory-dns + host_mapping)              │
-│  ✅ TLS (native-tls / rustls)                         │
+│  ✅ TLS (rustls)                                     │
 │  ✅ 重试 (reqwest-retry + ExponentialBackoff)          │
 │  ✅ 熔断 (cockatiel 同级逻辑)                          │
 │  ✅ 自适应超时 (RTT 采样)                              │
@@ -255,7 +255,7 @@ export function createNativeHttpClient(config: HttpClientConfig): IHttpClient {
 
 | 功能 | 放 Rust | 理由 |
 |------|---------|------|
-| TLS 握手 | ✅ | openssl/rustls 原生性能 |
+| TLS 握手 | ✅ | rustls 原生性能 |
 | DNS 解析 + host_mapping | ✅ | hickory-dns 自定义解析器 |
 | 连接池管理 | ✅ | reqwest 内置 hyper-util pool |
 | TCP keep-alive | ✅ | 系统调用级别 |

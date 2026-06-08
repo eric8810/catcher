@@ -1,6 +1,6 @@
 # WebSocket 指南
 
-> catcher 的 WebSocket 客户端为实时通信场景提供多端点竞速、自动重连、per-message-deflate 压缩和 msgpack 编解码能力。  
+> catcher 的 WebSocket 客户端为实时通信场景提供多端点竞速、自动重连、per-message-deflate 压缩、应用层压缩（gzip/zstd）和 msgpack 编解码能力。  
 > 覆盖平台：Node.js (TS) / Rust / Flutter (dart:ffi)
 
 ---
@@ -25,7 +25,8 @@
 |------|------|
 | 多端点竞速 | 同时连接多个 URL，取最快建立的连接，其余立即关闭 |
 | 自动重连 | 指数退避 + ±25% 抖动，可配置最大重试次数 |
-| Per-Message Deflate | zlib 压缩，可设阈值，仅压缩大于阈值的帧 |
+| Per-Message Deflate | zlib 压缩（RFC 7692），可设阈值，仅压缩大于阈值的帧 |
+| 应用层压缩 | gzip/zstd envelope 压缩，不依赖 WebSocket 扩展协商 |
 | Msgpack 编解码 | 二进制序列化，比 JSON 更小的体积 |
 | 心跳检测 | 自适应 ping/pong，连续丢包自动判定断线 |
 | 握手超时 | 默认 10s，防止 TCP 连通但握手卡死 |
@@ -571,6 +572,7 @@ Cookie 会被注入到 WebSocket 握手的 HTTP 请求头中。
 | **独立竞速函数** | `raceEndpoints()` | `EndpointRacer` | — |
 | **重连策略** | `createReconnectStrategy()` | `ReconnectManager` | 内建（`WsReconnectConfig`） |
 | **压缩** | `perMessageDeflate` | `per_message_deflate` | `perMessageDeflate` |
+| **应用层压缩** | — | `application_compression` | `applicationCompression` |
 | **Msgpack** | `pack()` / `unpack()` | `pack()` / `unpack()` | `CatcherCodec.pack()` / `.unpack()` |
 | **心跳** | ❌ 未集成 | `HeartbeatManager` | ✅ `WsHeartbeatConfig` |
 | **事件模型** | `EventTarget` 回调 | `mpsc::channel` | `Stream<WsEvent>` |

@@ -1,7 +1,8 @@
 # 依赖升级与选型分析：reqwest / tungstenite / yawc
 
-> 日期：2026-05-16
-> 目标：评估 reqwest 0.13 升级、tungstenite 升级、yawc 替换的可行性、工作量和收益，给出 PR 分解建议。
+> 日期：2026-05-16  
+> 目标：评估 reqwest 0.13 升级、tungstenite 升级、yawc 替换的可行性、工作量和收益，给出 PR 分解建议。  
+> **状态（2026-06-01）**：✅ yawc 已在 v0.3.11 中正式采用，替换 tokio-tungstenite 作为 WS 传输层。详见 [CHANGELOG](../../CHANGELOG.md#0311-2026-06-01)。
 
 ---
 

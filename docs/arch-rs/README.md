@@ -81,7 +81,7 @@ flutter pub add catcher_core
 | 01 | [`01-cargo.md`](./01-cargo.md) | Cargo workspace 与 crate 间依赖 |
 | 02 | [`02-module-tree.md`](./02-module-tree.md) | 各 crate 源码目录树 |
 | 03 | [`03-types.md`](./03-types.md) | 类型定义（catcher-core） |
-| 04 | [`04-transport.md`](./04-transport.md) | HTTP + WS 传输层（reqwest / tokio-tungstenite） |
+| 04 | [`04-transport.md`](./04-transport.md) | HTTP + WS 传输层（reqwest / yawc） |
 | 05 | [`05-resilience.md`](./05-resilience.md) | 重试、熔断、自适应超时 |
 | 06 | [`06-scheduler.md`](./06-scheduler.md) | 优先级队列与并发调度 |
 | 07 | [`07-codec.md`](./07-codec.md) | msgpack 编解码（已合并到 ws） |

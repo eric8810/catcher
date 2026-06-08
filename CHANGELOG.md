@@ -2,15 +2,21 @@
 
 All notable changes to this project will be documented in this file. See [release-please](https://github.com/googleapis/release-please) for automated management.
 
-## 0.3.11 (2026-05-20)
+## 0.3.11 (2026-06-01)
 
 ### ✨ Features
 
 - **WebSocket yawc transport**: Migrated the Rust WebSocket client transport from `tokio-tungstenite` to `yawc`, enabling native permessage-deflate negotiation while preserving DNS failover, reconnect, heartbeat, custom headers, subprotocols, and application-level compression fallback.
+- **Application-layer compression**: Added `application_compression` config to `WsClientConfig` with gzip and zstd support. When permessage-deflate is unavailable, messages above a configurable threshold are automatically compressed with a catcher-specific envelope so receiving servers can detect and decompress them. Negotiation headers (`X-Catcher-Application-Compression`) are sent during handshake.
 
 ### 🐛 Bug Fixes
 
 - **Android native builds**: Export Android NDK `CC_*` and `AR_*` variables so native dependencies with C build scripts use the correct cross-compilation toolchain.
+- **Reconnect message buffering**: Commands sent during reconnect are now drained and replayed after a successful reconnection instead of being silently dropped.
+- **pong_timeout fast detection**: `HeartbeatManager::is_timed_out()` now detects single-pong timeout expiry in addition to `is_missed_pongs_exceeded()`, providing faster dead-connection detection within a single heartbeat cycle.
+- **Close frame echo**: Receiving a Close frame now correctly echoes a Close frame back before disconnecting (RFC 6455 §5.5.1).
+- **Reconnect latency measurement**: The `Connected` event now carries the actual latency of each successful reconnection instead of reporting 0 ms.
+- **native-tls removal**: Dropped the `native-tls` feature and removed `rustls` as a direct dependency; `yawc/rustls-ring` handles all TLS provisioning.
 
 ### 🔄 Dependencies
 

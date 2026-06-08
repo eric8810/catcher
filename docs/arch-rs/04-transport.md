@@ -125,78 +125,83 @@ fn build_retry_policy(config: &RetryConfig) -> ExponentialBackoff {
 ## WsTransport (`src/transport/ws_client.rs`)
 
 ```rust
-use stream_tungstenite::prelude::*;
-use stream_tungstenite::WebSocketClient;
+use yawc::{Frame, OpCode};
 use tokio::sync::mpsc;
-use std::sync::Arc;
 use crate::error::CatcherError;
 use crate::types::ws::*;
 
 /// WebSocket 传输层
 pub struct WsTransport;
 
-impl WsTransport {
-    pub async fn connect(
-        url: &str,
-        config: &WsClientConfig,
-    ) -> Result<(WsHandle, mpsc::UnboundedReceiver<WsEvent>), CatcherError> {
-        let (event_tx, event_rx) = mpsc::unbounded_channel();
-        let tx_clone = event_tx.clone();
-        let url_owned = url.to_string();
-
-        let client = WebSocketClient::builder(&url_owned)
-            .receive_timeout(std::time::Duration::from_secs(600))
-            .build();
-
-        let mut messages = client.subscribe();
-        let client_arc = Arc::new(client);
-
-        let client_bg = client_arc.clone();
-        tokio::spawn(async move { client_bg.run().await; });
-
-        let tx_bg = tx_clone.clone();
-        tokio::spawn(async move {
-            while let Ok(msg) = messages.recv().await {
-                let event = match msg.as_ref() {
-                    tokio_tungstenite::tungstenite::Message::Text(t) =>
-                        WsEvent::Message { data: t.as_bytes().to_vec(), is_binary: false },
-                    tokio_tungstenite::tungstenite::Message::Binary(d) =>
-                        WsEvent::Message { data: d.clone(), is_binary: true },
-                    _ => continue,
-                };
-                let _ = tx_bg.send(event);
-            }
-        });
-
-        let sender = client_arc.sender().await;
-
-        Ok((WsHandle { url: url_owned, sender, event_tx: tx_clone }, event_rx))
-    }
-}
-
+/// WebSocket 连接句柄 — 跨重连保持有效
 #[derive(Clone)]
 pub struct WsHandle {
     url: String,
-    sender: Option<stream_tungstenite::Sender>,
-    event_tx: mpsc::UnboundedSender<WsEvent>,
+    cmd_tx: mpsc::UnboundedSender<WsCommand>,
+}
+
+enum WsCommand {
+    Text(String),
+    Binary(Vec<u8>),
+    Close { code: u16, reason: String },
+}
+
+impl WsTransport {
+    /// 建立 WebSocket 连接，返回句柄和事件接收器。
+    /// 支持多端点竞速（EndpointRacer）、自动重连（ReconnectManager）、心跳。
+    pub async fn connect(
+        config: &WsClientConfig,
+    ) -> Result<(WsHandle, mpsc::UnboundedReceiver<WsEvent>), CatcherError> {
+        let (event_tx, event_rx) = mpsc::unbounded_channel();
+        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel::<WsCommand>();
+
+        // 使用 endpoint racer 多端点竞速建立初始连接
+        let racer = EndpointRacer::new(config.urls.clone(), config.race_count);
+        let dns_resolver = build_dns_resolver(config)?;
+        let (url, stream, latency_ms) = racer.race(config, &dns_resolver).await?;
+
+        let handle_url = url.clone();
+        let mgr_config = config.clone();
+
+        // 启动连接管理器任务 — 内部循环处理断开、重连、缓冲重放
+        tokio::spawn(async move {
+            connection_manager(
+                url, stream, latency_ms, &mgr_config,
+                dns_resolver, event_tx, cmd_rx,
+            ).await;
+        });
+
+        Ok((WsHandle { url: handle_url, cmd_tx }, event_rx))
+    }
 }
 
 impl WsHandle {
+    /// 发送文本消息（断线期间自动缓冲，重连后重放）
     pub fn send_text(&self, text: &str) -> Result<(), CatcherError> {
-        self.sender.as_ref()
-            .ok_or(CatcherError::Internal("sender unavailable".into()))?
-            .send_text(text)
-            .map_err(|e| CatcherError::Internal(format!("ws send: {e}")))
+        self.cmd_tx
+            .send(WsCommand::Text(text.to_string()))
+            .map_err(|_| CatcherError::WsDisconnected {
+                code: 1006, reason: "connection closed".into(),
+            })
     }
 
+    /// 发送二进制消息
     pub fn send_binary(&self, data: &[u8]) -> Result<(), CatcherError> {
-        self.sender.as_ref()
-            .ok_or(CatcherError::Internal("sender unavailable".into()))?
-            .send_binary(data.to_vec())
-            .map_err(|e| CatcherError::Internal(format!("ws send: {e}")))
+        self.cmd_tx
+            .send(WsCommand::Binary(data.to_vec()))
+            .map_err(|_| CatcherError::WsDisconnected {
+                code: 1006, reason: "connection closed".into(),
+            })
     }
 
-    pub fn close(&self) { /* drop triggers close */ }
+    /// 关闭连接（发送 Close frame）
+    pub fn close(&self, code: u16, reason: &str) -> Result<(), CatcherError> {
+        self.cmd_tx
+            .send(WsCommand::Close { code, reason: reason.to_string() })
+            .map_err(|_| CatcherError::WsDisconnected {
+                code: 1006, reason: "connection closed".into(),
+            })
+    }
 }
 ```
 

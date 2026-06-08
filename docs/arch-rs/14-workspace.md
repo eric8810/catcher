@@ -36,11 +36,11 @@ crates/                               # Rust workspace
 │       └── observability/            # network_quality, metrics
 │
 ├── catcher-ws/                       # WebSocket 客户端
-│   ├── Cargo.toml                    # deps: catcher-core, tokio-tungstenite, backon
+│   ├── Cargo.toml                    # deps: catcher-core, catcher-dns, yawc, flate2, zstd, backon
 │   └── src/
 │       ├── codec.rs                  # msgpack pack/unpack (内置)
 │       ├── transport/ws_client.rs
-│       └── ws/                       # reconnect, heartbeat, multi_endpoint
+│       └── ws/                       # reconnect (消息缓冲重放), heartbeat, multi_endpoint, compression, application_compression
 │
 ├── catcher-ffi/                      # cdylib umbrella — 25 C ABI symbols
 │   ├── Cargo.toml                    # deps: catcher-http, catcher-ws, catcher-core

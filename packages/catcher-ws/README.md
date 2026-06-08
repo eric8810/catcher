@@ -3,7 +3,7 @@
 [![crates.io](https://img.shields.io/crates/v/catcher-ws.svg)](https://crates.io/crates/catcher-ws)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Resilient WebSocket client for the [catcher](https://github.com/eric8810/catcher) toolkit — built on **tokio-tungstenite** with automatic reconnection, heartbeat, DNS-aware endpoint racing, and compression controls.
+Resilient WebSocket client for the [catcher](https://github.com/eric8810/catcher) toolkit — built on **yawc** with automatic reconnection, heartbeat, DNS-aware endpoint racing, RFC 7692 permessage-deflate, and application-layer compression.
 
 > **⚠️ Breaking Change (0.3.0)**:
 > - `WsClientConfig` field renames: `deflate_threshold` → `deflate_threshold_bytes`, `max_message_size` → `max_payload_bytes`
@@ -152,3 +152,8 @@ let config = WsClientConfig {
 ## License
 
 MIT
+
+### Third-party licenses
+
+This project uses the following third-party libraries:
+- [`yawc`](https://github.com/infinitefield/yawc) - Licensed under [MPL-2.0](https://www.mozilla.org/en-US/MPL/2.0/)

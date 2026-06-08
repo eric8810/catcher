@@ -307,6 +307,9 @@ const ws = new WsClient(
 | `urls` | `string[]` | **必填** | WebSocket URL(s) |
 | `per_message_deflate` | `boolean` | `true` | 标准 RFC 7692 permessage-deflate |
 | `deflate_threshold_bytes` | `number` | `1024` | 压缩阈值 |
+| `application_compression.enabled` | `boolean` | `true` | 启用应用层压缩（gzip/zstd） |
+| `application_compression.algorithm` | `"gzip" \| "zstd"` | `"gzip"` | 压缩算法 |
+| `application_compression.threshold_bytes` | `number` | `1024` | 应用层压缩阈值 |
 | `handshake_timeout_ms` | `number` | `15000` | 握手超时 |
 | `max_payload_bytes` | `number` | `67108864` | 最大 payload（64MB） |
 | `reconnect.initial_delay_ms` | `number` | `500` | 初始重连延迟 |

@@ -95,6 +95,7 @@ pub struct WsClientConfig {
     pub headers: HashMap<String, String>,         // 默认 {}
     pub per_message_deflate: bool,                // 默认 true
     pub deflate_threshold_bytes: u32,             // 默认 1024
+    pub application_compression: Option<ApplicationCompressionConfig>,  // 默认 None
     pub handshake_timeout_ms: u64,                // 默认 15000
     pub max_payload_bytes: u64,                   // 默认 67108864 (64MB)
     pub reconnect: Option<ReconnectConfig>,
@@ -114,6 +115,17 @@ pub struct HeartbeatConfig {
     pub adaptive: bool,             // 默认 true — 基于 RTT 动态调整
     pub pong_timeout_ms: u64,       // 默认 10000 — pong 无响应视为断线
     pub max_missed_pongs: u32,      // 默认 3 — 连续丢失 pong 判定断线
+}
+
+pub enum ApplicationCompressionAlgorithm {
+    Gzip,    // 默认
+    Zstd,
+}
+
+pub struct ApplicationCompressionConfig {
+    pub enabled: bool,              // 默认 true
+    pub algorithm: ApplicationCompressionAlgorithm,  // 默认 Gzip
+    pub threshold_bytes: u32,       // 默认 1024 — 小于此值的消息不压缩
 }
 ```
 
@@ -321,6 +333,9 @@ pub fn build_ws_options(config: &WsClientConfig) -> yawc::Options
 |------|--------|
 | `per_message_deflate` | `true` |
 | `deflate_threshold_bytes` | `1024` |
+| `application_compression.enabled` | `true` |
+| `application_compression.algorithm` | `Gzip` |
+| `application_compression.threshold_bytes` | `1024` |
 | `handshake_timeout_ms` | `15000` |
 | `max_payload_bytes` | `67108864` (64MB) |
 | `race_count` | `1` |

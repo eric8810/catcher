@@ -113,7 +113,7 @@ catcher  catcher             (axios)    (ws)
 | [`catcher-core`](https://crates.io/crates/catcher-core) | [![crates.io](https://img.shields.io/crates/v/catcher-core.svg)](https://crates.io/crates/catcher-core) | Shared types & errors |
 | [`catcher-dns`](https://crates.io/crates/catcher-dns) | [![crates.io](https://img.shields.io/crates/v/catcher-dns.svg)](https://crates.io/crates/catcher-dns) | Shared DNS cache, host mapping, stale fallback |
 | [`catcher-http`](https://crates.io/crates/catcher-http) | [![crates.io](https://img.shields.io/crates/v/catcher-http.svg)](https://crates.io/crates/catcher-http) | HTTP — reqwest, retry, CB |
-| [`catcher-ws`](https://crates.io/crates/catcher-ws) | [![crates.io](https://img.shields.io/crates/v/catcher-ws.svg)](https://crates.io/crates/catcher-ws) | WS — tokio-tungstenite, codec |
+| [`catcher-ws`](https://crates.io/crates/catcher-ws) | [![crates.io](https://img.shields.io/crates/v/catcher-ws.svg)](https://crates.io/crates/catcher-ws) | WS — yawc, permessage-deflate, codec |
 | [`catcher-ffi`](https://crates.io/crates/catcher-ffi) | [![crates.io](https://img.shields.io/crates/v/catcher-ffi.svg)](https://crates.io/crates/catcher-ffi) | cdylib umbrella — 25 C ABI symbols |
 | [`catcher-uniffi`](https://crates.io/crates/catcher-uniffi) | [![crates.io](https://img.shields.io/crates/v/catcher-uniffi.svg)](https://crates.io/crates/catcher-uniffi) | UniFFI → Swift + Kotlin |
 
@@ -313,7 +313,7 @@ void main() async {
 - **Shared HTTP Agent** — TCP keep-alive, **StaleAwareDnsResolver** (676x cache hit speedup, stale-while-revalidate), TLS session reuse, idle socket eviction
 - **Auto-retry** — exponential backoff with jitter, destroys stale keepAlive sockets on retry
 - **Circuit Breaker** — trips on consecutive failures, auto-recovers, prevents retry storms
-- **Resilient WebSocket** — perMessageDeflate compression, exponential reconnect, multi-endpoint racing
+- **Resilient WebSocket** — RFC 7692 permessage-deflate, application-layer compression (gzip/zstd), exponential reconnect with message buffering, multi-endpoint racing, heartbeat with fast pong-timeout detection
 - **Server-Sent Events (SSE)** — raw line stream, auto-reconnect, `Last-Event-ID` resume, `AbortSignal`, cross-platform (Rust + TS + Browser)
 - **Binary codec** — built-in `msgpack: true` transport-level codec (10% wire savings), standalone pack/unpack via `@eric8810/catcher-napi-ws/codec`
 - **Dart FFI feature parity** — Flutter clients can configure DNS cache and enable native MessagePack through `DnsConfig`, `HttpClientConfig.msgpack`, `WsClientConfig.dns`, and `WsClientConfig.msgpack`
@@ -330,12 +330,13 @@ interceptors → retry → circuit breaker → concurrency queue → HTTP engine
 
 | Suite | Count | Status |
 |-------|-------|--------|
-| TS Unit + Integration (http, ws, sse, web) | 323/325 | ✅ |
+| TS Unit + Integration (http, ws, sse, web) | 346/348 | ✅ |
 | TS E2E (scenarios + rust-vs-vanilla) | 38/38 | ✅ |
 | Rust Unit — catcher-core | 23/23 | ✅ |
 | Rust Unit — catcher-dns | 12/12 | ✅ |
 | Rust Unit — catcher-http | 118/118 | ✅ |
-| Rust Unit — catcher-ws | 25/25 | ✅ |
+| Rust Unit — catcher-ws | 35/35 | ✅ |
+| Rust Integration — catcher-ws (compression) | 5/5 | ✅ |
 | NAPI Integration (dns, http, ws, msgpack) | 28/28 | ✅ |
 | NAPI E2E (rust-vs-vanilla S1-S8) | 37/37 | ✅ |
 | NAPI Throughput Benchmark | 14/14 | ✅ |
@@ -378,3 +379,8 @@ cd packages && cargo test
 ## License
 
 MIT
+
+### Third-party licenses
+
+This project uses the following third-party libraries:
+- [`yawc`](https://github.com/infinitefield/yawc) - Licensed under [MPL-2.0](https://www.mozilla.org/en-US/MPL/2.0/)
