@@ -137,7 +137,7 @@ catcher 当前已支持 HTTP 代理和 SOCKS5 代理。但生产环境中代理�
 
 | 场景 | catcher 覆盖 | 建议 |
 |------|:----------:|------|
-| VPN 连接建立/断开 | 网络接口状态变化 | ❌ | 是否检测到网络变化并重建连接池 |
+| VPN 连接建立/断开 | 网络接口状态变化 | ✅ `networkChanged()` | 宿主 App 主动通知：清 DNS 缓存 + 重建连接池 + WS 立即重连（见 user-manual/resilience.md 第七节） |
 | Split Tunnel | 部分流量走 VPN，部分直连 | ❌ | DNS 解析走不同解析器 |
 | VPN DNS 泄露 | DNS 不走 VPN 隧道 | ❌ | 需文档说明 DNS 配置的隐私影响 |
 | MTU 变化 | VPN 降低有效 MTU (TLS overhead) | ❌ | 大 payload 可能被 fragment |
@@ -183,7 +183,7 @@ catcher 的 E2E 测试已覆盖 7 种预设网络条件（good→metro），以�
 5. **代理返回非预期 Content-Type** — 不 panic，错误信息清晰
 6. **网络闪断时 CB 误触发** — CB 阈值需考虑网络闪断模式
 7. **Gray failure** — 部分成功/部分失败时 retry 策略
-8. **VPN 网络变化检测** — 连接池是否感知网络接口变化
+8. **VPN 网络变化检测** — ✅ 已实现 `networkChanged()` API：宿主 App 感知网络变化后主动通知，立即重建连接池/重连 WS/清 DNS 缓存（全平台绑定均已暴露）
 
 ### 中优先级
 
