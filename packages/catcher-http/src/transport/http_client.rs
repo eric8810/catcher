@@ -36,6 +36,9 @@ pub struct HttpTransport {
     cancel_token: Arc<Mutex<tokio_util::sync::CancellationToken>>,
     metrics: MetricsCollector,
     adaptive_timeout: Mutex<Option<AdaptiveTimeout>>,
+    /// 网络代际 — network_changed() 时递增。旧代际发起的请求失败时
+    /// 不计入熔断器（那是旧网络的失败，不应惩罚新网络）。
+    network_generation: AtomicU64,
     /// Per-request cancel tokens, keyed by request_id (N-03)
     pending_requests: Mutex<HashMap<u64, tokio_util::sync::CancellationToken>>,
     next_request_id: AtomicU64,
@@ -103,6 +106,7 @@ impl HttpTransport {
             cancel_token: Arc::new(Mutex::new(tokio_util::sync::CancellationToken::new())),
             metrics,
             adaptive_timeout: Mutex::new(None),
+            network_generation: AtomicU64::new(0),
             pending_requests: Mutex::new(HashMap::new()),
             next_request_id: AtomicU64::new(1),
             concurrency_semaphore,
@@ -110,11 +114,13 @@ impl HttpTransport {
         })
     }
 
-    /// 当前底层客户端的克隆（ClientWithMiddleware 内部是 Arc，克隆开销小）
+    /// 当前底层客户端的克隆（ClientWithMiddleware 内部是 Arc，克隆开销小）。
+    /// 锁中毒时直接取内部值：client 的写入是整体赋值，不存在半更新状态，
+    /// 且 panic 不能穿过 C ABI（会导致宿主进程 abort）。
     fn client(&self) -> ClientWithMiddleware {
         self.client
             .read()
-            .expect("client lock poisoned")
+            .unwrap_or_else(|e| e.into_inner())
             .clone()
     }
 
@@ -132,17 +138,21 @@ impl HttpTransport {
         #[cfg(feature = "hickory-dns")]
         self.dns_resolver.clear_cache();
 
+        // 熔断器先重置：即使客户端重建失败（如 TLS 证书文件被移除），
+        // 旧网络造成的熔断状态也不应继续拒绝新网络上的请求。
+        // 代际递增使旧网络上仍在飞行的请求失败时不再计入熔断。
+        self.network_generation.fetch_add(1, Ordering::SeqCst);
+        if let Some(ref cb) = self.circuit_breaker {
+            cb.reset();
+        }
+
         let new_client = build_middleware_client(
             &self.config,
             &self.metrics,
             #[cfg(feature = "hickory-dns")]
             &self.dns_resolver,
         )?;
-        *self.client.write().expect("client lock poisoned") = new_client;
-
-        if let Some(ref cb) = self.circuit_breaker {
-            cb.reset();
-        }
+        *self.client.write().unwrap_or_else(|e| e.into_inner()) = new_client;
         Ok(())
     }
 }
@@ -154,94 +164,92 @@ fn build_middleware_client(
     metrics: &MetricsCollector,
     #[cfg(feature = "hickory-dns")] dns_resolver: &Arc<crate::transport::dns::ReqwestDnsResolver>,
 ) -> Result<ClientWithMiddleware, CatcherError> {
+    let mut reqwest_builder = Client::builder()
+        .connect_timeout(Duration::from_millis(config.connect_timeout_ms))
+        .pool_max_idle_per_host(config.pool.max_idle_per_host)
+        .pool_idle_timeout(Duration::from_secs(config.pool.idle_timeout_secs))
+        .tcp_keepalive(
+            config
+                .pool
+                .keep_alive
+                .then(|| Duration::from_secs(config.pool.keep_alive_interval_secs)),
+        )
+        .tcp_keepalive_interval(
+            config
+                .pool
+                .keep_alive
+                .then(|| Duration::from_secs(config.pool.keep_alive_interval_secs)),
+        )
+        .tcp_keepalive_retries(config.pool.keep_alive.then_some(3));
+
+    // G8: TLS configuration
+    reqwest_builder = build_tls_config(reqwest_builder, &config.tls)?;
+
+    // G7: DNS resolution — 复用共享解析器（缓存跨连接池重建保留，可显式清空）
+    #[cfg(feature = "hickory-dns")]
     {
-        let mut reqwest_builder = Client::builder()
-            .connect_timeout(Duration::from_millis(config.connect_timeout_ms))
-            .pool_max_idle_per_host(config.pool.max_idle_per_host)
-            .pool_idle_timeout(Duration::from_secs(config.pool.idle_timeout_secs))
-            .tcp_keepalive(
-                config
-                    .pool
-                    .keep_alive
-                    .then(|| Duration::from_secs(config.pool.keep_alive_interval_secs)),
-            )
-            .tcp_keepalive_interval(
-                config
-                    .pool
-                    .keep_alive
-                    .then(|| Duration::from_secs(config.pool.keep_alive_interval_secs)),
-            )
-            .tcp_keepalive_retries(config.pool.keep_alive.then_some(3));
-
-        // G8: TLS configuration
-        reqwest_builder = build_tls_config(reqwest_builder, &config.tls)?;
-
-        // G7: DNS resolution — 复用共享解析器（缓存跨连接池重建保留，可显式清空）
-        #[cfg(feature = "hickory-dns")]
-        {
-            reqwest_builder = reqwest_builder.dns_resolver(dns_resolver.clone());
-        }
-
-        // G4: Proxy configuration
-        if let Some(ref proxy_config) = config.proxy {
-            let mut proxy = reqwest::Proxy::all(&proxy_config.url)
-                .map_err(|e| CatcherError::InvalidConfig(format!("invalid proxy URL: {e}")))?;
-            if let Some(ref auth) = proxy_config.auth {
-                proxy = proxy.basic_auth(&auth.username, &auth.password);
-            }
-            // G4: noProxy — exclude matching hostnames from proxying
-            if !proxy_config.no_proxy.is_empty() {
-                let no_proxy_str = proxy_config.no_proxy.join(",");
-                let no_proxy = reqwest::NoProxy::from_string(&no_proxy_str);
-                proxy = proxy.no_proxy(no_proxy);
-            }
-            reqwest_builder = reqwest_builder.proxy(proxy);
-        }
-
-        // G6: Redirect policy
-        reqwest_builder = match &config.redirect {
-            Some(r) if !r.follow => reqwest_builder.redirect(reqwest::redirect::Policy::none()),
-            Some(r) => reqwest_builder.redirect(reqwest::redirect::Policy::limited(r.max_redirects as usize)),
-            None => reqwest_builder,
-        };
-
-        // G12: Auth — set default headers for basic auth and bearer token
-        if let Some(ref auth) = config.auth {
-            let encoded = base64_encode(&format!("{}:{}", auth.username, auth.password));
-            let mut headers = reqwest::header::HeaderMap::new();
-            headers.insert(
-                "Authorization",
-                format!("Basic {}", encoded).parse()
-                    .map_err(|e| CatcherError::InvalidConfig(format!("invalid basic auth header: {e}")))?,
-            );
-            reqwest_builder = reqwest_builder.default_headers(headers);
-        }
-        if let Some(ref token) = config.bearer_token {
-            let mut headers = reqwest::header::HeaderMap::new();
-            headers.insert(
-                "Authorization",
-                format!("Bearer {}", token).parse()
-                    .map_err(|e| CatcherError::InvalidConfig(format!("invalid bearer token header: {e}")))?,
-            );
-            reqwest_builder = reqwest_builder.default_headers(headers);
-        }
-
-        let reqwest_client = reqwest_builder
-            .build()
-            .map_err(|e| CatcherError::Internal(format!("reqwest build error: {e}")))?;
-
-        // Phase 3: Wrap with middleware (retry)
-        let mut client_builder = MiddlewareBuilder::new(reqwest_client);
-        if let Some(ref retry) = config.retry {
-            let policy = build_retry_policy(retry);
-            client_builder = client_builder.with(MetricsRetryMiddleware::new(
-                policy,
-                metrics.http_retries_weak(),
-            ));
-        }
-
-        Ok(client_builder.build())
+        reqwest_builder = reqwest_builder.dns_resolver(dns_resolver.clone());
     }
+
+    // G4: Proxy configuration
+    if let Some(ref proxy_config) = config.proxy {
+        let mut proxy = reqwest::Proxy::all(&proxy_config.url)
+            .map_err(|e| CatcherError::InvalidConfig(format!("invalid proxy URL: {e}")))?;
+        if let Some(ref auth) = proxy_config.auth {
+            proxy = proxy.basic_auth(&auth.username, &auth.password);
+        }
+        // G4: noProxy — exclude matching hostnames from proxying
+        if !proxy_config.no_proxy.is_empty() {
+            let no_proxy_str = proxy_config.no_proxy.join(",");
+            let no_proxy = reqwest::NoProxy::from_string(&no_proxy_str);
+            proxy = proxy.no_proxy(no_proxy);
+        }
+        reqwest_builder = reqwest_builder.proxy(proxy);
+    }
+
+    // G6: Redirect policy
+    reqwest_builder = match &config.redirect {
+        Some(r) if !r.follow => reqwest_builder.redirect(reqwest::redirect::Policy::none()),
+        Some(r) => reqwest_builder.redirect(reqwest::redirect::Policy::limited(r.max_redirects as usize)),
+        None => reqwest_builder,
+    };
+
+    // G12: Auth — set default headers for basic auth and bearer token
+    if let Some(ref auth) = config.auth {
+        let encoded = base64_encode(&format!("{}:{}", auth.username, auth.password));
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            "Authorization",
+            format!("Basic {}", encoded).parse()
+                .map_err(|e| CatcherError::InvalidConfig(format!("invalid basic auth header: {e}")))?,
+        );
+        reqwest_builder = reqwest_builder.default_headers(headers);
+    }
+    if let Some(ref token) = config.bearer_token {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            "Authorization",
+            format!("Bearer {}", token).parse()
+                .map_err(|e| CatcherError::InvalidConfig(format!("invalid bearer token header: {e}")))?,
+        );
+        reqwest_builder = reqwest_builder.default_headers(headers);
+    }
+
+    let reqwest_client = reqwest_builder
+        .build()
+        .map_err(|e| CatcherError::Internal(format!("reqwest build error: {e}")))?;
+
+    // Phase 3: Wrap with middleware (retry)
+    let mut client_builder = MiddlewareBuilder::new(reqwest_client);
+    if let Some(ref retry) = config.retry {
+        let policy = build_retry_policy(retry);
+        client_builder = client_builder.with(MetricsRetryMiddleware::new(
+            policy,
+            metrics.http_retries_weak(),
+        ));
+    }
+
+    Ok(client_builder.build())
 }
 
 impl HttpTransport {
@@ -265,6 +273,7 @@ impl HttpTransport {
         mut request: HttpRequest,
     ) -> (u64, Result<HttpResponse, CatcherError>) {
         let start = Instant::now();
+        let gen_at_start = self.network_generation.load(Ordering::SeqCst);
 
         if let Some(ref cb) = self.circuit_breaker {
             if let Err(e) = cb.before_request() {
@@ -381,7 +390,10 @@ impl HttpTransport {
             Err(_) => {
                 self.metrics.record_http_request(false, elapsed_us);
                 if let Some(ref cb) = self.circuit_breaker {
-                    cb.on_failure();
+                    // 请求发起后网络已切换：失败属于旧网络，不计入新网络的熔断
+                    if self.network_generation.load(Ordering::SeqCst) == gen_at_start {
+                        cb.on_failure();
+                    }
                 }
             }
         }
