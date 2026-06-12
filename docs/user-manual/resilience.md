@@ -685,6 +685,7 @@ const client = createHttpClient({
 | 高频交易 | 1 | fixed 100ms | 3s | 10 / 5s | 20 |
 | 移动弱网 | 5 | exponential | 60s | 8 / 15s | 3 |
 | 批处理 | 10 | exponential | 300s | 20 / 60s | 2 |
+| 微服务内网 | 3 | exponential | 5s | 3 / 5s | 50 |
 
 ---
 
@@ -782,4 +783,11 @@ catcher_ws_network_changed(ws_handle);      // FfiResult
   避免每次通断都触发重连风暴。
 - **不调用也能恢复**：`networkChanged()` 是优化而非必需 — 不调用时
   心跳超时/keepalive 探针仍会兜底自愈，只是慢 10-30 秒。
-| 微服务内网 | 3 | exponential | 5s | 3 / 5s | 50 |
+- **DNS 服务器不会重读**：解析器的 nameserver 列表在创建时确定
+  （系统配置仅读取一次）。`networkChanged()` 清空解析缓存，但若新网络
+  推送了不同的系统 DNS 服务器，需要自定义 `dns.nameservers` 或重建客户端。
+- **建议配合 reconnect 配置**：WS 未配置 `reconnect` 时 `networkChanged()`
+  只做一次立即重连；切换瞬间网络常有 1-3 秒不可用窗口，一次尝试可能失败
+  并以 `Error` 事件终止。配置了 `reconnect` 则失败后自动落入退避重试。
+- **连接建立前调用会报错**：客户端还在初始连接过程中时调用
+  `networkChanged()` 会返回"未连接"错误，宿主回调中建议忽略该错误。
