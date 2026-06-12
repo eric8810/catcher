@@ -185,7 +185,8 @@ class CatcherHttpClient {
     final fn = _networkChangedFn;
     if (fn == null) {
       throw StateError(
-          'networkChanged() requires a rebuilt native library (>= 0.4)');
+          'networkChanged() requires a native library that exports '
+          'catcher_http_network_changed — rebuild catcher-ffi');
     }
     if (_handle == null || _handle == nullptr) {
       throw StateError('HTTP client has been disposed');

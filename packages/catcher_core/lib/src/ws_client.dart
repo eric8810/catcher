@@ -146,7 +146,8 @@ class CatcherWsClient {
     final fn = _networkChanged;
     if (fn == null) {
       throw StateError(
-          'networkChanged() requires a rebuilt native library (>= 0.4)');
+          'networkChanged() requires a native library that exports '
+          'catcher_ws_network_changed — rebuild catcher-ffi');
     }
     final result = fn(_handle!);
     _checkResult(result);

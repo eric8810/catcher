@@ -71,6 +71,9 @@ export class WsClient {
    * 马上重连 — 无需被动等待 10-30 秒心跳超时。多端点配置时重新竞速。
    */
   networkChanged(): void {
+    if (!this._raw.networkChanged) {
+      throw new Error('networkChanged() requires rebuilt native addon (cargo build)')
+    }
     this._raw.networkChanged()
   }
 
