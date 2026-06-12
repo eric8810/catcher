@@ -145,6 +145,23 @@ pub unsafe extern "C" fn catcher_ws_close(handle: *mut c_void, code: u16, reason
     }
 }
 
+/// 通知 WS 客户端网络环境已变化（WiFi 切换 / VPN 换节点等）。
+/// 立即断开当前连接、清空 DNS 缓存、跳过退避延迟重连。
+#[no_mangle]
+pub unsafe extern "C" fn catcher_ws_network_changed(handle: *mut c_void) -> FfiResult {
+    if handle.is_null() {
+        return FfiResult::error(1, "null handle");
+    }
+    let id = *(handle as *const usize);
+    match WS_REGISTRY.get(id) {
+        Some(h) => match h.network_changed() {
+            Ok(()) => FfiResult::ok(std::ptr::null_mut(), 0),
+            Err(e) => FfiResult::error(1, &e.to_string()),
+        },
+        None => FfiResult::error(1, "handle not found"),
+    }
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn catcher_ws_destroy(handle: *mut c_void) {
     if handle.is_null() {

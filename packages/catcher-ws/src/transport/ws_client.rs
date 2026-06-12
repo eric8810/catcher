@@ -35,6 +35,7 @@ enum WsCommand {
     Text(String),
     Binary(Vec<u8>),
     Close { code: u16, reason: String },
+    NetworkChanged,
 }
 
 // ── 公开类型 ──
@@ -83,6 +84,25 @@ impl WsHandle {
             })
     }
 
+    /// 通知库网络环境已发生变化（WiFi 切换、VPN 换节点、蜂窝/WiFi 切换等）。
+    ///
+    /// 旧连接在网络切换后通常处于半开状态，被动等待心跳超时需要 10-30 秒。
+    /// 调用此方法立即：
+    /// 1. 断开当前连接（不等心跳超时）
+    /// 2. 清空 DNS 缓存（新网络下解析结果可能不同）
+    /// 3. 重置重连退避计数，跳过退避延迟立即重连
+    /// 4. 多端点配置时重新竞速（新网络下最优端点可能不同）
+    ///
+    /// 重连期间正在等待退避的也会被打断并立即重试。
+    pub fn network_changed(&self) -> Result<(), CatcherError> {
+        self.cmd_tx
+            .send(WsCommand::NetworkChanged)
+            .map_err(|_| CatcherError::WsDisconnected {
+                code: 1006,
+                reason: "connection closed".into(),
+            })
+    }
+
     /// 返回连接的 URL（初始连接的 URL）
     pub fn url(&self) -> &str {
         &self.url
@@ -101,6 +121,7 @@ enum LoopOutcome {
     CleanClose,
     Disconnected { code: u16, reason: String },
     HeartbeatTimeout,
+    NetworkChanged,
 }
 
 fn application_compression_algorithm_name(
@@ -398,6 +419,26 @@ pub(crate) async fn connect_stream_with_resolver(
     Ok((stream, latency_ms))
 }
 
+/// 全量重连：多端点配置时重新竞速，单端点直接连接。
+/// 网络环境变化后调用 — 新网络下最优端点可能与之前不同。
+async fn connect_any_endpoint(
+    config: &WsClientConfig,
+    resolver: &SharedDnsResolver,
+) -> Result<(String, WsStream, u64), CatcherError> {
+    if config.urls.len() > 1 || config.race_count > 1 {
+        let racer = EndpointRacer::new(config.urls.clone(), config.race_count);
+        racer.race(config, resolver).await
+    } else {
+        let url = config
+            .urls
+            .first()
+            .cloned()
+            .ok_or_else(|| CatcherError::InvalidConfig("no WS URLs configured".into()))?;
+        let (stream, lat) = connect_stream_with_resolver(&url, config, resolver).await?;
+        Ok((url, stream, lat))
+    }
+}
+
 // ── 高级连接 ──
 
 impl WsTransport {
@@ -475,7 +516,7 @@ async fn connection_manager(
     event_tx: mpsc::UnboundedSender<WsEvent>,
     mut cmd_rx: mpsc::UnboundedReceiver<WsCommand>,
 ) {
-    let current_url = initial_url;
+    let mut current_url = initial_url;
     let mut stream_opt = Some(initial_stream);
     let mut reconnect_mgr = config
         .reconnect
@@ -563,6 +604,11 @@ async fn connection_manager(
                             let _ = writer.send(msg).await;
                             let _ = writer.close().await;
                             break LoopOutcome::CleanClose;
+                        }
+                        Some(WsCommand::NetworkChanged) => {
+                            // 旧网络上的连接大概率已半开，直接丢弃，不发 Close 帧
+                            // （在死网络上发送会阻塞到超时）
+                            break LoopOutcome::NetworkChanged;
                         }
                         None => break LoopOutcome::CleanClose,
                     }
@@ -655,6 +701,7 @@ async fn connection_manager(
         };
 
         // ── 处理 select loop 结果 ──
+        let network_changed = matches!(outcome, LoopOutcome::NetworkChanged);
         match outcome {
             LoopOutcome::CleanClose => break,
 
@@ -664,9 +711,37 @@ async fn connection_manager(
                     reason: "heartbeat timeout".into(),
                 });
             }
+            LoopOutcome::NetworkChanged => {
+                let _ = event_tx.send(WsEvent::Disconnected {
+                    code: 1006,
+                    reason: "network changed".into(),
+                });
+            }
             LoopOutcome::Disconnected { code, reason } => {
                 let _ = event_tx.send(WsEvent::Disconnected { code, reason });
             }
+        }
+
+        // ── 网络变化：清 DNS 缓存 + 跳过退避立即重连（即使未配置 reconnect）──
+        if network_changed {
+            dns_resolver.clear_cache();
+            if let Some(ref mut mgr) = reconnect_mgr {
+                mgr.reset();
+            }
+            let _ = event_tx.send(WsEvent::Reconnecting {
+                attempt: 0,
+                delay_ms: 0,
+            });
+            if let Ok((url, stream, lat)) = connect_any_endpoint(config, &dns_resolver).await {
+                current_url = url;
+                stream_opt = Some(stream);
+                first_latency = lat;
+                if let Some(ref mut mgr) = reconnect_mgr {
+                    mgr.on_connected();
+                }
+                continue;
+            }
+            // 立即重连失败 — 落入常规退避重连流程
         }
 
         // ── 尝试重连 ──
@@ -675,6 +750,9 @@ async fn connection_manager(
             let mut buffered_commands: Vec<WsCommand> = Vec::new();
             let mut reconnect_latency_ms: u64 = 0;
 
+            // 网络变化触发的重连：重新竞速全部端点（而非固守 current_url）
+            let mut race_endpoints = false;
+
             while let Some(delay) = mgr.on_disconnect() {
                 let attempt = mgr.attempt();
                 let _ = event_tx.send(WsEvent::Reconnecting {
@@ -682,29 +760,70 @@ async fn connection_manager(
                     delay_ms: delay,
                 });
 
-                tokio::time::sleep(Duration::from_millis(delay)).await;
-
-                // 排空待处理命令：Close 中止重连，其余缓存等待重放
+                // 退避等待 — 期间监听命令：Close 中止；NetworkChanged 打断
+                // 剩余延迟、重置退避计数立即重试；其余缓存等待重放
                 let mut abort = false;
-                loop {
-                    match cmd_rx.try_recv() {
-                        Ok(WsCommand::Close { .. }) => {
-                            abort = true;
-                            break;
+                let mut skip_backoff = false;
+                {
+                    let backoff_sleep = tokio::time::sleep(Duration::from_millis(delay));
+                    tokio::pin!(backoff_sleep);
+                    loop {
+                        tokio::select! {
+                            _ = &mut backoff_sleep => break,
+                            cmd = cmd_rx.recv() => match cmd {
+                                Some(WsCommand::Close { .. }) | None => {
+                                    abort = true;
+                                    break;
+                                }
+                                Some(WsCommand::NetworkChanged) => {
+                                    skip_backoff = true;
+                                    break;
+                                }
+                                Some(cmd) => buffered_commands.push(cmd),
+                            }
                         }
-                        Ok(cmd) => buffered_commands.push(cmd),
-                        Err(mpsc::error::TryRecvError::Empty) => break,
-                        Err(mpsc::error::TryRecvError::Disconnected) => {
-                            abort = true;
-                            break;
+                    }
+                }
+
+                // 排空剩余待处理命令
+                if !abort {
+                    loop {
+                        match cmd_rx.try_recv() {
+                            Ok(WsCommand::Close { .. }) => {
+                                abort = true;
+                                break;
+                            }
+                            Ok(WsCommand::NetworkChanged) => skip_backoff = true,
+                            Ok(cmd) => buffered_commands.push(cmd),
+                            Err(mpsc::error::TryRecvError::Empty) => break,
+                            Err(mpsc::error::TryRecvError::Disconnected) => {
+                                abort = true;
+                                break;
+                            }
                         }
                     }
                 }
                 if abort {
                     break;
                 }
+                if skip_backoff {
+                    dns_resolver.clear_cache();
+                    mgr.reset();
+                    race_endpoints = true;
+                }
 
-                match connect_stream_with_resolver(&current_url, config, &dns_resolver).await {
+                let connect_result = if race_endpoints {
+                    connect_any_endpoint(config, &dns_resolver)
+                        .await
+                        .map(|(url, stream, lat)| {
+                            current_url = url;
+                            (stream, lat)
+                        })
+                } else {
+                    connect_stream_with_resolver(&current_url, config, &dns_resolver).await
+                };
+
+                match connect_result {
                     Ok((stream, lat)) => {
                         stream_opt = Some(stream);
                         reconnect_latency_ms = lat;
@@ -732,7 +851,7 @@ async fn connection_manager(
                                         let _ = futures_util::SinkExt::send(&mut stream, msg).await;
                                     }
                                 }
-                                WsCommand::Close { .. } => {}
+                                WsCommand::Close { .. } | WsCommand::NetworkChanged => {}
                             }
                         }
                         stream_opt = Some(stream);
@@ -979,6 +1098,132 @@ mod tests {
         drop(result);
         bad_server.abort();
         let _ = good_server.await.unwrap();
+    }
+
+    /// network_changed() 应立即断开并重连，事件序列：
+    /// Connected → Disconnected("network changed") → Reconnecting(0) → Connected
+    #[tokio::test]
+    async fn network_changed_triggers_immediate_reconnect() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        // 服务器接受两次连接（初始 + 网络变化后的重连）
+        let server = tokio::spawn(async move {
+            for _ in 0..2 {
+                let (stream, _) = listener.accept().await.unwrap();
+                let ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+                // 保持连接存活，直到对端断开
+                tokio::spawn(async move {
+                    let mut ws = ws;
+                    while let Some(Ok(_)) = ws.next().await {}
+                });
+            }
+        });
+
+        let config = WsClientConfig {
+            urls: vec![format!("ws://127.0.0.1:{port}")],
+            handshake_timeout_ms: 1_000,
+            reconnect: Some(ReconnectConfig {
+                initial_delay_ms: 60_000, // 故意设很大：验证重连没有走退避延迟
+                max_delay_ms: 60_000,
+                backoff_multiplier: 2.0,
+                max_attempts: 5,
+            }),
+            ..Default::default()
+        };
+
+        let (handle, mut rx) = WsTransport::connect(&config).await.unwrap();
+
+        // 初始 Connected
+        let first = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(matches!(first, WsEvent::Connected { .. }));
+
+        handle.network_changed().unwrap();
+
+        // Disconnected("network changed")
+        let ev = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        match ev {
+            WsEvent::Disconnected { reason, .. } => assert_eq!(reason, "network changed"),
+            other => panic!("expected Disconnected, got {other:?}"),
+        }
+
+        // Reconnecting(attempt=0, delay=0) — 立即重连，无退避
+        let ev = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        match ev {
+            WsEvent::Reconnecting { attempt, delay_ms } => {
+                assert_eq!(attempt, 0);
+                assert_eq!(delay_ms, 0);
+            }
+            other => panic!("expected Reconnecting, got {other:?}"),
+        }
+
+        // 2 秒内重新 Connected（initial_delay 是 60 秒，证明跳过了退避）
+        let ev = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(matches!(ev, WsEvent::Connected { .. }));
+
+        let _ = handle.close(1000, "done");
+        let _ = server.await;
+    }
+
+    /// 未配置 reconnect 时 network_changed() 也应执行一次立即重连
+    #[tokio::test]
+    async fn network_changed_reconnects_without_reconnect_config() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            for _ in 0..2 {
+                let (stream, _) = listener.accept().await.unwrap();
+                let ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+                tokio::spawn(async move {
+                    let mut ws = ws;
+                    while let Some(Ok(_)) = ws.next().await {}
+                });
+            }
+        });
+
+        let config = WsClientConfig {
+            urls: vec![format!("ws://127.0.0.1:{port}")],
+            handshake_timeout_ms: 1_000,
+            reconnect: None,
+            ..Default::default()
+        };
+
+        let (handle, mut rx) = WsTransport::connect(&config).await.unwrap();
+        let first = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(matches!(first, WsEvent::Connected { .. }));
+
+        handle.network_changed().unwrap();
+
+        // Disconnected → Reconnecting → Connected
+        let mut got_connected = false;
+        for _ in 0..3 {
+            let ev = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            if matches!(ev, WsEvent::Connected { .. }) {
+                got_connected = true;
+                break;
+            }
+        }
+        assert!(got_connected, "should reconnect even without reconnect config");
+
+        let _ = handle.close(1000, "done");
+        let _ = server.await;
     }
 
     /// 验证 build_request 自动声明应用层压缩能力
