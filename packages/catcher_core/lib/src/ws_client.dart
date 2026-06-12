@@ -397,6 +397,10 @@ class WsClientConfig {
   final List<String> urls;
   final bool perMessageDeflate;
   final int handshakeTimeoutMs;
+
+  /// 单帧发送超时（毫秒，0 = 不限制）。
+  /// 半开连接上的发送超时后判定断线并进入重连流程。
+  final int sendTimeoutMs;
   final int maxPayloadBytes;
   final WsReconnectConfig? reconnect;
   final WsHeartbeatConfig? heartbeat;
@@ -412,6 +416,7 @@ class WsClientConfig {
     required this.urls,
     this.perMessageDeflate = true,
     this.handshakeTimeoutMs = 15000,
+    this.sendTimeoutMs = 10000,
     this.maxPayloadBytes = 67108864, // 64MB
     this.reconnect,
     this.heartbeat,
@@ -428,6 +433,7 @@ class WsClientConfig {
         'urls': urls,
         'per_message_deflate': perMessageDeflate,
         'handshake_timeout_ms': handshakeTimeoutMs,
+        'send_timeout_ms': sendTimeoutMs,
         'max_payload_bytes': maxPayloadBytes,
         if (reconnect != null) 'reconnect': reconnect!.toJson(),
         if (heartbeat != null) 'heartbeat': heartbeat!.toJson(),

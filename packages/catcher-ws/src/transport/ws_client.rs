@@ -419,6 +419,34 @@ pub(crate) async fn connect_stream_with_resolver(
     Ok((stream, latency_ms))
 }
 
+enum SendStatus {
+    Sent,
+    Failed,
+    TimedOut,
+}
+
+/// 带超时的帧发送。
+///
+/// 网络切换后连接变成半开时，发送会阻塞到 TCP 重传超时（分钟级），
+/// 期间事件循环无法处理任何命令（包括 network_changed / close）。
+/// 超时判定断线，让循环尽快进入重连流程。`timeout_ms == 0` 不限制。
+async fn send_frame_with_timeout<S>(writer: &mut S, frame: Frame, timeout_ms: u64) -> SendStatus
+where
+    S: futures_util::Sink<Frame> + Unpin,
+{
+    if timeout_ms == 0 {
+        return match writer.send(frame).await {
+            Ok(()) => SendStatus::Sent,
+            Err(_) => SendStatus::Failed,
+        };
+    }
+    match tokio::time::timeout(Duration::from_millis(timeout_ms), writer.send(frame)).await {
+        Ok(Ok(())) => SendStatus::Sent,
+        Ok(Err(_)) => SendStatus::Failed,
+        Err(_) => SendStatus::TimedOut,
+    }
+}
+
 /// 重连成功后重放缓存的发送命令（Close/NetworkChanged 已在缓存时被过滤）。
 async fn replay_buffered_commands(
     stream: &mut WsStream,
@@ -601,11 +629,16 @@ async fn connection_manager(
                                     continue;
                                 }
                             };
-                            if writer.send(msg).await.is_err() {
-                                break LoopOutcome::Disconnected {
+                            match send_frame_with_timeout(&mut writer, msg, config.send_timeout_ms).await {
+                                SendStatus::Sent => {}
+                                SendStatus::Failed => break LoopOutcome::Disconnected {
                                     code: 1006,
                                     reason: "send failed".into(),
-                                };
+                                },
+                                SendStatus::TimedOut => break LoopOutcome::Disconnected {
+                                    code: 1006,
+                                    reason: "send timeout".into(),
+                                },
                             }
                         }
                         Some(WsCommand::Binary(d)) => {
@@ -618,17 +651,30 @@ async fn connection_manager(
                                     continue;
                                 }
                             };
-                            if writer.send(msg).await.is_err() {
-                                break LoopOutcome::Disconnected {
+                            match send_frame_with_timeout(&mut writer, msg, config.send_timeout_ms).await {
+                                SendStatus::Sent => {}
+                                SendStatus::Failed => break LoopOutcome::Disconnected {
                                     code: 1006,
                                     reason: "send failed".into(),
-                                };
+                                },
+                                SendStatus::TimedOut => break LoopOutcome::Disconnected {
+                                    code: 1006,
+                                    reason: "send timeout".into(),
+                                },
                             }
                         }
                         Some(WsCommand::Close { code, reason }) => {
                             let msg = Frame::close(yawc::close::CloseCode::from(code), reason);
-                            let _ = writer.send(msg).await;
-                            let _ = writer.close().await;
+                            let _ = send_frame_with_timeout(&mut writer, msg, config.send_timeout_ms).await;
+                            if config.send_timeout_ms == 0 {
+                                let _ = writer.close().await;
+                            } else {
+                                let _ = tokio::time::timeout(
+                                    Duration::from_millis(config.send_timeout_ms),
+                                    writer.close(),
+                                )
+                                .await;
+                            }
                             break LoopOutcome::CleanClose;
                         }
                         Some(WsCommand::NetworkChanged) => {
@@ -655,7 +701,21 @@ async fn connection_manager(
                         }
                         state.waiting_for_pong = true;
                         state.ping_sent_at = Some(Instant::now());
-                        let _ = writer.send(Frame::ping(Vec::new())).await;
+                        if matches!(
+                            send_frame_with_timeout(
+                                &mut writer,
+                                Frame::ping(Vec::new()),
+                                config.send_timeout_ms,
+                            )
+                            .await,
+                            SendStatus::TimedOut
+                        ) {
+                            // 半开连接：ping 都发不出去，不必再等 pong 超时
+                            break LoopOutcome::Disconnected {
+                                code: 1006,
+                                reason: "ping send timeout".into(),
+                            };
+                        }
                         // 根据自适应间隔重设下一次 ping 时间
                         let next_ms = state.mgr.interval_ms();
                         ping_sleep.as_mut().reset(
@@ -706,12 +766,12 @@ async fn connection_manager(
                                     .unwrap_or("abnormal")
                                     .to_string();
                                 // RFC 6455 §5.5.1: 收到 Close 帧必须回一个 Close 帧
-                                let _ = writer
-                                    .send(Frame::close(
-                                        yawc::close::CloseCode::from(code),
-                                        &reason,
-                                    ))
-                                    .await;
+                                let _ = send_frame_with_timeout(
+                                    &mut writer,
+                                    Frame::close(yawc::close::CloseCode::from(code), &reason),
+                                    config.send_timeout_ms,
+                                )
+                                .await;
                                 break LoopOutcome::Disconnected { code, reason };
                             }
                             Some(_) => {}
@@ -776,7 +836,8 @@ async fn connection_manager(
                 break;
             }
 
-            dns_resolver.clear_cache();
+            // 清缓存 + 重建解析器（重读系统 DNS 配置）；重建失败时旧解析器仍可用
+            let _ = dns_resolver.network_changed();
             if let Some(ref mut mgr) = reconnect_mgr {
                 mgr.reset();
             }
@@ -872,7 +933,8 @@ async fn connection_manager(
                     break;
                 }
                 if skip_backoff {
-                    dns_resolver.clear_cache();
+                    // 清缓存 + 重建解析器（重读系统 DNS 配置）；重建失败时旧解析器仍可用
+            let _ = dns_resolver.network_changed();
                     mgr.reset();
                     race_endpoints = true;
                 }
@@ -1149,6 +1211,62 @@ mod tests {
         drop(result);
         bad_server.abort();
         let _ = good_server.await.unwrap();
+    }
+
+    /// 永远不就绪的 Sink — 模拟半开连接上发送阻塞
+    struct PendingSink;
+
+    impl futures_util::Sink<Frame> for PendingSink {
+        type Error = std::io::Error;
+
+        fn poll_ready(
+            self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Result<(), Self::Error>> {
+            std::task::Poll::Pending
+        }
+
+        fn start_send(self: std::pin::Pin<&mut Self>, _item: Frame) -> Result<(), Self::Error> {
+            Ok(())
+        }
+
+        fn poll_flush(
+            self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Result<(), Self::Error>> {
+            std::task::Poll::Pending
+        }
+
+        fn poll_close(
+            self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Result<(), Self::Error>> {
+            std::task::Poll::Pending
+        }
+    }
+
+    /// 半开连接上发送阻塞时应在 send_timeout_ms 内返回 TimedOut，
+    /// 而不是阻塞整个事件循环
+    #[tokio::test]
+    async fn send_frame_times_out_on_stuck_sink() {
+        let mut sink = PendingSink;
+        let start = Instant::now();
+        let status =
+            send_frame_with_timeout(&mut sink, Frame::text(b"x".to_vec()), 50).await;
+        assert!(matches!(status, SendStatus::TimedOut));
+        assert!(start.elapsed() < Duration::from_secs(2));
+    }
+
+    /// 正常 Sink 上发送应返回 Sent（含 timeout=0 禁用路径）
+    #[tokio::test]
+    async fn send_frame_succeeds_on_ready_sink() {
+        let mut sink = futures_util::sink::drain();
+        let status =
+            send_frame_with_timeout(&mut sink, Frame::text(b"a".to_vec()), 1_000).await;
+        assert!(matches!(status, SendStatus::Sent));
+
+        let status = send_frame_with_timeout(&mut sink, Frame::text(b"b".to_vec()), 0).await;
+        assert!(matches!(status, SendStatus::Sent));
     }
 
     /// network_changed() 应立即断开并重连，事件序列：

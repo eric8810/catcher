@@ -786,6 +786,9 @@ catcher_ws_network_changed(ws_handle);      // FfiResult
 - **DNS 服务器不会重读**：解析器的 nameserver 列表在创建时确定
   （系统配置仅读取一次）。`networkChanged()` 清空解析缓存，但若新网络
   推送了不同的系统 DNS 服务器，需要自定义 `dns.nameservers` 或重建客户端。
+- **发送超时**（WS）：半开连接上的发送会阻塞到 TCP 重传超时（分钟级）。
+  `send_timeout_ms`（默认 10s，0 = 不限制）保证单帧发送超时后立即判定
+  断线进入重连，事件循环不会被卡住。
 - **建议配合 reconnect 配置**：WS 未配置 `reconnect` 时 `networkChanged()`
   只做一次立即重连；切换瞬间网络常有 1-3 秒不可用窗口，一次尝试可能失败
   并以 `Error` 事件终止。配置了 `reconnect` 则失败后自动落入退避重试。
