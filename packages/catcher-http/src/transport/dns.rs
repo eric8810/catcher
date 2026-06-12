@@ -15,6 +15,13 @@ mod reqwest_resolver {
         inner: Arc<DnsResolver>,
     }
 
+    impl ReqwestDnsResolver {
+        /// 清空 DNS 缓存（网络环境变化后调用）。
+        pub(crate) fn clear_cache(&self) {
+            self.inner.clear_cache();
+        }
+    }
+
     impl reqwest::dns::Resolve for ReqwestDnsResolver {
         fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
             let inner = self.inner.clone();
@@ -39,7 +46,7 @@ mod reqwest_resolver {
 }
 
 #[cfg(feature = "hickory-dns")]
-pub(crate) use reqwest_resolver::build_stale_aware_resolver;
+pub(crate) use reqwest_resolver::{build_stale_aware_resolver, ReqwestDnsResolver};
 
 #[cfg(test)]
 mod tests {

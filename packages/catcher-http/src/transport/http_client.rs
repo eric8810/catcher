@@ -1,7 +1,7 @@
 use reqwest::Client;
 use reqwest_middleware::{ClientBuilder as MiddlewareBuilder, ClientWithMiddleware};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tokio::runtime::Handle;
@@ -25,8 +25,13 @@ use catcher_core::types::resilience::CbState;
 /// Phase 6: 增加 per-request cancel (N-03)
 /// Phase 7: 增加 Semaphore 并发控制 + 优先级队列 (A-01)
 pub struct HttpTransport {
-    client: ClientWithMiddleware,
+    /// 底层客户端 — RwLock 包装以支持 network_changed() 热替换
+    /// （重建连接池，丢弃网络切换后残留的半开 keep-alive 连接）
+    client: RwLock<ClientWithMiddleware>,
     config: Arc<HttpClientConfig>,
+    /// 共享 DNS 解析器 — network_changed() 时清空缓存
+    #[cfg(feature = "hickory-dns")]
+    dns_resolver: Arc<crate::transport::dns::ReqwestDnsResolver>,
     circuit_breaker: Option<CircuitBreaker>,
     cancel_token: Arc<Mutex<tokio_util::sync::CancellationToken>>,
     metrics: MetricsCollector,
@@ -43,6 +48,113 @@ pub struct HttpTransport {
 impl HttpTransport {
     /// 根据 HttpClientConfig 构建 HttpTransport
     pub fn new(config: HttpClientConfig) -> Result<Self, CatcherError> {
+        // G7: DNS resolution — always build shared DNS resolver for caching
+        #[cfg(feature = "hickory-dns")]
+        let dns_resolver = {
+            let dns_config = config.dns.clone().unwrap_or_default();
+            crate::transport::dns::build_stale_aware_resolver(&dns_config)?
+        };
+
+        let metrics = MetricsCollector::new();
+        let client = build_middleware_client(
+            &config,
+            &metrics,
+            #[cfg(feature = "hickory-dns")]
+            &dns_resolver,
+        )?;
+
+        let circuit_breaker = config
+            .circuit_breaker
+            .as_ref()
+            .map(|cb| CircuitBreaker::new(cb.clone()));
+
+        // A-01: Priority-based request queue with concurrency control.
+        // PriorityRequestQueue starts Tokio worker tasks during construction, so only
+        // enable it when HttpTransport::new() is called inside an active runtime.
+        // Synchronous constructors (notably napi) fall back to semaphore-only
+        // concurrency control and still execute requests on their async methods.
+        let (concurrency_semaphore, priority_queue) = if config.max_concurrency > 0 {
+            if Handle::try_current().is_ok() {
+                let queue_config = catcher_core::types::scheduler::QueueConfig {
+                    max_concurrency: config.max_concurrency as usize,
+                    queue_capacity: 1024,
+                    default_timeout_ms: config.response_timeout_ms,
+                    concurrency_mode: catcher_core::types::scheduler::ConcurrencyMode::Fixed(
+                        config.max_concurrency as usize,
+                    ),
+                };
+                (
+                    None, // priority_queue handles concurrency internally
+                    Some(crate::scheduler::PriorityRequestQueue::new(queue_config)),
+                )
+            } else {
+                (Some(Arc::new(Semaphore::new(config.max_concurrency as usize))), None)
+            }
+        } else {
+            (None, None)
+        };
+
+        Ok(Self {
+            client: RwLock::new(client),
+            config: Arc::new(config),
+            #[cfg(feature = "hickory-dns")]
+            dns_resolver,
+            circuit_breaker,
+            cancel_token: Arc::new(Mutex::new(tokio_util::sync::CancellationToken::new())),
+            metrics,
+            adaptive_timeout: Mutex::new(None),
+            pending_requests: Mutex::new(HashMap::new()),
+            next_request_id: AtomicU64::new(1),
+            concurrency_semaphore,
+            priority_queue,
+        })
+    }
+
+    /// 当前底层客户端的克隆（ClientWithMiddleware 内部是 Arc，克隆开销小）
+    fn client(&self) -> ClientWithMiddleware {
+        self.client
+            .read()
+            .expect("client lock poisoned")
+            .clone()
+    }
+
+    /// 通知库网络环境已发生变化（WiFi 切换、VPN 换节点、蜂窝/WiFi 切换等）。
+    ///
+    /// 网络切换后旧连接池中的 keep-alive 连接全部变成半开连接，被动等待
+    /// TCP keepalive 探针（默认 20s）或请求失败才会清理。调用此方法立即：
+    ///
+    /// 1. 清空 DNS 缓存 — 新网络下解析结果可能不同（VPN 场景尤其明显）
+    /// 2. 重建底层客户端 — 丢弃整个旧连接池，后续请求走全新 TCP 连接
+    /// 3. 重置熔断器 — 切换期间的失败属于旧网络，不应惩罚新网络
+    ///
+    /// 飞行中的请求不受影响：其内部重试会自动建立新连接。
+    pub fn network_changed(&self) -> Result<(), CatcherError> {
+        #[cfg(feature = "hickory-dns")]
+        self.dns_resolver.clear_cache();
+
+        let new_client = build_middleware_client(
+            &self.config,
+            &self.metrics,
+            #[cfg(feature = "hickory-dns")]
+            &self.dns_resolver,
+        )?;
+        *self.client.write().expect("client lock poisoned") = new_client;
+
+        if let Some(ref cb) = self.circuit_breaker {
+            cb.reset();
+        }
+        Ok(())
+    }
+}
+
+/// 构建底层 reqwest + middleware 客户端。
+/// 独立函数以便 network_changed() 热重建连接池时复用。
+fn build_middleware_client(
+    config: &HttpClientConfig,
+    metrics: &MetricsCollector,
+    #[cfg(feature = "hickory-dns")] dns_resolver: &Arc<crate::transport::dns::ReqwestDnsResolver>,
+) -> Result<ClientWithMiddleware, CatcherError> {
+    {
         let mut reqwest_builder = Client::builder()
             .connect_timeout(Duration::from_millis(config.connect_timeout_ms))
             .pool_max_idle_per_host(config.pool.max_idle_per_host)
@@ -64,12 +176,10 @@ impl HttpTransport {
         // G8: TLS configuration
         reqwest_builder = build_tls_config(reqwest_builder, &config.tls)?;
 
-        // G7: DNS resolution — always build shared DNS resolver for caching
+        // G7: DNS resolution — 复用共享解析器（缓存跨连接池重建保留，可显式清空）
         #[cfg(feature = "hickory-dns")]
         {
-            let dns_config = config.dns.clone().unwrap_or_default();
-            let resolver = crate::transport::dns::build_stale_aware_resolver(&dns_config)?;
-            reqwest_builder = reqwest_builder.dns_resolver(resolver);
+            reqwest_builder = reqwest_builder.dns_resolver(dns_resolver.clone());
         }
 
         // G4: Proxy configuration
@@ -121,7 +231,6 @@ impl HttpTransport {
             .map_err(|e| CatcherError::Internal(format!("reqwest build error: {e}")))?;
 
         // Phase 3: Wrap with middleware (retry)
-        let metrics = MetricsCollector::new();
         let mut client_builder = MiddlewareBuilder::new(reqwest_client);
         if let Some(ref retry) = config.retry {
             let policy = build_retry_policy(retry);
@@ -131,51 +240,11 @@ impl HttpTransport {
             ));
         }
 
-        let circuit_breaker = config
-            .circuit_breaker
-            .as_ref()
-            .map(|cb| CircuitBreaker::new(cb.clone()));
-
-        // A-01: Priority-based request queue with concurrency control.
-        // PriorityRequestQueue starts Tokio worker tasks during construction, so only
-        // enable it when HttpTransport::new() is called inside an active runtime.
-        // Synchronous constructors (notably napi) fall back to semaphore-only
-        // concurrency control and still execute requests on their async methods.
-        let (concurrency_semaphore, priority_queue) = if config.max_concurrency > 0 {
-            if Handle::try_current().is_ok() {
-                let queue_config = catcher_core::types::scheduler::QueueConfig {
-                    max_concurrency: config.max_concurrency as usize,
-                    queue_capacity: 1024,
-                    default_timeout_ms: config.response_timeout_ms,
-                    concurrency_mode: catcher_core::types::scheduler::ConcurrencyMode::Fixed(
-                        config.max_concurrency as usize,
-                    ),
-                };
-                (
-                    None, // priority_queue handles concurrency internally
-                    Some(crate::scheduler::PriorityRequestQueue::new(queue_config)),
-                )
-            } else {
-                (Some(Arc::new(Semaphore::new(config.max_concurrency as usize))), None)
-            }
-        } else {
-            (None, None)
-        };
-
-        Ok(Self {
-            client: client_builder.build(),
-            config: Arc::new(config),
-            circuit_breaker,
-            cancel_token: Arc::new(Mutex::new(tokio_util::sync::CancellationToken::new())),
-            metrics,
-            adaptive_timeout: Mutex::new(None),
-            pending_requests: Mutex::new(HashMap::new()),
-            next_request_id: AtomicU64::new(1),
-            concurrency_semaphore,
-            priority_queue,
-        })
+        Ok(client_builder.build())
     }
+}
 
+impl HttpTransport {
     /// 发起 HTTP 请求（带熔断器检查 + cancel 支持 + metrics 记录 + 自适应超时 + 并发控制）
     pub async fn execute(&self, request: HttpRequest) -> Result<HttpResponse, CatcherError> {
         let (_, result) = self.execute_with_token(
@@ -220,7 +289,7 @@ impl HttpTransport {
         // A-01: Acquire concurrency slot — priority queue or semaphore
         let result = if let Some(ref queue) = self.priority_queue {
             // Priority queue path: handles both concurrency and priority ordering
-            let client = self.client.clone();
+            let client = self.client();
             let config = self.config.clone();
             let priority = request.priority;
             let timeout_ms = request.timeout_ms;
@@ -372,7 +441,7 @@ impl HttpTransport {
 
     /// 使用预分配的 token 执行请求（N-03，供 FFI 层使用）。
     async fn do_execute(&self, request: HttpRequest) -> Result<HttpResponse, CatcherError> {
-        execute_http_request(self.client.clone(), self.config.clone(), request).await
+        execute_http_request(self.client(), self.config.clone(), request).await
     }
 
     /// 流式执行 HTTP 请求（N-02），逐 chunk 通过回调推送。
@@ -400,7 +469,8 @@ impl HttpTransport {
             format!("{}{}", self.config.base_url.trim_end_matches('/'), request.url)
         };
 
-        let mut req = self.client.request(method, &url);
+        let client = self.client();
+        let mut req = client.request(method, &url);
         for (k, v) in &self.config.default_headers { req = req.header(k, v); }
         for (k, v) in &request.headers { req = req.header(k, v); }
         // B-02: multipart support
@@ -850,6 +920,61 @@ mod tests {
         assert_eq!(base64_encode("ab"), "YWI=");
         assert_eq!(base64_encode("abc"), "YWJj");
         assert_eq!(base64_encode("test"), "dGVzdA==");
+    }
+
+    // ── 网络变化通知 tests ──
+
+    /// network_changed() 重建客户端后，新请求应正常工作
+    #[tokio::test]
+    async fn network_changed_rebuilds_client_and_requests_work() {
+        use wiremock::{MockServer, Mock, ResponseTemplate};
+        use wiremock::matchers::method;
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok": true})))
+            .mount(&server)
+            .await;
+
+        let config = HttpClientConfig {
+            base_url: server.uri(),
+            ..Default::default()
+        };
+        let transport = HttpTransport::new(config).unwrap();
+
+        assert!(transport.get("/test").await.is_ok());
+        transport.network_changed().unwrap();
+        assert!(transport.get("/test").await.is_ok());
+        // 幂等：连续调用不应出错
+        transport.network_changed().unwrap();
+        transport.network_changed().unwrap();
+        assert!(transport.get("/test").await.is_ok());
+    }
+
+    /// network_changed() 应重置熔断器 — 切换期间的失败不惩罚新网络
+    #[tokio::test]
+    async fn network_changed_resets_circuit_breaker() {
+        use catcher_core::types::resilience::CircuitBreakerConfig;
+
+        let config = HttpClientConfig {
+            base_url: "http://127.0.0.1:1".to_string(), // 不可达 → 制造失败
+            connect_timeout_ms: 200,
+            response_timeout_ms: 200,
+            circuit_breaker: Some(CircuitBreakerConfig {
+                failure_threshold: 2,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let transport = HttpTransport::new(config).unwrap();
+
+        // 触发足够的失败让熔断器打开
+        let _ = transport.get("/test").await;
+        let _ = transport.get("/test").await;
+        assert_eq!(transport.circuit_breaker_state(), Some(CbState::Open));
+
+        transport.network_changed().unwrap();
+        assert_eq!(transport.circuit_breaker_state(), Some(CbState::Closed));
     }
 
     // ── N-02: Stream download tests ──

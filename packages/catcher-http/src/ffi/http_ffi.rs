@@ -350,6 +350,22 @@ pub unsafe extern "C" fn catcher_http_metrics(handle: *mut c_void) -> *mut c_cha
     CString::new(json).unwrap_or_default().into_raw()
 }
 
+/// 通知 HTTP 客户端网络环境已变化（WiFi 切换 / VPN 换节点等）。
+/// 清空 DNS 缓存、重建连接池（丢弃半开连接）、重置熔断器。
+/// 返回 0 成功，1 句柄无效，2 重建失败。
+#[no_mangle]
+pub unsafe extern "C" fn catcher_http_network_changed(handle: *mut c_void) -> i32 {
+    if handle.is_null() { return 1; }
+    let id = *(handle as *const usize);
+    match REGISTRY.get(id) {
+        Some(transport) => match transport.network_changed() {
+            Ok(()) => 0,
+            Err(_) => 2,
+        },
+        None => 1,
+    }
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn catcher_http_client_cancel_all(handle: *mut c_void) {
     if handle.is_null() { return; }
