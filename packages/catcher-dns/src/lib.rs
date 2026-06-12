@@ -128,6 +128,18 @@ impl DnsResolver {
         }
     }
 
+    /// 清空 DNS 缓存。
+    ///
+    /// 网络环境变化（WiFi 切换、VPN 换节点等）后旧解析结果可能指向不可达
+    /// 地址，调用此方法立即失效缓存，下次解析走全新查询。`host_mapping`
+    /// 是静态配置，不受影响。关闭 `hickory-dns` feature 时无缓存，为 no-op。
+    pub fn clear_cache(&self) {
+        #[cfg(feature = "hickory-dns")]
+        {
+            self.inner.clear_cache();
+        }
+    }
+
     #[cfg(test)]
     fn has_host_mapping(&self, hostname: &str) -> bool {
         #[cfg(feature = "hickory-dns")]
@@ -227,6 +239,12 @@ mod hickory_backend {
         #[cfg(test)]
         pub(super) fn has_host_mapping(&self, hostname: &str) -> bool {
             self.host_mapping.contains_key(hostname)
+        }
+
+        /// 立即失效全部缓存条目（含 hickory 内部缓存）。
+        pub(super) fn clear_cache(&self) {
+            self.cache.invalidate_all();
+            self.resolver.clear_cache();
         }
 
         async fn do_resolve(
@@ -514,6 +532,25 @@ mod tests {
             msg.contains("not-an-ip"),
             "error should mention the bad IP: {msg}"
         );
+    }
+
+    #[tokio::test]
+    async fn clear_cache_keeps_host_mapping_resolvable() {
+        let config = DnsConfig {
+            host_mapping: vec![("api.test".to_string(), "127.0.0.1".to_string())]
+                .into_iter()
+                .collect(),
+            ..Default::default()
+        };
+        let resolver = build_stale_aware_resolver(&config).expect("valid resolver");
+        resolver.clear_cache();
+        let addrs = resolver
+            .resolve_socket_addrs("api.test", 8080)
+            .await
+            .expect("host mapping survives clear_cache");
+        assert_eq!(addrs, vec!["127.0.0.1:8080".parse().expect("valid addr")]);
+        // 再次清空应幂等
+        resolver.clear_cache();
     }
 
     #[tokio::test]
