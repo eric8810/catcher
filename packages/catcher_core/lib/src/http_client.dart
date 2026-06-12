@@ -33,6 +33,7 @@ class CatcherHttpClient {
   late final CatcherFreeEventDataDart _freeEventDataFn;
   late final CatcherFreeDataDart _freeDataFn;
   CatcherHttpClientCancelAllDart? _cancelAllFn;
+  CatcherHttpNetworkChangedDart? _networkChangedFn;
   CatcherHttpCircuitBreakerStateDart? _circuitBreakerStateFn;
   CatcherHttpMetricsDart? _metricsFn;
   CatcherHttpAdaptiveTimeoutConfigDart? _adaptiveTimeoutFn;
@@ -66,6 +67,13 @@ class CatcherHttpClient {
           CatcherHttpClientCancelAllDart>('catcher_http_client_cancel_all');
     } catch (_) {
       _cancelAllFn = null;
+    }
+
+    try {
+      _networkChangedFn = _lib.lookupFunction<CatcherHttpNetworkChangedNative,
+          CatcherHttpNetworkChangedDart>('catcher_http_network_changed');
+    } catch (_) {
+      _networkChangedFn = null;
     }
 
     try {
@@ -166,6 +174,26 @@ class CatcherHttpClient {
     final bodyBytes = body != null ? utf8.encode(jsonEncode(body)) : null;
     return _execute('PATCH', path, bodyBytes, contentType,
         headers: headers, timeoutMs: timeoutMs);
+  }
+
+  /// 通知客户端网络环境已变化（WiFi 切换 / VPN 换节点 / 蜂窝切换等）。
+  ///
+  /// 在 connectivity_plus 等插件的网络变化回调中调用。清空 DNS 缓存、
+  /// 重建连接池（丢弃可能半开的 keep-alive 连接）、重置熔断器 — 新请求
+  /// 立即走新网络上的全新连接。飞行中的请求不受影响。
+  void networkChanged() {
+    final fn = _networkChangedFn;
+    if (fn == null) {
+      throw StateError(
+          'networkChanged() requires a rebuilt native library (>= 0.4)');
+    }
+    if (_handle == null || _handle == nullptr) {
+      throw StateError('HTTP client has been disposed');
+    }
+    final code = fn(_handle!);
+    if (code != 0) {
+      throw StateError('networkChanged failed with code $code');
+    }
   }
 
   /// Cancel all in-flight requests on this client (page-exit scenario).

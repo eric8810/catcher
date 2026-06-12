@@ -188,6 +188,15 @@ typedef CatcherWsCloseDart = void Function(
   FfiStringNative reason,
 );
 
+/// catcher_ws_network_changed(handle) → FfiResult
+/// 通知网络环境变化：立即断开重连，跳过退避延迟
+typedef CatcherWsNetworkChangedNative = FfiResultNative Function(
+  Pointer<Void> handle,
+);
+typedef CatcherWsNetworkChangedDart = FfiResultNative Function(
+  Pointer<Void> handle,
+);
+
 /// catcher_ws_destroy(handle)
 typedef CatcherWsDestroyNative = Void Function(Pointer<Void> handle);
 typedef CatcherWsDestroyDart = void Function(Pointer<Void> handle);
@@ -259,6 +268,11 @@ typedef CatcherQualityHistoryDart = Pointer<Char> Function();
 /// catcher_http_client_cancel_all(handle)
 typedef CatcherHttpClientCancelAllNative = Void Function(Pointer<Void> handle);
 typedef CatcherHttpClientCancelAllDart = void Function(Pointer<Void> handle);
+
+/// catcher_http_network_changed(handle) → i32 (0=success, 1=invalid handle, 2=rebuild failed)
+/// 通知网络环境变化：清 DNS 缓存、重建连接池、重置熔断器
+typedef CatcherHttpNetworkChangedNative = Int32 Function(Pointer<Void> handle);
+typedef CatcherHttpNetworkChangedDart = int Function(Pointer<Void> handle);
 
 /// catcher_http_circuit_breaker_state(handle) → *mut c_char (JSON, caller frees via catcher_free_data)
 typedef CatcherHttpCircuitBreakerStateNative = Pointer<Char> Function(

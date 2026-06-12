@@ -64,6 +64,16 @@ export class WsClient {
     this._raw.sendBinary(buf)
   }
 
+  /**
+   * 通知客户端网络环境已变化（WiFi 切换 / VPN 换节点 / 蜂窝切换等）。
+   *
+   * 立即丢弃当前（大概率已半开的）连接、清空 DNS 缓存、重置重连退避并
+   * 马上重连 — 无需被动等待 10-30 秒心跳超时。多端点配置时重新竞速。
+   */
+  networkChanged(): void {
+    this._raw.networkChanged()
+  }
+
   /** 关闭连接。默认 code=1000, reason='normal' */
   close(code?: number, reason?: string): void {
     this._raw.close(code ?? null, reason ?? null)

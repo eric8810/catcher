@@ -198,6 +198,22 @@ impl JsHttpClient {
         self.inner.disable_adaptive_timeout();
     }
 
+    // ── Network change ──
+
+    /// Notify the client that the network environment changed
+    /// (WiFi switch, VPN node change, cellular handover, ...).
+    ///
+    /// Clears the DNS cache, rebuilds the connection pool (dropping all
+    /// possibly half-open keep-alive sockets) and resets the circuit breaker,
+    /// so new requests immediately use fresh connections on the new network.
+    /// In-flight requests are unaffected.
+    #[napi]
+    pub fn network_changed(&self) -> napi::Result<()> {
+        self.inner
+            .network_changed()
+            .map_err(|e| napi::Error::from_reason(e.to_string()))
+    }
+
     // ── Cancel ──
 
     /// Cancel all in-flight requests.
