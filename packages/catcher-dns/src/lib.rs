@@ -185,6 +185,7 @@ fn with_port(addrs: Vec<SocketAddr>, port: u16) -> Vec<SocketAddr> {
 mod hickory_backend {
     use std::collections::HashSet;
     use std::net::SocketAddr;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Arc;
     use std::time::{Duration, Instant};
 
@@ -213,6 +214,9 @@ mod hickory_backend {
         stale_ttl: Duration,
         stale_on_error: bool,
         refreshing: Arc<Mutex<HashSet<String>>>,
+        /// 缓存代际 — clear_cache() 时递增。在旧代际发起的解析结果
+        /// 不允许写入新代际的缓存（防止网络切换后旧网络的解析结果回灌）。
+        generation: Arc<AtomicU64>,
     }
 
     impl HickoryDnsResolver {
@@ -233,6 +237,7 @@ mod hickory_backend {
                 stale_ttl: Duration::from_secs(config.stale_ttl_secs as u64),
                 stale_on_error: config.stale_on_error,
                 refreshing: Arc::new(Mutex::new(HashSet::new())),
+                generation: Arc::new(AtomicU64::new(0)),
             })
         }
 
@@ -242,9 +247,15 @@ mod hickory_backend {
         }
 
         /// 立即失效全部缓存条目（含 hickory 内部缓存）。
+        ///
+        /// 递增代际计数：清空时刻之前发起、之后才完成的解析（后台 stale
+        /// 刷新或并发查询）属于旧网络，其结果不会留在新代际的缓存中。
         pub(super) fn clear_cache(&self) {
+            self.generation.fetch_add(1, Ordering::SeqCst);
             self.cache.invalidate_all();
             self.resolver.clear_cache();
+            // 放行被旧代际刷新任务占位的 hostname，允许立即发起新解析
+            self.refreshing.lock().clear();
         }
 
         async fn do_resolve(
@@ -284,19 +295,24 @@ mod hickory_backend {
                 if age < self.cache_ttl + self.stale_ttl {
                     let refresh = self.clone();
                     let key = hostname.to_string();
+                    let gen_at_start = self.generation.load(Ordering::SeqCst);
                     if self.refreshing.lock().insert(key.clone()) {
                         tokio::spawn(async move {
                             if let Ok(addrs) = refresh.do_resolve(&key).await {
-                                refresh
-                                    .cache
-                                    .insert(
-                                        key.clone(),
-                                        DnsCacheEntry {
-                                            addrs,
-                                            inserted: Instant::now(),
-                                        },
-                                    )
-                                    .await;
+                                // 解析期间发生 clear_cache（网络已切换）：
+                                // 结果来自旧网络，丢弃
+                                if refresh.generation.load(Ordering::SeqCst) == gen_at_start {
+                                    refresh
+                                        .cache
+                                        .insert(
+                                            key.clone(),
+                                            DnsCacheEntry {
+                                                addrs,
+                                                inserted: Instant::now(),
+                                            },
+                                        )
+                                        .await;
+                                }
                             }
                             refresh.refreshing.lock().remove(&key);
                         });
@@ -307,6 +323,7 @@ mod hickory_backend {
 
             let resolver = self.clone();
             let key = hostname.to_string();
+            let gen_at_start = self.generation.load(Ordering::SeqCst);
             let result = self
                 .cache
                 .try_get_with::<_, String>(hostname.to_string(), async move {
@@ -319,6 +336,13 @@ mod hickory_backend {
                     }
                 })
                 .await;
+
+            // 解析期间发生 clear_cache（网络已切换）：本次结果可能来自旧网络。
+            // 仍返回给当前调用方（连接失败会自行重试），但从缓存中移除，
+            // 下一次解析强制走新网络的全新查询。
+            if self.generation.load(Ordering::SeqCst) != gen_at_start {
+                self.cache.invalidate(hostname).await;
+            }
 
             match result {
                 Ok(entry) => Ok(entry.addrs.clone()),
