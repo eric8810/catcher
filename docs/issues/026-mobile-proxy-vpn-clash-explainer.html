@@ -1,0 +1,926 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>VPN / Clash 下 Catcher 访问失败说明</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f8fb;
+        --paper: #ffffff;
+        --ink: #18202b;
+        --muted: #647184;
+        --line: #d8e0ea;
+        --blue: #2563eb;
+        --blue-soft: #eaf1ff;
+        --green: #15803d;
+        --green-soft: #e9f8ee;
+        --red: #dc2626;
+        --red-soft: #fff0f0;
+        --orange: #d97706;
+        --orange-soft: #fff5df;
+        --teal: #0f766e;
+        --teal-soft: #e4f7f5;
+        --shadow: 0 18px 48px rgba(24, 32, 43, 0.08);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+          "Microsoft YaHei", sans-serif;
+        color: var(--ink);
+        background:
+          linear-gradient(180deg, #eef4ff 0, rgba(238, 244, 255, 0) 360px),
+          var(--bg);
+      }
+
+      main {
+        width: min(1180px, calc(100vw - 32px));
+        margin: 0 auto;
+        padding: 28px 0 56px;
+      }
+
+      .topline {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 18px;
+      }
+
+      .label {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 32px;
+        padding: 6px 10px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.74);
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .dot {
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: var(--red);
+      }
+
+      h1 {
+        max-width: 860px;
+        margin: 0;
+        font-size: clamp(32px, 5vw, 58px);
+        line-height: 1.05;
+        letter-spacing: 0;
+      }
+
+      .lead {
+        max-width: 780px;
+        margin: 18px 0 28px;
+        color: #3a4656;
+        font-size: 19px;
+        line-height: 1.75;
+      }
+
+      .summary {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+        margin-bottom: 26px;
+      }
+
+      .summary-item,
+      .panel,
+      .reason,
+      .fix-item {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--paper);
+        box-shadow: var(--shadow);
+      }
+
+      .summary-item {
+        padding: 16px;
+      }
+
+      .summary-item strong {
+        display: block;
+        margin-bottom: 6px;
+        font-size: 15px;
+      }
+
+      .summary-item span {
+        display: block;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.55;
+      }
+
+      section {
+        margin-top: 22px;
+      }
+
+      .section-title {
+        margin: 0 0 12px;
+        font-size: 22px;
+        letter-spacing: 0;
+      }
+
+      .compare {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+      }
+
+      .panel {
+        overflow: hidden;
+      }
+
+      .panel header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 16px 18px;
+        border-bottom: 1px solid var(--line);
+        background: #fbfcff;
+      }
+
+      .panel h2 {
+        margin: 0;
+        font-size: 18px;
+        letter-spacing: 0;
+      }
+
+      .status {
+        border-radius: 8px;
+        padding: 5px 9px;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .ok {
+        color: var(--green);
+        background: var(--green-soft);
+      }
+
+      .bad {
+        color: var(--red);
+        background: var(--red-soft);
+      }
+
+      .route {
+        position: relative;
+        min-height: 450px;
+        padding: 24px 18px 18px;
+      }
+
+      .route svg {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+      }
+
+      .node {
+        position: absolute;
+        display: grid;
+        place-items: center;
+        width: 148px;
+        min-height: 82px;
+        padding: 12px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        text-align: center;
+        box-shadow: 0 10px 26px rgba(24, 32, 43, 0.08);
+      }
+
+      .node .icon {
+        width: 30px;
+        height: 30px;
+        margin-bottom: 7px;
+        border-radius: 8px;
+        display: grid;
+        place-items: center;
+        font-weight: 800;
+        color: #fff;
+        background: var(--blue);
+      }
+
+      .node b {
+        display: block;
+        font-size: 14px;
+        line-height: 1.25;
+      }
+
+      .node small {
+        display: block;
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.35;
+      }
+
+      .phone {
+        left: 22px;
+        top: 72px;
+      }
+
+      .proxy {
+        left: calc(50% - 74px);
+        top: 44px;
+      }
+
+      .server {
+        right: 22px;
+        top: 72px;
+      }
+
+      .dns {
+        left: calc(50% - 74px);
+        bottom: 92px;
+      }
+
+      .catcher {
+        left: 28px;
+        bottom: 92px;
+      }
+
+      .bypass {
+        right: 28px;
+        bottom: 92px;
+      }
+
+      .vpn-note,
+      .break-note {
+        position: absolute;
+        left: 18px;
+        right: 18px;
+        bottom: 16px;
+        padding: 10px 12px;
+        border-radius: 8px;
+        font-size: 13px;
+        line-height: 1.55;
+      }
+
+      .vpn-note {
+        color: #14532d;
+        background: var(--green-soft);
+      }
+
+      .break-note {
+        color: #7f1d1d;
+        background: var(--red-soft);
+      }
+
+      .reasons {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .diagnosis {
+        display: grid;
+        grid-template-columns: 0.95fr 1.05fr;
+        gap: 16px;
+        align-items: stretch;
+      }
+
+      .verdict {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        padding: 18px;
+        box-shadow: var(--shadow);
+      }
+
+      .verdict h3 {
+        margin: 0 0 10px;
+        font-size: 18px;
+      }
+
+      .verdict p {
+        margin: 0;
+        color: #3a4656;
+        font-size: 15px;
+        line-height: 1.7;
+      }
+
+      .ranked {
+        display: grid;
+        gap: 10px;
+        margin-top: 14px;
+      }
+
+      .ranked div {
+        border-left: 4px solid var(--blue);
+        padding: 9px 10px;
+        background: #f8fbff;
+        border-radius: 6px;
+        color: #344154;
+        font-size: 14px;
+        line-height: 1.55;
+      }
+
+      .ranked b {
+        color: var(--ink);
+      }
+
+      .chain {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        padding: 18px;
+        box-shadow: var(--shadow);
+      }
+
+      .chain-row {
+        display: grid;
+        grid-template-columns: 92px 1fr;
+        gap: 12px;
+        align-items: start;
+        padding: 12px 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .chain-row:last-child {
+        border-bottom: 0;
+      }
+
+      .chain-label {
+        display: inline-flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 30px;
+        border-radius: 8px;
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .chain-ok {
+        color: var(--green);
+        background: var(--green-soft);
+      }
+
+      .chain-bad {
+        color: var(--red);
+        background: var(--red-soft);
+      }
+
+      .chain-text {
+        color: #3a4656;
+        font-size: 14px;
+        line-height: 1.65;
+      }
+
+      .chain-text b {
+        color: var(--ink);
+      }
+
+      .reason {
+        padding: 18px;
+      }
+
+      .work-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 16px;
+      }
+
+      .work-card {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        padding: 18px;
+        box-shadow: var(--shadow);
+      }
+
+      .work-card h3 {
+        margin: 0 0 12px;
+        font-size: 18px;
+      }
+
+      .work-card ul {
+        margin: 0;
+        padding-left: 20px;
+      }
+
+      .work-card li {
+        margin: 10px 0;
+        color: #3a4656;
+        font-size: 14px;
+        line-height: 1.6;
+      }
+
+      .work-card b {
+        color: var(--ink);
+      }
+
+      .reason-mark {
+        display: grid;
+        place-items: center;
+        width: 36px;
+        height: 36px;
+        margin-bottom: 12px;
+        border-radius: 8px;
+        color: #fff;
+        font-weight: 800;
+      }
+
+      .reason h3,
+      .fix-item h3 {
+        margin: 0 0 8px;
+        font-size: 17px;
+      }
+
+      .reason p,
+      .fix-item p {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.65;
+        font-size: 14px;
+      }
+
+      .fix {
+        display: grid;
+        grid-template-columns: 1.1fr 0.9fr;
+        gap: 18px;
+        align-items: stretch;
+      }
+
+      .target-map {
+        position: relative;
+        min-height: 430px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        box-shadow: var(--shadow);
+        overflow: hidden;
+      }
+
+      .target-map svg {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+      }
+
+      .target-node {
+        position: absolute;
+        width: 170px;
+        min-height: 76px;
+        padding: 12px;
+        border-radius: 8px;
+        border: 1px solid var(--line);
+        background: #fff;
+        box-shadow: 0 10px 24px rgba(24, 32, 43, 0.08);
+        text-align: center;
+      }
+
+      .target-node b {
+        display: block;
+        margin-bottom: 4px;
+        font-size: 14px;
+      }
+
+      .target-node small {
+        display: block;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.35;
+      }
+
+      .n1 {
+        left: 28px;
+        top: 46px;
+      }
+
+      .n2 {
+        left: calc(50% - 85px);
+        top: 46px;
+      }
+
+      .n3 {
+        right: 28px;
+        top: 46px;
+      }
+
+      .n4 {
+        left: 80px;
+        bottom: 54px;
+      }
+
+      .n5 {
+        right: 80px;
+        bottom: 54px;
+      }
+
+      .fix-list {
+        display: grid;
+        gap: 12px;
+      }
+
+      .fix-item {
+        padding: 16px;
+      }
+
+      .fix-item strong {
+        color: var(--teal);
+      }
+
+      .plain {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        padding: 18px;
+        color: #3a4656;
+        line-height: 1.75;
+        box-shadow: var(--shadow);
+      }
+
+      .plain b {
+        color: var(--ink);
+      }
+
+      @media (max-width: 900px) {
+        main {
+          width: min(100vw - 24px, 680px);
+          padding-top: 20px;
+        }
+
+        .summary,
+        .compare,
+        .diagnosis,
+        .work-grid,
+        .reasons,
+        .fix {
+          grid-template-columns: 1fr;
+        }
+
+        .route {
+          min-height: 600px;
+        }
+
+        .phone,
+        .catcher {
+          left: 18px;
+        }
+
+        .server,
+        .bypass {
+          right: 18px;
+        }
+
+        .proxy,
+        .dns {
+          left: calc(50% - 74px);
+        }
+
+        .target-map {
+          min-height: 560px;
+        }
+
+        .target-node {
+          width: 152px;
+        }
+
+        .n1 {
+          left: 18px;
+          top: 42px;
+        }
+
+        .n2 {
+          right: 18px;
+          left: auto;
+          top: 42px;
+        }
+
+        .n3 {
+          left: calc(50% - 76px);
+          top: 206px;
+        }
+
+        .n4 {
+          left: 18px;
+          bottom: 48px;
+        }
+
+        .n5 {
+          right: 18px;
+          bottom: 48px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="topline">
+        <span class="label"><span class="dot"></span> 临时说明页</span>
+        <span class="label">iOS / Android / Electron</span>
+      </div>
+
+      <h1>开了代理后，HTTP 和 WebSocket 都连不上</h1>
+      <p class="lead">
+        现在更准确的判断是：旧链路能用，Clash escape 也能让 App 直连，说明手机和服务器本身不是完全不通。修复前 Catcher 接手后全断，最可疑的是 Catcher 在真正连接服务器之前，已经自己做了 DNS 或自己建了连接，导致 Clash 没机会按原规则处理。
+      </p>
+
+      <div class="summary" aria-label="核心结论">
+        <div class="summary-item">
+          <strong>第一怀疑：DNS 先失败</strong>
+          <span>修复前 Catcher HTTP / WS 都会先用自己的 DNS resolver，请求可能还没到连接阶段。</span>
+        </div>
+        <div class="summary-item">
+          <strong>第二怀疑：规则上下文变了</strong>
+          <span>域名被提前解析成 IP 后，Clash 的域名、fake-ip、分流规则可能不再命中。</span>
+        </div>
+        <div class="summary-item">
+          <strong>第三怀疑：没走代理流程</strong>
+          <span>修复前 HTTP 没传 proxy，WebSocket 也没有 CONNECT / SOCKS5 连接流程。</span>
+        </div>
+        <div class="summary-item">
+          <strong>网络切换没重建</strong>
+          <span>代理或 VPN 开关后，旧连接池、旧 DNS 缓存、旧 WS 连接还可能继续用。</span>
+        </div>
+      </div>
+
+      <section>
+        <h2 class="section-title">为什么 Clash escape 也救不了</h2>
+        <div class="diagnosis">
+          <article class="verdict">
+            <h3>关键不是“escape 无效”，而是 Catcher 改了前半段链路</h3>
+            <p>
+              escape 要生效，Clash 至少要看到 App、域名、fake-ip 或连接目标。如果 Catcher 自己的 DNS 先失败，后面就没有业务连接；如果 Catcher 先把域名变成真实 IP，Clash 看到的内容已经和旧链路不同，规则可能就匹配不上。
+            </p>
+            <div class="ranked">
+              <div><b>最可能：</b>Catcher DNS resolver 和 Clash / 系统 DNS 不一致。</div>
+              <div><b>其次：</b>HTTP / WebSocket 没按当前代理或 VPN 路径建连接。</div>
+              <div><b>再看：</b>VPN 或 Clash 开关后，旧 DNS 缓存和旧连接池没有重建。</div>
+            </div>
+          </article>
+
+          <article class="chain" aria-label="链路对比">
+            <div class="chain-row">
+              <span class="chain-label chain-ok">旧链路</span>
+              <div class="chain-text">
+                <b>App → 系统网络栈 → Clash 判断 → escape 直连 → 服务器。</b>
+                这条路能用，说明 Clash 能识别原来的 App 请求和域名。
+              </div>
+            </div>
+            <div class="chain-row">
+              <span class="chain-label chain-bad">Catcher</span>
+              <div class="chain-text">
+                <b>App → Catcher DNS → 解析失败或拿到真实 IP → 再尝试连接。</b>
+                这时可能还没发出 HTTP / WSS 连接，也可能让 Clash 失去原来的规则判断依据。
+              </div>
+            </div>
+            <div class="chain-row">
+              <span class="chain-label chain-bad">结果</span>
+              <div class="chain-text">
+                <b>表现就是“什么请求都发不出去”。</b>
+                这不等于服务器不可达，更像是请求卡在 DNS、代理选择或连接建立之前。
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <h2 class="section-title">责任边界和验证项</h2>
+        <div class="work-grid">
+          <article class="work-card">
+            <h3>Catcher 已做</h3>
+            <ul>
+              <li><b>DNS 策略显式化。</b>不配置 dns 时使用原生解析；显式 <code>dns.mode = catcher</code> 才启用 Catcher DNS。</li>
+              <li><b>不再静默退回 Google DNS。</b>读取系统 DNS 失败时默认报错，只有显式打开 fallback 才退回默认 DNS。</li>
+              <li><b>HTTP 和 WS 共用网络配置。</b>代理、DNS、TLS、网络路径版本都已暴露给两条链路。</li>
+              <li><b>WS 补齐代理能力。</b>WS 现在走 yawc + reqwest，复用 HTTP CONNECT、SOCKS5、SOCKS5 远端 DNS。</li>
+              <li><b>HTTP 补齐真实 SOCKS 能力。</b>已启用 reqwest socks feature。</li>
+              <li><b>网络变化后可重建。</b>已暴露 network_path_id，外部在 VPN / Clash / DNS 变化时传新值并重建 client。</li>
+            </ul>
+          </article>
+
+          <article class="work-card">
+            <h3>外部集成要做</h3>
+            <ul>
+              <li><b>平台探测。</b>echoo 读取 iOS / Android 的 VPN、代理、DNS、网络变化；klip 用 Electron session 查询目标 URL 的代理结果。</li>
+              <li><b>传入统一配置。</b>HTTP 和 WS 都使用同一份 proxy、DNS、TLS、networkPathId。</li>
+              <li><b>网络变化后重建。</b>Clash、VPN、系统代理、Wi-Fi、蜂窝变化后，重建 Catcher HTTP / WS client。</li>
+              <li><b>保留业务边界。</b>应用层只管 token、ready、业务消息；连接、代理、DNS、TLS 交给 Catcher。</li>
+              <li><b>分别落文档。</b>echoo 和 klip 的接入工作已写到各自项目的 docs/issues 目录。</li>
+            </ul>
+          </article>
+
+          <article class="work-card">
+            <h3>继续定位的验证项</h3>
+            <ul>
+              <li><b>看 DNS 是否先失败。</b>记录 DNS 模式、nameserver、解析结果、耗时和错误。</li>
+              <li><b>确认默认原生解析是否恢复。</b>不传 dns 时应按系统 / reqwest 默认路径解析。</li>
+              <li><b>对比解析结果。</b>比较旧链路、系统 DNS、Catcher DNS、Clash fake-ip 的差异。</li>
+              <li><b>确认有没有 TCP 连接。</b>如果没有连接日志，就不是服务器拒绝，而是连接前失败。</li>
+              <li><b>看 Clash 和服务端日志。</b>确认 Clash 是否看到连接、服务端是否收到请求。</li>
+              <li><b>再查 TLS。</b>只有 DNS 和 TCP 都成功后，才优先看证书和 WSS 握手；WS pinning 仍是后续项。</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <h2 class="section-title">两条路的差别</h2>
+        <div class="compare">
+          <article class="panel">
+            <header>
+              <h2>系统期待的路</h2>
+              <span class="status ok">应该这样</span>
+            </header>
+            <div class="route">
+              <svg viewBox="0 0 520 390" preserveAspectRatio="none" aria-hidden="true">
+                <defs>
+                  <marker id="arrow-ok" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+                    <path d="M0,0 L10,5 L0,10 Z" fill="#15803d"></path>
+                  </marker>
+                </defs>
+                <path d="M116 114 C190 52, 252 52, 260 86" fill="none" stroke="#15803d" stroke-width="5" marker-end="url(#arrow-ok)"></path>
+                <path d="M334 86 C374 54, 432 68, 448 116" fill="none" stroke="#15803d" stroke-width="5" marker-end="url(#arrow-ok)"></path>
+                <path d="M260 126 C260 184, 260 240, 260 286" fill="none" stroke="#15803d" stroke-width="4" stroke-dasharray="8 8" marker-end="url(#arrow-ok)"></path>
+              </svg>
+
+              <div class="node phone">
+                <span class="icon">1</span>
+                <b>App 发请求</b>
+                <small>HTTP / WSS</small>
+              </div>
+              <div class="node proxy">
+                <span class="icon" style="background: var(--green)">2</span>
+                <b>系统网络策略</b>
+                <small>VPN / Clash / 代理</small>
+              </div>
+              <div class="node server">
+                <span class="icon" style="background: var(--teal)">3</span>
+                <b>目标服务</b>
+                <small>由代理或 VPN 转发</small>
+              </div>
+              <div class="node dns">
+                <span class="icon" style="background: var(--orange)">DNS</span>
+                <b>按当前网络解析</b>
+                <small>可能由 VPN 或代理处理</small>
+              </div>
+              <div class="vpn-note">关键点：先问系统当前网络怎么走，再决定 DNS、代理、证书和连接。</div>
+            </div>
+          </article>
+
+          <article class="panel">
+            <header>
+              <h2>Catcher 现在的路</h2>
+              <span class="status bad">容易失败</span>
+            </header>
+            <div class="route">
+              <svg viewBox="0 0 520 390" preserveAspectRatio="none" aria-hidden="true">
+                <defs>
+                  <marker id="arrow-bad" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+                    <path d="M0,0 L10,5 L0,10 Z" fill="#dc2626"></path>
+                  </marker>
+                  <marker id="arrow-warn" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+                    <path d="M0,0 L10,5 L0,10 Z" fill="#d97706"></path>
+                  </marker>
+                </defs>
+                <path d="M116 114 C196 72, 330 72, 406 114" fill="none" stroke="#dc2626" stroke-width="5" marker-end="url(#arrow-bad)"></path>
+                <path d="M116 280 C188 250, 232 248, 260 286" fill="none" stroke="#d97706" stroke-width="4" marker-end="url(#arrow-warn)"></path>
+                <path d="M334 286 C374 248, 410 236, 448 280" fill="none" stroke="#dc2626" stroke-width="4" stroke-dasharray="9 8" marker-end="url(#arrow-bad)"></path>
+                <path d="M252 82 C252 38, 320 38, 386 76" fill="none" stroke="#94a3b8" stroke-width="3" stroke-dasharray="6 8"></path>
+              </svg>
+
+              <div class="node phone">
+                <span class="icon">1</span>
+                <b>App 发请求</b>
+                <small>Catcher 接手</small>
+              </div>
+              <div class="node server">
+                <span class="icon" style="background: var(--red)">4</span>
+                <b>目标服务</b>
+                <small>被尝试直连</small>
+              </div>
+              <div class="node catcher">
+                <span class="icon" style="background: var(--orange)">2</span>
+                <b>Catcher 自己建连接</b>
+                <small>没拿到系统代理</small>
+              </div>
+              <div class="node dns">
+                <span class="icon" style="background: var(--orange)">3</span>
+                <b>本地 DNS</b>
+                <small>可能绕过代理策略</small>
+              </div>
+              <div class="node bypass">
+                <span class="icon" style="background: #64748b">VPN</span>
+                <b>Clash / VPN</b>
+                <small>没有被正确使用</small>
+              </div>
+              <div class="break-note">失败点：HTTP 没进代理，WebSocket 也没进代理；DNS、证书和网络变化也没有统一处理。</div>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <h2 class="section-title">修复前 HTTP 和 WebSocket 都连不上的四个原因</h2>
+        <div class="reasons">
+          <article class="reason">
+            <div class="reason-mark" style="background: var(--red)">1</div>
+            <h3>HTTP 没拿到代理</h3>
+            <p>用户开了 Clash，本地代理可能是 127.0.0.1:7890。Catcher HTTP 没拿到这条信息，就不会先进代理，而是按默认方式直连。</p>
+          </article>
+          <article class="reason">
+            <div class="reason-mark" style="background: var(--orange)">2</div>
+            <h3>修复前 WebSocket 没有代理通道</h3>
+            <p>WSS 也需要先连代理，再 CONNECT 到目标，再 TLS 握手。修复前 WS 是解析目标 IP 后直连，代理规则自然失效。</p>
+          </article>
+          <article class="reason">
+            <div class="reason-mark" style="background: var(--blue)">3</div>
+            <h3>DNS 和代理顺序反了</h3>
+            <p>很多代理希望拿到域名后自己解析。修复前 Catcher 先本地解析成 IP，可能破坏 fake-ip、远端 DNS 和分流规则。</p>
+          </article>
+          <article class="reason">
+            <div class="reason-mark" style="background: var(--teal)">4</div>
+            <h3>网络变了但连接没换</h3>
+            <p>VPN 开关会改变路由和 DNS。旧连接池、旧 DNS 缓存、旧 WS 连接如果继续用，就像拿旧地图找新路。</p>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <h2 class="section-title">本次修复后的结构</h2>
+        <div class="fix">
+          <div class="target-map">
+            <svg viewBox="0 0 640 430" preserveAspectRatio="none" aria-hidden="true">
+              <defs>
+                <marker id="arrow-target" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+                  <path d="M0,0 L10,5 L0,10 Z" fill="#2563eb"></path>
+                </marker>
+              </defs>
+              <path d="M184 84 C260 70, 322 70, 456 84" fill="none" stroke="#2563eb" stroke-width="4" marker-end="url(#arrow-target)"></path>
+              <path d="M320 118 C320 178, 220 218, 164 318" fill="none" stroke="#2563eb" stroke-width="4" marker-end="url(#arrow-target)"></path>
+              <path d="M320 118 C320 178, 420 218, 476 318" fill="none" stroke="#2563eb" stroke-width="4" marker-end="url(#arrow-target)"></path>
+              <path d="M164 318 C232 364, 400 364, 476 318" fill="none" stroke="#0f766e" stroke-width="3" stroke-dasharray="8 8"></path>
+            </svg>
+            <div class="target-node n1">
+              <b>外部项目平台探测</b>
+              <small>VPN、系统代理、PAC、证书、网络变化</small>
+            </div>
+            <div class="target-node n2">
+              <b>统一网络配置</b>
+              <small>把当前网络规则变成统一配置</small>
+            </div>
+            <div class="target-node n3">
+              <b>Catcher 核心</b>
+              <small>统一处理代理、DNS、TLS、重建</small>
+            </div>
+            <div class="target-node n4">
+              <b>HTTP Transport</b>
+              <small>HTTP / HTTPS / SOCKS5 / DNS 策略</small>
+            </div>
+            <div class="target-node n5">
+              <b>WS Transport</b>
+              <small>CONNECT / SOCKS5 / WSS TLS / 重连</small>
+            </div>
+          </div>
+
+          <div class="fix-list">
+            <article class="fix-item">
+              <h3><strong>已做 1：</strong>HTTP 和 WS 用同一份网络策略</h3>
+              <p>两条链路都已暴露 proxy、DNS、TLS 和 networkPathId。</p>
+            </article>
+            <article class="fix-item">
+              <h3><strong>已做 2：</strong>代理场景不提前乱解析 DNS</h3>
+              <p>不配置 dns 时走原生解析；使用 socks5h 时把目标域名交给代理解析。</p>
+            </article>
+            <article class="fix-item">
+              <h3><strong>已做 3：</strong>VPN 或代理变化后可重建连接</h3>
+              <p>外部项目传入新的 networkPathId，并重建 HTTP / WS client。</p>
+            </article>
+            <article class="fix-item">
+              <h3><strong>已做 4：</strong>证书配置主要能力对齐</h3>
+              <p>HTTP 和 WSS 都支持自定义 CA、证书校验开关；WS pinning 后续单独补齐。</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2 class="section-title">最短解释</h2>
+        <div class="plain">
+          <b>用户开 VPN 或 Clash，不是网络真的没了。</b>
+          网络只是换了一条规则：HTTP 要进代理，WebSocket 也要进代理，有些 DNS 要交给代理，有些连接要跟随 VPN。Catcher 现在已经补齐了 HTTP / WS 的统一代理、DNS、TLS 配置入口；外部项目还需要把平台当前网络状态传进来，并在网络变化后重建 client。
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

@@ -20,7 +20,7 @@ export interface SharedAgentOptions {
 // === Proxy ===
 
 export interface ProxyConfig {
-  /** "http://host:port" | "https://host:port" | "socks5://host:port" */
+  /** "http://host:port" | "https://host:port" | "socks5://host:port" | "socks5h://host:port" */
   url: string
   auth?: { username: string; password: string }
   noProxy?: string[]
@@ -29,10 +29,14 @@ export interface ProxyConfig {
 // === DNS ===
 
 export interface DnsConfig {
+  /** DNS mode. Not setting dns lets the transport use its native resolver. */
+  mode?: 'catcher' | 'native'
   /** Custom DNS nameservers (e.g. ["8.8.8.8"]) */
   nameservers?: string[]
   /** Hostname → IP mapping for custom DNS resolution */
   hostMapping?: Record<string, string>
+  /** Allow fallback to default nameservers when system DNS config cannot be read. Default: false */
+  fallbackToDefaultNameservers?: boolean
 }
 
 // === TLS ===
@@ -146,6 +150,8 @@ export interface HttpClientConfig {
   xsrfCookieName?: string
   /** XSRF/CSRF header name. Default: "X-XSRF-TOKEN" */
   xsrfHeaderName?: string
+  /** Network path version. Recreate clients after VPN/proxy/DNS changes with a new value. */
+  networkPathId?: string
 }
 
 // === Per-request Options ===
@@ -279,10 +285,16 @@ export interface ResilientWSOptions {
   headers?: Record<string, string>
   /** Skip TLS cert validation */
   rejectUnauthorized?: boolean
+  /** DNS configuration. Not setting dns lets the transport use its native resolver. */
+  dns?: DnsConfig
+  /** TLS configuration */
+  tls?: TlsConfig
   // --- G3: Cookie for WS handshake (Node.js ws library) ---
   cookie?: string
   // --- G4: Proxy for WS connections ---
   proxy?: boolean | string | ProxyConfig
+  /** Network path version. Recreate clients after VPN/proxy/DNS changes with a new value. */
+  networkPathId?: string
 }
 
 export interface ResilientWS extends EventTarget {

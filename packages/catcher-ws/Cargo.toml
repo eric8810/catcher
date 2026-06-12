@@ -8,11 +8,11 @@ repository = "https://github.com/eric8810/catcher"
 
 [features]
 default = ["rustls-tls"]
-rustls-tls = ["yawc/rustls-ring"]
+rustls-tls = ["yawc/rustls-ring", "reqwest/rustls"]
 
 [dependencies]
 catcher-core = { path = "../catcher-core", version = "0.3.12" }
-catcher-dns = { path = "../catcher-dns", version = "0.3.12" }
+catcher-dns = { path = "../catcher-dns", version = "0.3.12", features = ["reqwest-resolver"] }
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "net", "io-util", "macros"] }
 futures-util = "0.3"
 backon = "1"
@@ -25,7 +25,8 @@ flate2 = "1"
 zstd = "0.13"
 http = "1"
 url = "2"
-yawc = { version = "0.3.3", default-features = false }
+yawc = { version = "0.3.3", default-features = false, features = ["reqwest"] }
+reqwest = { version = "0.13", default-features = false, features = ["socks"] }
 
 [dev-dependencies]
 sha1 = "0.10"

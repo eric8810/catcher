@@ -26,6 +26,8 @@ export interface HeartbeatConfig {
 
 /** DNS 配置 — 对应 Rust DnsConfig */
 export interface DnsConfig {
+  /** DNS 模式。默认: 'catcher'。不配置 dns 时使用 reqwest 原生解析。 */
+  mode?: 'catcher' | 'native'
   /** 缓存条目数上限。默认: 512 */
   cache_size?: number
   /** DNS 缓存 TTL（秒）。默认: 300 */
@@ -40,6 +42,52 @@ export interface DnsConfig {
   nameservers?: string[]
   /** Hostname → IP 映射 */
   host_mapping?: Record<string, string>
+  /** 读取系统 DNS 失败时是否退回默认 DNS。默认: false */
+  fallback_to_default_nameservers?: boolean
+}
+
+/** TLS 版本 */
+export type TlsVersion = 'Tls1_0' | 'Tls1_1' | 'Tls1_2' | 'Tls1_3'
+
+/** TLS 配置 — 对应 Rust TlsConfig */
+export interface TlsConfig {
+  /** 是否验证服务端证书。默认: true */
+  reject_unauthorized?: boolean
+  /** CA 证书 PEM 内容 */
+  ca_cert_pem?: string
+  /** CA 证书文件路径 */
+  ca_cert_path?: string
+  /** 客户端证书 PEM 内容 */
+  client_cert_pem?: string
+  /** 客户端证书文件路径 */
+  client_cert_path?: string
+  /** 客户端私钥 PEM 内容 */
+  client_key_pem?: string
+  /** 客户端私钥文件路径 */
+  client_key_path?: string
+  /** TLS SNI 覆写 */
+  tls_sni_override?: string
+  /** 最低 TLS 版本 */
+  min_tls_version?: TlsVersion
+  /** 最高 TLS 版本 */
+  max_tls_version?: TlsVersion
+  /** SHA-256 公钥指纹 pinning */
+  pin_sha256?: string[]
+}
+
+/** 代理认证 */
+export interface ProxyAuth {
+  username: string
+  password: string
+}
+
+/** 代理配置 — 对应 Rust ProxyConfig */
+export interface ProxyConfig {
+  /** 代理 URL: "http://host:port" | "https://host:port" | "socks5://host:port" | "socks5h://host:port" */
+  url: string
+  auth?: ProxyAuth
+  /** 不走代理的 hostname 列表 */
+  no_proxy?: string[]
 }
 
 /**
@@ -64,12 +112,18 @@ export interface WsClientConfig {
   reconnect?: ReconnectConfig
   /** 心跳配置 */
   heartbeat?: HeartbeatConfig
+  /** TLS 配置 */
+  tls?: TlsConfig
+  /** 代理配置 */
+  proxy?: ProxyConfig
   /** 同时竞速端点数。默认: 1 */
   race_count?: number
   /** DNS 配置 */
   dns?: DnsConfig
   /** 启用 msgpack 编解码 — send 自动 JSON→msgpack, receive 自动 msgpack→JSON. 默认 false */
   msgpack?: boolean
+  /** 网络路径版本。VPN / 代理 / DNS 变化后传入新值并重建 client。 */
+  network_path_id?: string
 }
 
 /** WebSocket 事件 — 所有回调参数的联合类型 */

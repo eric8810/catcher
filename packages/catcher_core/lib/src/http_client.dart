@@ -978,6 +978,7 @@ class TlsConfig {
 
 /// DNS configuration
 class DnsConfig {
+  final String mode;
   final int cacheSize;
   final int cacheTtlSecs;
   final int negativeTtlSecs;
@@ -985,8 +986,10 @@ class DnsConfig {
   final bool staleOnError;
   final List<String> nameservers;
   final Map<String, String> hostMapping;
+  final bool fallbackToDefaultNameservers;
 
   const DnsConfig({
+    this.mode = 'catcher',
     this.cacheSize = 512,
     this.cacheTtlSecs = 300,
     this.negativeTtlSecs = 60,
@@ -994,9 +997,11 @@ class DnsConfig {
     this.staleOnError = true,
     this.nameservers = const [],
     this.hostMapping = const {},
+    this.fallbackToDefaultNameservers = false,
   });
 
   Map<String, dynamic> toJson() => {
+        'mode': mode,
         'cache_size': cacheSize,
         'cache_ttl_secs': cacheTtlSecs,
         'negative_ttl_secs': negativeTtlSecs,
@@ -1004,6 +1009,7 @@ class DnsConfig {
         'stale_on_error': staleOnError,
         'nameservers': nameservers,
         'host_mapping': hostMapping,
+        'fallback_to_default_nameservers': fallbackToDefaultNameservers,
       };
 }
 
@@ -1071,6 +1077,7 @@ class HttpClientConfig {
   final ProxyAuth? auth;
   final String? bearerToken;
   final bool msgpack;
+  final String? networkPathId;
 
   const HttpClientConfig({
     required this.baseUrl,
@@ -1088,6 +1095,7 @@ class HttpClientConfig {
     this.auth,
     this.bearerToken,
     this.msgpack = false,
+    this.networkPathId,
   });
 
   Map<String, dynamic> toJson() => {
@@ -1106,6 +1114,7 @@ class HttpClientConfig {
         if (auth != null) 'auth': auth!.toJson(),
         if (bearerToken != null) 'bearer_token': bearerToken,
         'msgpack': msgpack,
+        if (networkPathId != null) 'network_path_id': networkPathId,
       };
 }
 

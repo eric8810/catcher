@@ -56,6 +56,15 @@
 
 详见 → [native-layer-capability-gaps.md](./native-layer-capability-gaps.md)
 
+## 移动端代理 / VPN 接入问题
+
+> 来源：客户在 iOS / Android 使用 Clash、VPN、本地代理时的失败反馈；结合 `echoo-flutter` 和 `klip-electron` 实际接入方式审查。
+
+| # | Issue | 优先级 | 状态 | 文件 |
+|---|-------|:------:|:----:|------|
+| M-01 | Clash / VPN / 本地代理下请求失败 | 🔴 P0 | Catcher 已实现，待验证 | [026-mobile-proxy-vpn-clash.md](./026-mobile-proxy-vpn-clash.md) |
+
+
 ## 间题之间的关联
 
 ```

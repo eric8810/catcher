@@ -5,7 +5,7 @@ import 'dart:ffi';
 import 'package:ffi/ffi.dart';
 
 import 'ffi_bindings.dart';
-import 'http_client.dart' show DnsConfig;
+import 'http_client.dart' show DnsConfig, ProxyConfig, TlsConfig;
 import 'native_loader.dart';
 
 /// Dart wrapper around the Rust catcher WebSocket client via C ABI.
@@ -379,7 +379,10 @@ class WsClientConfig {
   final int deflateThresholdBytes;
   final WsApplicationCompressionConfig? applicationCompression;
   final DnsConfig? dns;
+  final TlsConfig tls;
+  final ProxyConfig? proxy;
   final bool msgpack;
+  final String? networkPathId;
 
   const WsClientConfig({
     required this.urls,
@@ -394,7 +397,10 @@ class WsClientConfig {
     this.deflateThresholdBytes = 1024,
     this.applicationCompression,
     this.dns,
+    this.tls = const TlsConfig(),
+    this.proxy,
     this.msgpack = false,
+    this.networkPathId,
   });
 
   Map<String, dynamic> toJson() => {
@@ -411,7 +417,10 @@ class WsClientConfig {
         if (applicationCompression != null)
           'application_compression': applicationCompression!.toJson(),
         if (dns != null) 'dns': dns!.toJson(),
+        'tls': tls.toJson(),
+        if (proxy != null) 'proxy': proxy!.toJson(),
         'msgpack': msgpack,
+        if (networkPathId != null) 'network_path_id': networkPathId,
       };
 }
 

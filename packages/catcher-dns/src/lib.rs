@@ -18,6 +18,9 @@ use serde::{Deserialize, Serialize};
 /// DNS 配置。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DnsConfig {
+    /// DNS 模式。
+    #[serde(default)]
+    pub mode: DnsMode,
     /// 缓存条目数上限。
     #[serde(alias = "cacheSize", default = "default_dns_cache_size")]
     pub cache_size: u64,
@@ -39,6 +42,27 @@ pub struct DnsConfig {
     /// 主机名到 IP 的固定映射。
     #[serde(alias = "hostMapping", default)]
     pub host_mapping: HashMap<String, String>,
+    /// 读取系统 DNS 失败时是否退回 Hickory 默认 DNS。
+    #[serde(alias = "fallbackToDefaultNameservers", default)]
+    pub fallback_to_default_nameservers: bool,
+}
+
+/// DNS 模式。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum DnsMode {
+    /// 使用 Catcher resolver、缓存、host mapping 和旧缓存兜底。
+    #[default]
+    Catcher,
+    /// 不注入 Catcher resolver，让协议库使用自身默认解析流程。
+    Native,
+}
+
+impl DnsConfig {
+    /// 是否应接入 Catcher resolver。
+    pub fn use_catcher_resolver(&self) -> bool {
+        self.mode == DnsMode::Catcher
+    }
 }
 
 fn default_dns_cache_size() -> u64 {
@@ -60,6 +84,7 @@ fn default_dns_stale_ttl() -> u32 {
 impl Default for DnsConfig {
     fn default() -> Self {
         Self {
+            mode: DnsMode::default(),
             cache_size: default_dns_cache_size(),
             cache_ttl_secs: default_dns_cache_ttl(),
             negative_ttl_secs: default_dns_negative_ttl(),
@@ -67,6 +92,7 @@ impl Default for DnsConfig {
             stale_on_error: default_true(),
             nameservers: Vec::new(),
             host_mapping: HashMap::new(),
+            fallback_to_default_nameservers: false,
         }
     }
 }
@@ -78,9 +104,18 @@ impl Default for DnsConfig {
 #[derive(Clone, Debug)]
 pub struct DnsResolver {
     #[cfg(feature = "hickory-dns")]
-    inner: hickory_backend::HickoryDnsResolver,
+    inner: DnsBackend,
     #[cfg(not(feature = "hickory-dns"))]
     host_mapping: HashMap<String, Vec<SocketAddr>>,
+}
+
+#[cfg(feature = "hickory-dns")]
+#[derive(Clone, Debug)]
+enum DnsBackend {
+    Hickory(Box<hickory_backend::HickoryDnsResolver>),
+    Native {
+        host_mapping: HashMap<String, Vec<SocketAddr>>,
+    },
 }
 
 impl DnsResolver {
@@ -88,8 +123,17 @@ impl DnsResolver {
     pub fn new(config: &DnsConfig) -> Result<Self, CatcherError> {
         #[cfg(feature = "hickory-dns")]
         {
+            if config.mode == DnsMode::Native {
+                return Ok(Self {
+                    inner: DnsBackend::Native {
+                        host_mapping: parse_host_mapping(&config.host_mapping)?,
+                    },
+                });
+            }
             Ok(Self {
-                inner: hickory_backend::HickoryDnsResolver::new(config)?,
+                inner: DnsBackend::Hickory(Box::new(hickory_backend::HickoryDnsResolver::new(
+                    config,
+                )?)),
             })
         }
 
@@ -109,22 +153,17 @@ impl DnsResolver {
     ) -> Result<Vec<SocketAddr>, CatcherError> {
         #[cfg(feature = "hickory-dns")]
         {
-            return self.inner.resolve_socket_addrs(hostname, port).await;
+            match &self.inner {
+                DnsBackend::Hickory(inner) => inner.resolve_socket_addrs(hostname, port).await,
+                DnsBackend::Native { host_mapping } => {
+                    resolve_native_socket_addrs(host_mapping, hostname, port).await
+                }
+            }
         }
 
         #[cfg(not(feature = "hickory-dns"))]
         {
-            if let Some(addrs) = self.host_mapping.get(hostname) {
-                return Ok(with_port(addrs.clone(), port));
-            }
-
-            tokio::net::lookup_host((hostname, port))
-                .await
-                .map(|iter| iter.collect())
-                .map_err(|e| CatcherError::DnsError {
-                    host: hostname.to_string(),
-                    reason: e.to_string(),
-                })
+            resolve_native_socket_addrs(&self.host_mapping, hostname, port).await
         }
     }
 
@@ -132,7 +171,10 @@ impl DnsResolver {
     fn has_host_mapping(&self, hostname: &str) -> bool {
         #[cfg(feature = "hickory-dns")]
         {
-            self.inner.has_host_mapping(hostname)
+            match &self.inner {
+                DnsBackend::Hickory(inner) => inner.has_host_mapping(hostname),
+                DnsBackend::Native { host_mapping } => host_mapping.contains_key(hostname),
+            }
         }
 
         #[cfg(not(feature = "hickory-dns"))]
@@ -140,6 +182,24 @@ impl DnsResolver {
             self.host_mapping.contains_key(hostname)
         }
     }
+}
+
+async fn resolve_native_socket_addrs(
+    host_mapping: &HashMap<String, Vec<SocketAddr>>,
+    hostname: &str,
+    port: u16,
+) -> Result<Vec<SocketAddr>, CatcherError> {
+    if let Some(addrs) = host_mapping.get(hostname) {
+        return Ok(with_port(addrs.clone(), port));
+    }
+
+    tokio::net::lookup_host((hostname, port))
+        .await
+        .map(|iter| iter.collect())
+        .map_err(|e| CatcherError::DnsError {
+            host: hostname.to_string(),
+            reason: e.to_string(),
+        })
 }
 
 /// 创建共享 DNS 解析器。
@@ -340,8 +400,18 @@ mod hickory_backend {
         opts.negative_max_ttl = Some(Duration::from_secs(config.negative_ttl_secs as u64));
 
         if config.nameservers.is_empty() {
-            let (sys_config, sys_opts) = hickory_resolver::system_conf::read_system_conf()
-                .unwrap_or_else(|_| (ResolverConfig::default(), ResolverOpts::default()));
+            let (sys_config, sys_opts) = match hickory_resolver::system_conf::read_system_conf() {
+                Ok(config) => config,
+                Err(_) if config.fallback_to_default_nameservers => {
+                    (ResolverConfig::default(), ResolverOpts::default())
+                }
+                Err(e) => {
+                    return Err(CatcherError::DnsError {
+                        host: "system".to_string(),
+                        reason: format!("read system DNS config: {e}"),
+                    });
+                }
+            };
             opts.negative_max_ttl = opts.negative_max_ttl.or(sys_opts.negative_max_ttl);
             Ok(
                 TokioResolver::builder_with_config(sys_config, TokioConnectionProvider::default())
@@ -373,9 +443,48 @@ mod hickory_backend {
     }
 }
 
+#[cfg(feature = "reqwest-resolver")]
+pub mod reqwest_resolver {
+    use std::net::SocketAddr;
+    use std::sync::Arc;
+
+    use catcher_core::CatcherError;
+
+    use crate::{build_stale_aware_resolver, DnsConfig, DnsResolver};
+
+    /// reqwest DNS 适配器。
+    #[derive(Clone, Debug)]
+    pub struct ReqwestDnsResolver {
+        inner: Arc<DnsResolver>,
+    }
+
+    impl reqwest::dns::Resolve for ReqwestDnsResolver {
+        fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+            let inner = self.inner.clone();
+            Box::pin(async move {
+                let hostname = name.as_str().to_string();
+                let addrs = inner
+                    .resolve_socket_addrs(&hostname, 0)
+                    .await
+                    .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })?;
+                Ok(Box::new(addrs.into_iter()) as Box<dyn Iterator<Item = SocketAddr> + Send>)
+            })
+        }
+    }
+
+    /// 构建 reqwest 可用的共享 DNS resolver。
+    pub fn build_reqwest_resolver(
+        config: &DnsConfig,
+    ) -> Result<Arc<ReqwestDnsResolver>, CatcherError> {
+        Ok(Arc::new(ReqwestDnsResolver {
+            inner: build_stale_aware_resolver(config)?,
+        }))
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{build_stale_aware_resolver, DnsConfig, DnsResolver};
+    use super::{build_stale_aware_resolver, DnsConfig, DnsMode, DnsResolver};
     use std::collections::HashMap;
 
     #[test]
@@ -395,6 +504,7 @@ mod tests {
     #[test]
     fn dns_config_uses_default_values() {
         let config = DnsConfig::default();
+        assert_eq!(config.mode, DnsMode::Catcher);
         assert_eq!(config.cache_size, 512);
         assert_eq!(config.cache_ttl_secs, 300);
         assert_eq!(config.negative_ttl_secs, 60);
@@ -402,6 +512,15 @@ mod tests {
         assert!(config.stale_on_error);
         assert!(config.nameservers.is_empty());
         assert!(config.host_mapping.is_empty());
+        assert!(!config.fallback_to_default_nameservers);
+        assert!(config.use_catcher_resolver());
+    }
+
+    #[test]
+    fn dns_config_can_use_native_mode() {
+        let config: DnsConfig = serde_json::from_str(r#"{"mode":"native"}"#).unwrap();
+        assert_eq!(config.mode, DnsMode::Native);
+        assert!(!config.use_catcher_resolver());
     }
 
     #[test]
