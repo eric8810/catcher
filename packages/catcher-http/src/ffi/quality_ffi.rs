@@ -147,7 +147,15 @@ pub unsafe extern "C" fn catcher_quality_subscribe(
 #[no_mangle]
 pub unsafe extern "C" fn catcher_quality_unsubscribe(sub_handle: *mut c_void) {
     if sub_handle.is_null() { return; }
+    // 先从订阅表移除，仅当句柄确实在表中时才回收 —
+    // 重复 unsubscribe 或传入无效句柄都安全返回，避免 double-free/UAF
+    {
+        let mut subs = SUBSCRIPTIONS.lock().unwrap();
+        let Some(pos) = subs.iter().position(|&p| p == sub_handle as usize) else {
+            return;
+        };
+        subs.remove(pos);
+    }
     let sub: Box<crate::observability::network_quality::QualitySubscription> = Box::from_raw(sub_handle as *mut _);
     sub.unsubscribe();
-    SUBSCRIPTIONS.lock().unwrap().retain(|&p| p != sub_handle as usize);
 }

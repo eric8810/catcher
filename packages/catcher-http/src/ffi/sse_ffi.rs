@@ -224,7 +224,7 @@ pub unsafe extern "C" fn catcher_sse_connect(
                     }
                 });
 
-                Box::into_raw(Box::new(id)) as usize
+                id
             }
             Err(_) => 0usize,
             }
@@ -244,7 +244,7 @@ pub unsafe extern "C" fn catcher_sse_ready_state(sse_handle: *mut c_void) -> i32
     if sse_handle.is_null() {
         return -1;
     }
-    let id = *(sse_handle as *const usize);
+    let id = sse_handle as usize;
     SSE_REGISTRY.get(id)
         .map(|client| match client.blocking_lock().ready_state() {
             SseReadyState::Connecting => 0,
@@ -261,7 +261,7 @@ pub unsafe extern "C" fn catcher_sse_last_event_id(sse_handle: *mut c_void) -> *
     if sse_handle.is_null() {
         return std::ptr::null_mut();
     }
-    let id = *(sse_handle as *const usize);
+    let id = sse_handle as usize;
     SSE_REGISTRY.get(id)
         .map(|client| {
             let last_id = client.blocking_lock().last_event_id();
@@ -276,7 +276,7 @@ pub unsafe extern "C" fn catcher_sse_close(sse_handle: *mut c_void) {
     if sse_handle.is_null() {
         return;
     }
-    let id = *(sse_handle as *const usize);
+    let id = sse_handle as usize;
     if let Some(client) = SSE_REGISTRY.get(id) {
         client.blocking_lock().close();
     }
@@ -288,7 +288,6 @@ pub unsafe extern "C" fn catcher_sse_destroy(sse_handle: *mut c_void) {
     if sse_handle.is_null() {
         return;
     }
-    let id = *(sse_handle as *const usize);
+    let id = sse_handle as usize;
     SSE_REGISTRY.remove(id);
-    drop(Box::from_raw(sse_handle as *mut usize));
 }

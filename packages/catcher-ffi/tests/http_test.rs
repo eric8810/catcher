@@ -59,6 +59,39 @@ async fn h01_create_and_destroy_client() {
     unsafe { http::catcher_http_client_destroy(handle); }
 }
 
+/// destroy 之后用旧句柄调用任何 API 必须安全失败（句柄是注册表 id
+/// 而非堆指针，不存在 use-after-free）。网络监听回调线程在 App 销毁
+/// 客户端后仍可能触发，这是真实会发生的时序。
+#[tokio::test]
+async fn h16_stale_handle_after_destroy_is_safe() {
+    let config = r#"{"base_url":"https://httpbin.org","connect_timeout_ms":5000}"#;
+    let c_config = CString::new(config).unwrap();
+
+    let handle = unsafe { http::catcher_http_client_create(c_config.as_ptr()) };
+    assert!(!handle.is_null());
+    unsafe { http::catcher_http_client_destroy(handle); }
+
+    // 全部 API 用已销毁的句柄调用：不崩溃、返回失败码
+    unsafe {
+        assert_eq!(http::catcher_http_network_changed(handle), 1);
+        assert_eq!(http::catcher_http_cancel_request(handle, 1), -1);
+        http::catcher_http_client_cancel_all(handle); // 应为 no-op
+        // 重复 destroy 安全
+        http::catcher_http_client_destroy(handle);
+    }
+}
+
+/// 凭空伪造的句柄值也必须安全失败（不解引用调用方指针）
+#[tokio::test]
+async fn h17_garbage_handle_is_safe() {
+    let garbage = 0x7fff_ffff_usize as *mut std::ffi::c_void;
+    unsafe {
+        assert_eq!(http::catcher_http_network_changed(garbage), 1);
+        assert_eq!(http::catcher_http_cancel_request(garbage, 1), -1);
+        http::catcher_http_client_destroy(garbage);
+    }
+}
+
 #[tokio::test]
 async fn h02_get_request_with_wiremock() {
     use wiremock::{MockServer, Mock, ResponseTemplate};
