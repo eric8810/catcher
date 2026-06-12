@@ -140,6 +140,21 @@ impl DnsResolver {
         }
     }
 
+    /// 网络环境变化时的完整恢复：清空缓存 + 重建底层解析器。
+    ///
+    /// 仅 `clear_cache()` 不够：底层解析器的 nameserver 列表在创建时确定
+    /// （系统配置只读一次），UDP socket 也绑定在旧网络接口上。新网络往往
+    /// 推送不同的 DNS 服务器（VPN/蜂窝切换尤其明显），重建解析器会重读
+    /// 系统 DNS 配置并重新建立到 nameserver 的连接。
+    /// 关闭 `hickory-dns` feature 时每次解析都走系统调用，为 no-op。
+    pub fn network_changed(&self) -> Result<(), CatcherError> {
+        #[cfg(feature = "hickory-dns")]
+        {
+            self.inner.network_changed()?;
+        }
+        Ok(())
+    }
+
     #[cfg(test)]
     fn has_host_mapping(&self, hostname: &str) -> bool {
         #[cfg(feature = "hickory-dns")]
@@ -195,7 +210,7 @@ mod hickory_backend {
     use hickory_resolver::name_server::TokioConnectionProvider;
     use hickory_resolver::TokioResolver;
     use moka::future::Cache;
-    use parking_lot::Mutex;
+    use parking_lot::{Mutex, RwLock};
 
     use crate::{parse_host_mapping, with_port, DnsConfig};
 
@@ -207,7 +222,11 @@ mod hickory_backend {
 
     #[derive(Clone, Debug)]
     pub(super) struct HickoryDnsResolver {
-        resolver: TokioResolver,
+        /// 底层解析器 — RwLock 包装以支持 network_changed() 热重建
+        /// （重读系统 DNS 配置、重建绑定在新网络接口上的 socket）
+        resolver: Arc<RwLock<TokioResolver>>,
+        /// 重建解析器所需的配置
+        config: DnsConfig,
         cache: Cache<String, DnsCacheEntry>,
         host_mapping: std::collections::HashMap<String, Vec<SocketAddr>>,
         cache_ttl: Duration,
@@ -230,7 +249,8 @@ mod hickory_backend {
                 .build();
 
             Ok(Self {
-                resolver,
+                resolver: Arc::new(RwLock::new(resolver)),
+                config: config.clone(),
                 cache,
                 host_mapping: parse_host_mapping(&config.host_mapping)?,
                 cache_ttl: Duration::from_secs(config.cache_ttl_secs as u64),
@@ -253,17 +273,30 @@ mod hickory_backend {
         pub(super) fn clear_cache(&self) {
             self.generation.fetch_add(1, Ordering::SeqCst);
             self.cache.invalidate_all();
-            self.resolver.clear_cache();
+            self.resolver.read().clear_cache();
             // 放行被旧代际刷新任务占位的 hostname，允许立即发起新解析
             self.refreshing.lock().clear();
+        }
+
+        /// 网络变化恢复：清空缓存 + 重建底层解析器。
+        ///
+        /// 重建会重读系统 DNS 配置（未显式配置 nameservers 时）并重新
+        /// 建立到 nameserver 的 socket — 旧 socket 可能仍绑定在已失效
+        /// 的网络接口上。重建失败时保留旧解析器（缓存已清空），返回错误。
+        pub(super) fn network_changed(&self) -> Result<(), CatcherError> {
+            self.clear_cache();
+            let new_resolver = build_inner_resolver(&self.config)?;
+            *self.resolver.write() = new_resolver;
+            Ok(())
         }
 
         async fn do_resolve(
             &self,
             hostname: &str,
         ) -> Result<Vec<SocketAddr>, Box<dyn std::error::Error + Send + Sync>> {
-            let lookup = self
-                .resolver
+            // 克隆出当前解析器（内部 Arc，克隆廉价），不跨 await 持锁
+            let resolver = self.resolver.read().clone();
+            let lookup = resolver
                 .lookup_ip(hostname)
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
@@ -575,6 +608,28 @@ mod tests {
         assert_eq!(addrs, vec!["127.0.0.1:8080".parse().expect("valid addr")]);
         // 再次清空应幂等
         resolver.clear_cache();
+    }
+
+    #[tokio::test]
+    async fn network_changed_rebuilds_resolver_and_keeps_resolving() {
+        let config = DnsConfig {
+            host_mapping: vec![("api.test".to_string(), "127.0.0.1".to_string())]
+                .into_iter()
+                .collect(),
+            ..Default::default()
+        };
+        let resolver = build_stale_aware_resolver(&config).expect("valid resolver");
+        resolver
+            .network_changed()
+            .expect("rebuild with same config succeeds");
+        // 重建后仍可解析（host_mapping 与新解析器都可用）
+        let addrs = resolver
+            .resolve_socket_addrs("api.test", 9090)
+            .await
+            .expect("resolves after rebuild");
+        assert_eq!(addrs, vec!["127.0.0.1:9090".parse().expect("valid addr")]);
+        // 幂等
+        resolver.network_changed().expect("idempotent");
     }
 
     #[tokio::test]

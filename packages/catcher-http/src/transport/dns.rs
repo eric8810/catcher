@@ -16,9 +16,10 @@ mod reqwest_resolver {
     }
 
     impl ReqwestDnsResolver {
-        /// 清空 DNS 缓存（网络环境变化后调用）。
-        pub(crate) fn clear_cache(&self) {
-            self.inner.clear_cache();
+        /// 网络环境变化恢复：清空缓存 + 重建底层解析器（重读系统 DNS 配置）。
+        /// 重建失败时旧解析器保持可用（缓存已清空），调用方可继续。
+        pub(crate) fn network_changed(&self) -> Result<(), CatcherError> {
+            self.inner.network_changed()
         }
     }
 

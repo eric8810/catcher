@@ -135,8 +135,10 @@ impl HttpTransport {
     ///
     /// 飞行中的请求不受影响：其内部重试会自动建立新连接。
     pub fn network_changed(&self) -> Result<(), CatcherError> {
+        // 清缓存 + 重建解析器（重读系统 DNS 配置、重连 nameserver）。
+        // 重建失败时旧解析器仍可用且缓存已清空，继续重建连接池
         #[cfg(feature = "hickory-dns")]
-        self.dns_resolver.clear_cache();
+        let _ = self.dns_resolver.network_changed();
 
         // 熔断器先重置：即使客户端重建失败（如 TLS 证书文件被移除），
         // 旧网络造成的熔断状态也不应继续拒绝新网络上的请求。
