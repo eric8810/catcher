@@ -1,6 +1,6 @@
 [package]
 name = "catcher-http"
-version = "0.3.12"
+version = "0.3.13"
 edition = "2021"
 description = "HTTP client for catcher — resilient transport with retry, circuit breaker, priority scheduling"
 license = "MIT"
@@ -14,8 +14,8 @@ hickory-dns = ["catcher-dns/hickory-dns", "catcher-dns/reqwest-resolver"]
 napi = ["dep:napi", "dep:napi-derive"]
 
 [dependencies]
-catcher-core = { path = "../catcher-core", version = "0.3.12" }
-catcher-dns = { path = "../catcher-dns", version = "0.3.12", default-features = false }
+catcher-core = { path = "../catcher-core", version = "0.3.13" }
+catcher-dns = { path = "../catcher-dns", version = "0.3.13", default-features = false }
 
 # ── 异步运行时 ──
 tokio = { version = "1", features = ["sync", "time", "net", "io-util", "macros"] }
@@ -27,6 +27,8 @@ tokio-stream = "0.1"
 bytes = "1"
 
 # ── HTTP 传输 ──
+# ⚠️ 升级 reqwest 时务必重跑 tests/proxy_dns_behavior_test.rs：代理路径下「目标域名交给
+# 代理远端解析、不被本地 resolver 解析」依赖 reqwest 内部行为，非明文 API 承诺（issue #031）。
 reqwest = { version = "0.13", default-features = false, features = [
     "http2", "gzip", "brotli", "deflate", "stream", "charset", "query", "form", "socks"
 ] }
