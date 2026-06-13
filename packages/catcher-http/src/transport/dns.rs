@@ -1,5 +1,5 @@
 #[cfg(feature = "hickory-dns")]
-pub(crate) use catcher_dns::reqwest_resolver::build_reqwest_resolver;
+pub(crate) use catcher_dns::reqwest_resolver::{build_reqwest_resolver, ReqwestDnsResolver};
 
 #[cfg(test)]
 mod tests {

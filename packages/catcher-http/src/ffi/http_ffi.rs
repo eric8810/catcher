@@ -89,6 +89,9 @@ fn invoke_http_callback(
 
 // ── Lifecycle ──
 
+/// 创建 HTTP 客户端。返回的句柄是注册表 id 直接编码为指针值（id ≥ 1，
+/// 与 null 不冲突），**不指向任何内存** — destroy 之后用旧句柄调用任何
+/// API 都安全失败，而不是 use-after-free。
 #[no_mangle]
 pub unsafe extern "C" fn catcher_http_client_create(config_json: *const c_char) -> *mut c_void {
     if config_json.is_null() { return std::ptr::null_mut(); }
@@ -102,15 +105,14 @@ pub unsafe extern "C" fn catcher_http_client_create(config_json: *const c_char) 
         Err(_) => return std::ptr::null_mut(),
     };
     let id = REGISTRY.insert(Arc::new(transport));
-    Box::into_raw(Box::new(id)) as *mut c_void
+    id as *mut c_void
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn catcher_http_client_destroy(handle: *mut c_void) {
     if handle.is_null() { return; }
-    let id = *(handle as *const usize);
+    let id = handle as usize;
     REGISTRY.remove(id);
-    drop(Box::from_raw(handle as *mut usize));
 }
 
 // ── Original FFI (unchanged signatures — backward compatible) ──
@@ -122,7 +124,7 @@ pub unsafe extern "C" fn catcher_http_get(
     callback: EventCallback, user_data: *mut c_void,
 ) {
     if handle.is_null() { return; }
-    let id = *(handle as *const usize);
+    let id = handle as usize;
     let url_str = ffi_string_to_string(url, "/");
     let per_request_headers = parse_headers_json(headers_json);
     let per_request_timeout = if timeout_ms > 0 { Some(timeout_ms as u64) } else { None };
@@ -152,7 +154,7 @@ pub unsafe extern "C" fn catcher_http_post(
     callback: EventCallback, user_data: *mut c_void,
 ) {
     if handle.is_null() { return; }
-    let id = *(handle as *const usize);
+    let id = handle as usize;
     let url_str = ffi_string_to_string(url, "/");
     let body_data = read_body_bytes(body, body_len);
     let ct_str = ffi_string_to_string(content_type, "application/octet-stream");
@@ -185,7 +187,7 @@ pub unsafe extern "C" fn catcher_http_execute(
     callback: EventCallback, user_data: *mut c_void,
 ) {
     if handle.is_null() { return; }
-    let id = *(handle as *const usize);
+    let id = handle as usize;
     let method_str = ffi_string_to_string(method, "GET");
     let url_str = ffi_string_to_string(url, "/");
     let body_data = if !body.is_null() && body_len > 0 {
@@ -240,7 +242,7 @@ pub unsafe extern "C" fn catcher_http_execute_with_id(
     callback: EventCallback, user_data: *mut c_void,
 ) -> u64 {
     if handle.is_null() { return 0; }
-    let id = *(handle as *const usize);
+    let id = handle as usize;
     let method_str = ffi_string_to_string(method, "GET");
     let url_str = ffi_string_to_string(url, "/");
     let body_data = if !body.is_null() && body_len > 0 {
@@ -318,7 +320,7 @@ pub unsafe extern "C" fn catcher_http_cancel_request(
     handle: *mut c_void, request_id: u64,
 ) -> i32 {
     if handle.is_null() { return -1; }
-    let id = *(handle as *const usize);
+    let id = handle as usize;
     if let Some(transport) = REGISTRY.get(id) {
         if transport.cancel_request(request_id) { 0 } else { -1 }
     } else { -1 }
@@ -329,7 +331,7 @@ pub unsafe extern "C" fn catcher_http_cancel_request(
 #[no_mangle]
 pub unsafe extern "C" fn catcher_http_circuit_breaker_state(handle: *mut c_void) -> *mut c_char {
     if handle.is_null() { return std::ptr::null_mut(); }
-    let id = *(handle as *const usize);
+    let id = handle as usize;
     let state = REGISTRY.get(id).and_then(|t| t.circuit_breaker_state());
     let json = match state {
         Some(s) => serde_json::to_string(&s).unwrap_or_default(),
@@ -341,7 +343,7 @@ pub unsafe extern "C" fn catcher_http_circuit_breaker_state(handle: *mut c_void)
 #[no_mangle]
 pub unsafe extern "C" fn catcher_http_metrics(handle: *mut c_void) -> *mut c_char {
     if handle.is_null() { return std::ptr::null_mut(); }
-    let id = *(handle as *const usize);
+    let id = handle as usize;
     let snapshot = REGISTRY.get(id).map(|t| t.metrics());
     let json = match snapshot {
         Some(s) => serde_json::to_string(&s).unwrap_or_default(),
@@ -350,10 +352,26 @@ pub unsafe extern "C" fn catcher_http_metrics(handle: *mut c_void) -> *mut c_cha
     CString::new(json).unwrap_or_default().into_raw()
 }
 
+/// 通知 HTTP 客户端网络环境已变化（WiFi 切换 / VPN 换节点等）。
+/// 清空 DNS 缓存、重建连接池（丢弃半开连接）、重置熔断器。
+/// 返回 0 成功，1 句柄无效，2 重建失败。
+#[no_mangle]
+pub unsafe extern "C" fn catcher_http_network_changed(handle: *mut c_void) -> i32 {
+    if handle.is_null() { return 1; }
+    let id = handle as usize;
+    match REGISTRY.get(id) {
+        Some(transport) => match transport.network_changed() {
+            Ok(()) => 0,
+            Err(_) => 2,
+        },
+        None => 1,
+    }
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn catcher_http_client_cancel_all(handle: *mut c_void) {
     if handle.is_null() { return; }
-    let id = *(handle as *const usize);
+    let id = handle as usize;
     if let Some(transport) = REGISTRY.get(id) {
         transport.cancel_all();
     }
@@ -366,7 +384,7 @@ pub unsafe extern "C" fn catcher_http_adaptive_timeout_config(
     multiplier_scaled: u32, window_size: u32,
 ) {
     if handle.is_null() { return; }
-    let id = *(handle as *const usize);
+    let id = handle as usize;
     if let Some(transport) = REGISTRY.get(id) {
         if enabled != 0 {
             transport.set_adaptive_timeout(
@@ -390,7 +408,7 @@ pub unsafe extern "C" fn catcher_http_execute_stream(
     callback: EventCallback, user_data: *mut c_void,
 ) -> u64 {
     if handle.is_null() { return 0; }
-    let id = *(handle as *const usize);
+    let id = handle as usize;
     let method_str = ffi_string_to_string(method, "GET");
     let url_str = ffi_string_to_string(url, "/");
     let body_data = if !body.is_null() && body_len > 0 {
@@ -487,7 +505,7 @@ pub unsafe extern "C" fn catcher_http_multipart(
         Some(cb) => cb,
         None => return,
     };
-    let id_val = *(handle as *const usize);
+    let id_val = handle as usize;
 
     let method_str = if method.is_null() {
         HttpMethod::POST

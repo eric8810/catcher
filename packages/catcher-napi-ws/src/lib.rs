@@ -122,6 +122,23 @@ impl JsWsClient {
         }
     }
 
+    /// Notify the client that the network environment changed
+    /// (WiFi switch, VPN node change, cellular handover, ...).
+    ///
+    /// Immediately drops the (likely half-open) connection, clears the DNS
+    /// cache, resets reconnect backoff and reconnects right away — instead of
+    /// waiting 10-30s for heartbeat timeout. With multiple endpoints the race
+    /// is re-run, since the best endpoint may differ on the new network.
+    #[napi]
+    pub fn network_changed(&self) -> napi::Result<()> {
+        if let Some(ref h) = *self.handle.lock().unwrap() {
+            h.network_changed()
+                .map_err(|e| napi::Error::from_reason(e.to_string()))
+        } else {
+            Err(napi::Error::from_reason("WebSocket not connected"))
+        }
+    }
+
     /// Close the WebSocket connection with optional code and reason.
     ///
     /// Defaults to code 1000, reason "normal" if not specified.

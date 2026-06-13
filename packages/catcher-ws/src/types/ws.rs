@@ -195,6 +195,13 @@ pub struct WsClientConfig {
     #[serde(alias = "handshakeTimeoutMs", default = "default_handshake_timeout")]
     pub handshake_timeout_ms: u64,
 
+    /// 单帧发送超时（毫秒，0 = 不限制）。
+    /// 网络切换后连接变成半开时，发送会阻塞到 TCP 重传超时（分钟级）并
+    /// 卡住整个事件循环（包括 network_changed 命令的处理）。超时后判定
+    /// 断线，进入重连流程。
+    #[serde(alias = "sendTimeoutMs", default = "default_send_timeout")]
+    pub send_timeout_ms: u64,
+
     /// 最大 payload 大小（字节）
     #[serde(alias = "maxPayloadBytes", default = "default_max_payload")]
     pub max_payload_bytes: u64,
@@ -232,6 +239,10 @@ pub struct WsClientConfig {
     pub network_path_id: Option<String>,
 }
 
+fn default_send_timeout() -> u64 {
+    10_000
+}
+
 fn default_deflate_threshold() -> u32 {
     1024
 }
@@ -255,6 +266,7 @@ impl Default for WsClientConfig {
             deflate_threshold_bytes: default_deflate_threshold(),
             application_compression: None,
             handshake_timeout_ms: default_handshake_timeout(),
+            send_timeout_ms: default_send_timeout(),
             max_payload_bytes: default_max_payload(),
             reconnect: None,
             heartbeat: None,

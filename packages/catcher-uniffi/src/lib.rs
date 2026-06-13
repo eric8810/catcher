@@ -347,6 +347,19 @@ impl HttpClient {
             .map_err(|e| CatcherError::Network(e.to_string()))
     }
 
+    /// Notify the client that the network environment changed
+    /// (WiFi switch, VPN node change, cellular handover, ...).
+    ///
+    /// Call this from NWPathMonitor (iOS) / ConnectivityManager (Android)
+    /// callbacks. Clears the DNS cache, rebuilds the connection pool
+    /// (dropping half-open keep-alive sockets) and resets the circuit breaker.
+    #[uniffi::method]
+    pub fn network_changed(&self) -> Result<(), CatcherError> {
+        self.inner
+            .network_changed()
+            .map_err(|e| CatcherError::Network(e.to_string()))
+    }
+
     /// Query circuit breaker state as JSON string
     #[uniffi::method]
     pub fn circuit_breaker_state(&self) -> String {
@@ -463,6 +476,20 @@ impl WsClient {
     pub fn send_binary(&self, data: Vec<u8>) -> Result<(), CatcherError> {
         self.handle
             .send_binary(&data)
+            .map_err(|e| CatcherError::Network(e.to_string()))
+    }
+
+    /// Notify the client that the network environment changed
+    /// (WiFi switch, VPN node change, cellular handover, ...).
+    ///
+    /// Call this from NWPathMonitor (iOS) / ConnectivityManager (Android)
+    /// callbacks. Immediately drops the half-open connection, clears the DNS
+    /// cache, resets reconnect backoff and reconnects right away — instead of
+    /// waiting 10-30s for heartbeat timeout.
+    #[uniffi::method]
+    pub fn network_changed(&self) -> Result<(), CatcherError> {
+        self.handle
+            .network_changed()
             .map_err(|e| CatcherError::Network(e.to_string()))
     }
 

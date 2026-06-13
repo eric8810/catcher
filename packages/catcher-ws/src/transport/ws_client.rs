@@ -30,6 +30,7 @@ enum WsCommand {
     Text(String),
     Binary(Vec<u8>),
     Close { code: u16, reason: String },
+    NetworkChanged,
 }
 
 // ── 公开类型 ──
@@ -78,6 +79,25 @@ impl WsHandle {
             })
     }
 
+    /// 通知库网络环境已发生变化（WiFi 切换、VPN 换节点、蜂窝/WiFi 切换等）。
+    ///
+    /// 旧连接在网络切换后通常处于半开状态，被动等待心跳超时需要 10-30 秒。
+    /// 调用此方法立即：
+    /// 1. 断开当前连接（不等心跳超时）
+    /// 2. 清空 DNS 缓存（新网络下解析结果可能不同）
+    /// 3. 重置重连退避计数，跳过退避延迟立即重连
+    /// 4. 多端点配置时重新竞速（新网络下最优端点可能不同）
+    ///
+    /// 重连期间正在等待退避的也会被打断并立即重试。
+    pub fn network_changed(&self) -> Result<(), CatcherError> {
+        self.cmd_tx
+            .send(WsCommand::NetworkChanged)
+            .map_err(|_| CatcherError::WsDisconnected {
+                code: 1006,
+                reason: "connection closed".into(),
+            })
+    }
+
     /// 返回连接的 URL（初始连接的 URL）
     pub fn url(&self) -> &str {
         &self.url
@@ -96,6 +116,7 @@ enum LoopOutcome {
     CleanClose,
     Disconnected { code: u16, reason: String },
     HeartbeatTimeout,
+    NetworkChanged,
 }
 
 fn application_compression_algorithm_name(
@@ -426,6 +447,80 @@ pub(crate) async fn connect_stream_with_client(
     Ok((stream, latency_ms))
 }
 
+enum SendStatus {
+    Sent,
+    Failed,
+    TimedOut,
+}
+
+/// 带超时的帧发送。
+///
+/// 网络切换后连接变成半开时，发送会阻塞到 TCP 重传超时（分钟级），
+/// 期间事件循环无法处理任何命令（包括 network_changed / close）。
+/// 超时判定断线，让循环尽快进入重连流程。`timeout_ms == 0` 不限制。
+async fn send_frame_with_timeout<S>(writer: &mut S, frame: Frame, timeout_ms: u64) -> SendStatus
+where
+    S: futures_util::Sink<Frame> + Unpin,
+{
+    if timeout_ms == 0 {
+        return match writer.send(frame).await {
+            Ok(()) => SendStatus::Sent,
+            Err(_) => SendStatus::Failed,
+        };
+    }
+    match tokio::time::timeout(Duration::from_millis(timeout_ms), writer.send(frame)).await {
+        Ok(Ok(())) => SendStatus::Sent,
+        Ok(Err(_)) => SendStatus::Failed,
+        Err(_) => SendStatus::TimedOut,
+    }
+}
+
+/// 重连成功后重放缓存的发送命令（Close/NetworkChanged 已在缓存时被过滤）。
+async fn replay_buffered_commands(
+    stream: &mut WsStream,
+    commands: Vec<WsCommand>,
+    config: &WsClientConfig,
+) {
+    for cmd in commands {
+        match cmd {
+            WsCommand::Text(t) => {
+                if let Ok(msg) = encode_text_message(&t, config) {
+                    let _ = futures_util::SinkExt::send(stream, msg).await;
+                }
+            }
+            WsCommand::Binary(d) => {
+                if let Ok(msg) = encode_binary_message(&d, config) {
+                    let _ = futures_util::SinkExt::send(stream, msg).await;
+                }
+            }
+            WsCommand::Close { .. } | WsCommand::NetworkChanged => {}
+        }
+    }
+}
+
+/// 全量重连：多端点配置时重新竞速，单端点直接连接。
+/// 网络环境变化后调用 — 新网络下最优端点可能与之前不同。
+async fn connect_any_endpoint(
+    config: &WsClientConfig,
+    client: &reqwest::Client,
+) -> Result<(String, WsStream, u64), CatcherError> {
+    if config.urls.len() > 1 || config.race_count > 1 {
+        // race_count 只限制初始连接的竞速宽度（EndpointRacer 内部 take(race_count)）。
+        // 网络变化后旧的最优端点可能已不可达，必须让每个端点都有机会。
+        let race_count = (config.urls.len() as u32).max(config.race_count);
+        let racer = EndpointRacer::new(config.urls.clone(), race_count);
+        racer.race(config, client).await
+    } else {
+        let url = config
+            .urls
+            .first()
+            .cloned()
+            .ok_or_else(|| CatcherError::InvalidConfig("no WS URLs configured".into()))?;
+        let (stream, lat) = connect_stream_with_client(&url, config, client).await?;
+        Ok((url, stream, lat))
+    }
+}
+
 // ── 高级连接 ──
 
 impl WsTransport {
@@ -499,11 +594,11 @@ async fn connection_manager(
     initial_stream: WsStream,
     initial_latency_ms: u64,
     config: &WsClientConfig,
-    reqwest_client: reqwest::Client,
+    mut reqwest_client: reqwest::Client,
     event_tx: mpsc::UnboundedSender<WsEvent>,
     mut cmd_rx: mpsc::UnboundedReceiver<WsCommand>,
 ) {
-    let current_url = initial_url;
+    let mut current_url = initial_url;
     let mut stream_opt = Some(initial_stream);
     let mut reconnect_mgr = config
         .reconnect
@@ -562,11 +657,16 @@ async fn connection_manager(
                                     continue;
                                 }
                             };
-                            if writer.send(msg).await.is_err() {
-                                break LoopOutcome::Disconnected {
+                            match send_frame_with_timeout(&mut writer, msg, config.send_timeout_ms).await {
+                                SendStatus::Sent => {}
+                                SendStatus::Failed => break LoopOutcome::Disconnected {
                                     code: 1006,
                                     reason: "send failed".into(),
-                                };
+                                },
+                                SendStatus::TimedOut => break LoopOutcome::Disconnected {
+                                    code: 1006,
+                                    reason: "send timeout".into(),
+                                },
                             }
                         }
                         Some(WsCommand::Binary(d)) => {
@@ -579,18 +679,36 @@ async fn connection_manager(
                                     continue;
                                 }
                             };
-                            if writer.send(msg).await.is_err() {
-                                break LoopOutcome::Disconnected {
+                            match send_frame_with_timeout(&mut writer, msg, config.send_timeout_ms).await {
+                                SendStatus::Sent => {}
+                                SendStatus::Failed => break LoopOutcome::Disconnected {
                                     code: 1006,
                                     reason: "send failed".into(),
-                                };
+                                },
+                                SendStatus::TimedOut => break LoopOutcome::Disconnected {
+                                    code: 1006,
+                                    reason: "send timeout".into(),
+                                },
                             }
                         }
                         Some(WsCommand::Close { code, reason }) => {
                             let msg = Frame::close(yawc::close::CloseCode::from(code), reason);
-                            let _ = writer.send(msg).await;
-                            let _ = writer.close().await;
+                            let _ = send_frame_with_timeout(&mut writer, msg, config.send_timeout_ms).await;
+                            if config.send_timeout_ms == 0 {
+                                let _ = writer.close().await;
+                            } else {
+                                let _ = tokio::time::timeout(
+                                    Duration::from_millis(config.send_timeout_ms),
+                                    writer.close(),
+                                )
+                                .await;
+                            }
                             break LoopOutcome::CleanClose;
+                        }
+                        Some(WsCommand::NetworkChanged) => {
+                            // 旧网络上的连接大概率已半开，直接丢弃，不发 Close 帧
+                            // （在死网络上发送会阻塞到超时）
+                            break LoopOutcome::NetworkChanged;
                         }
                         None => break LoopOutcome::CleanClose,
                     }
@@ -611,7 +729,21 @@ async fn connection_manager(
                         }
                         state.waiting_for_pong = true;
                         state.ping_sent_at = Some(Instant::now());
-                        let _ = writer.send(Frame::ping(Vec::new())).await;
+                        if matches!(
+                            send_frame_with_timeout(
+                                &mut writer,
+                                Frame::ping(Vec::new()),
+                                config.send_timeout_ms,
+                            )
+                            .await,
+                            SendStatus::TimedOut
+                        ) {
+                            // 半开连接：ping 都发不出去，不必再等 pong 超时
+                            break LoopOutcome::Disconnected {
+                                code: 1006,
+                                reason: "ping send timeout".into(),
+                            };
+                        }
                         // 根据自适应间隔重设下一次 ping 时间
                         let next_ms = state.mgr.interval_ms();
                         ping_sleep.as_mut().reset(
@@ -662,12 +794,12 @@ async fn connection_manager(
                                     .unwrap_or("abnormal")
                                     .to_string();
                                 // RFC 6455 §5.5.1: 收到 Close 帧必须回一个 Close 帧
-                                let _ = writer
-                                    .send(Frame::close(
-                                        yawc::close::CloseCode::from(code),
-                                        &reason,
-                                    ))
-                                    .await;
+                                let _ = send_frame_with_timeout(
+                                    &mut writer,
+                                    Frame::close(yawc::close::CloseCode::from(code), &reason),
+                                    config.send_timeout_ms,
+                                )
+                                .await;
                                 break LoopOutcome::Disconnected { code, reason };
                             }
                             Some(_) => {}
@@ -683,6 +815,7 @@ async fn connection_manager(
         };
 
         // ── 处理 select loop 结果 ──
+        let network_changed = matches!(outcome, LoopOutcome::NetworkChanged);
         match outcome {
             LoopOutcome::CleanClose => break,
 
@@ -692,16 +825,95 @@ async fn connection_manager(
                     reason: "heartbeat timeout".into(),
                 });
             }
+            LoopOutcome::NetworkChanged => {
+                let _ = event_tx.send(WsEvent::Disconnected {
+                    code: 1006,
+                    reason: "network changed".into(),
+                });
+            }
             LoopOutcome::Disconnected { code, reason } => {
                 let _ = event_tx.send(WsEvent::Disconnected { code, reason });
+            }
+        }
+
+        // 跨重连阶段缓存的待重放命令（Text/Binary）
+        let mut buffered_commands: Vec<WsCommand> = Vec::new();
+
+        // ── 网络变化：清 DNS 缓存 + 跳过退避立即重连（即使未配置 reconnect）──
+        if network_changed {
+            // 合并 OS 回调风暴：一次网络切换常触发多个连续回调（如 Android 的
+            // onAvailable / onCapabilitiesChanged），排空积压的 NetworkChanged
+            // 只重连一次；其余命令缓存等待重放，Close 中止
+            let mut close_requested = false;
+            loop {
+                match cmd_rx.try_recv() {
+                    Ok(WsCommand::NetworkChanged) => {}
+                    Ok(WsCommand::Close { .. }) => {
+                        close_requested = true;
+                        break;
+                    }
+                    Ok(cmd) => buffered_commands.push(cmd),
+                    Err(mpsc::error::TryRecvError::Empty) => break,
+                    Err(mpsc::error::TryRecvError::Disconnected) => {
+                        close_requested = true;
+                        break;
+                    }
+                }
+            }
+            if close_requested {
+                break;
+            }
+
+            // 重建 reqwest client：丢弃旧连接池，并重新应用 proxy/TLS/DNS 配置。
+            // 显式启用 Catcher DNS 时，也会随新 client 重建 resolver。
+            match build_reqwest_client(config) {
+                Ok(client) => reqwest_client = client,
+                Err(e) => {
+                    let _ = event_tx.send(WsEvent::Error {
+                        message: format!("network changed client rebuild failed: {e}"),
+                    });
+                }
+            }
+            if let Some(ref mut mgr) = reconnect_mgr {
+                mgr.reset();
+            }
+            let _ = event_tx.send(WsEvent::Reconnecting {
+                attempt: 0,
+                delay_ms: 0,
+            });
+            match connect_any_endpoint(config, &reqwest_client).await {
+                Ok((url, mut stream, lat)) => {
+                    replay_buffered_commands(&mut stream, buffered_commands, config).await;
+                    current_url = url;
+                    stream_opt = Some(stream);
+                    first_latency = lat;
+                    if let Some(ref mut mgr) = reconnect_mgr {
+                        mgr.on_connected();
+                    }
+                    continue;
+                }
+                Err(e) => {
+                    // 无退避重连兜底时这是终态：补一个 Error 事件，
+                    // 避免消费者停留在 Reconnecting 状态等待一个不会来的结果
+                    if reconnect_mgr.is_none() {
+                        let _ = event_tx.send(WsEvent::Error {
+                            message: format!("network changed reconnect failed: {e}"),
+                        });
+                    }
+                    // 落入常规退避重连流程
+                }
             }
         }
 
         // ── 尝试重连 ──
         if let Some(ref mut mgr) = reconnect_mgr {
             let mut reconnected = false;
-            let mut buffered_commands: Vec<WsCommand> = Vec::new();
             let mut reconnect_latency_ms: u64 = 0;
+
+            // 网络变化触发的重连：重新竞速全部端点（而非固守 current_url）。
+            // 立即重连失败落入本循环时必须继承这个意图，否则多端点配置下
+            // 会固守旧网络的获胜端点直到耗尽重试
+            let mut race_endpoints = network_changed;
 
             while let Some(delay) = mgr.on_disconnect() {
                 let attempt = mgr.attempt();
@@ -710,29 +922,77 @@ async fn connection_manager(
                     delay_ms: delay,
                 });
 
-                tokio::time::sleep(Duration::from_millis(delay)).await;
-
-                // 排空待处理命令：Close 中止重连，其余缓存等待重放
+                // 退避等待 — 期间监听命令：Close 中止；NetworkChanged 打断
+                // 剩余延迟、重置退避计数立即重试；其余缓存等待重放
                 let mut abort = false;
-                loop {
-                    match cmd_rx.try_recv() {
-                        Ok(WsCommand::Close { .. }) => {
-                            abort = true;
-                            break;
+                let mut skip_backoff = false;
+                {
+                    let backoff_sleep = tokio::time::sleep(Duration::from_millis(delay));
+                    tokio::pin!(backoff_sleep);
+                    loop {
+                        tokio::select! {
+                            _ = &mut backoff_sleep => break,
+                            cmd = cmd_rx.recv() => match cmd {
+                                Some(WsCommand::Close { .. }) | None => {
+                                    abort = true;
+                                    break;
+                                }
+                                Some(WsCommand::NetworkChanged) => {
+                                    skip_backoff = true;
+                                    break;
+                                }
+                                Some(cmd) => buffered_commands.push(cmd),
+                            }
                         }
-                        Ok(cmd) => buffered_commands.push(cmd),
-                        Err(mpsc::error::TryRecvError::Empty) => break,
-                        Err(mpsc::error::TryRecvError::Disconnected) => {
-                            abort = true;
-                            break;
+                    }
+                }
+
+                // 排空剩余待处理命令
+                if !abort {
+                    loop {
+                        match cmd_rx.try_recv() {
+                            Ok(WsCommand::Close { .. }) => {
+                                abort = true;
+                                break;
+                            }
+                            Ok(WsCommand::NetworkChanged) => skip_backoff = true,
+                            Ok(cmd) => buffered_commands.push(cmd),
+                            Err(mpsc::error::TryRecvError::Empty) => break,
+                            Err(mpsc::error::TryRecvError::Disconnected) => {
+                                abort = true;
+                                break;
+                            }
                         }
                     }
                 }
                 if abort {
                     break;
                 }
+                if skip_backoff {
+                    match build_reqwest_client(config) {
+                        Ok(client) => reqwest_client = client,
+                        Err(e) => {
+                            let _ = event_tx.send(WsEvent::Error {
+                                message: format!("network changed client rebuild failed: {e}"),
+                            });
+                        }
+                    }
+                    mgr.reset();
+                    race_endpoints = true;
+                }
 
-                match connect_stream_with_client(&current_url, config, &reqwest_client).await {
+                let connect_result = if race_endpoints {
+                    connect_any_endpoint(config, &reqwest_client)
+                        .await
+                        .map(|(url, stream, lat)| {
+                            current_url = url;
+                            (stream, lat)
+                        })
+                } else {
+                    connect_stream_with_client(&current_url, config, &reqwest_client).await
+                };
+
+                match connect_result {
                     Ok((stream, lat)) => {
                         stream_opt = Some(stream);
                         reconnect_latency_ms = lat;
@@ -748,21 +1008,7 @@ async fn connection_manager(
                 // 重连后回放缓存的命令（Close 已被过滤，不会到达这里）
                 if !buffered_commands.is_empty() {
                     if let Some(mut stream) = stream_opt.take() {
-                        for cmd in buffered_commands {
-                            match cmd {
-                                WsCommand::Text(t) => {
-                                    if let Ok(msg) = encode_text_message(&t, config) {
-                                        let _ = futures_util::SinkExt::send(&mut stream, msg).await;
-                                    }
-                                }
-                                WsCommand::Binary(d) => {
-                                    if let Ok(msg) = encode_binary_message(&d, config) {
-                                        let _ = futures_util::SinkExt::send(&mut stream, msg).await;
-                                    }
-                                }
-                                WsCommand::Close { .. } => {}
-                            }
-                        }
+                        replay_buffered_commands(&mut stream, buffered_commands, config).await;
                         stream_opt = Some(stream);
                     }
                 }
@@ -923,6 +1169,339 @@ mod tests {
         let _ = server.await.unwrap();
     }
 
+    /// 永远不就绪的 Sink — 模拟半开连接上发送阻塞
+    struct PendingSink;
+
+    impl futures_util::Sink<Frame> for PendingSink {
+        type Error = std::io::Error;
+
+        fn poll_ready(
+            self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Result<(), Self::Error>> {
+            std::task::Poll::Pending
+        }
+
+        fn start_send(self: std::pin::Pin<&mut Self>, _item: Frame) -> Result<(), Self::Error> {
+            Ok(())
+        }
+
+        fn poll_flush(
+            self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Result<(), Self::Error>> {
+            std::task::Poll::Pending
+        }
+
+        fn poll_close(
+            self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Result<(), Self::Error>> {
+            std::task::Poll::Pending
+        }
+    }
+
+    /// 半开连接上发送阻塞时应在 send_timeout_ms 内返回 TimedOut，
+    /// 而不是阻塞整个事件循环
+    #[tokio::test]
+    async fn send_frame_times_out_on_stuck_sink() {
+        let mut sink = PendingSink;
+        let start = Instant::now();
+        let status =
+            send_frame_with_timeout(&mut sink, Frame::text(b"x".to_vec()), 50).await;
+        assert!(matches!(status, SendStatus::TimedOut));
+        assert!(start.elapsed() < Duration::from_secs(2));
+    }
+
+    /// 正常 Sink 上发送应返回 Sent（含 timeout=0 禁用路径）
+    #[tokio::test]
+    async fn send_frame_succeeds_on_ready_sink() {
+        let mut sink = futures_util::sink::drain();
+        let status =
+            send_frame_with_timeout(&mut sink, Frame::text(b"a".to_vec()), 1_000).await;
+        assert!(matches!(status, SendStatus::Sent));
+
+        let status = send_frame_with_timeout(&mut sink, Frame::text(b"b".to_vec()), 0).await;
+        assert!(matches!(status, SendStatus::Sent));
+    }
+
+    /// network_changed() 应立即断开并重连，事件序列：
+    /// Connected → Disconnected("network changed") → Reconnecting(0) → Connected
+    #[tokio::test]
+    async fn network_changed_triggers_immediate_reconnect() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        // 服务器接受两次连接（初始 + 网络变化后的重连）
+        let server = tokio::spawn(async move {
+            for _ in 0..2 {
+                let (stream, _) = listener.accept().await.unwrap();
+                let ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+                // 保持连接存活，直到对端断开
+                tokio::spawn(async move {
+                    let mut ws = ws;
+                    while let Some(Ok(_)) = ws.next().await {}
+                });
+            }
+        });
+
+        let config = WsClientConfig {
+            urls: vec![format!("ws://127.0.0.1:{port}")],
+            handshake_timeout_ms: 1_000,
+            reconnect: Some(ReconnectConfig {
+                initial_delay_ms: 60_000, // 故意设很大：验证重连没有走退避延迟
+                max_delay_ms: 60_000,
+                backoff_multiplier: 2.0,
+                max_attempts: 5,
+            }),
+            ..Default::default()
+        };
+
+        let (handle, mut rx) = WsTransport::connect(&config).await.unwrap();
+
+        // 初始 Connected
+        let first = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(matches!(first, WsEvent::Connected { .. }));
+
+        handle.network_changed().unwrap();
+
+        // Disconnected("network changed")
+        let ev = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        match ev {
+            WsEvent::Disconnected { reason, .. } => assert_eq!(reason, "network changed"),
+            other => panic!("expected Disconnected, got {other:?}"),
+        }
+
+        // Reconnecting(attempt=0, delay=0) — 立即重连，无退避
+        let ev = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        match ev {
+            WsEvent::Reconnecting { attempt, delay_ms } => {
+                assert_eq!(attempt, 0);
+                assert_eq!(delay_ms, 0);
+            }
+            other => panic!("expected Reconnecting, got {other:?}"),
+        }
+
+        // 2 秒内重新 Connected（initial_delay 是 60 秒，证明跳过了退避）
+        let ev = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(matches!(ev, WsEvent::Connected { .. }));
+
+        let _ = handle.close(1000, "done");
+        let _ = server.await;
+    }
+
+    /// network_changed() 应打断正在进行的退避等待并立即重连，
+    /// 且退避期间发送的消息在重连后被重放
+    #[tokio::test]
+    async fn network_changed_interrupts_backoff_and_replays_buffered() {
+        use tokio_tungstenite::tungstenite::Message;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        // 第一段：接受一次连接后立刻断开 → 客户端进入 60s 退避
+        let first = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+            drop(ws); // 直接断开
+        });
+
+        let config = WsClientConfig {
+            urls: vec![format!("ws://{addr}")],
+            handshake_timeout_ms: 1_000,
+            reconnect: Some(ReconnectConfig {
+                initial_delay_ms: 60_000, // 不打断的话测试必然超时
+                max_delay_ms: 60_000,
+                backoff_multiplier: 2.0,
+                max_attempts: 5,
+            }),
+            ..Default::default()
+        };
+
+        let (handle, mut rx) = WsTransport::connect(&config).await.unwrap();
+        first.await.unwrap();
+
+        // 等待进入退避（Connected → Disconnected → Reconnecting(1, 60000)）
+        loop {
+            let ev = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            if let WsEvent::Reconnecting { attempt, delay_ms } = ev {
+                assert_eq!(attempt, 1);
+                assert_eq!(delay_ms, 60_000);
+                break;
+            }
+        }
+
+        // 退避期间发送消息（应被缓存）并重新拉起服务器
+        handle.send_text("buffered during backoff").unwrap();
+        let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+        let second = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+            // 读取重放的消息
+            loop {
+                match ws.next().await {
+                    Some(Ok(Message::Text(t))) => return t.to_string(),
+                    Some(Ok(_)) => continue,
+                    other => panic!("expected replayed text, got {other:?}"),
+                }
+            }
+        });
+
+        handle.network_changed().unwrap();
+
+        // 2 秒内重连成功（60s 退避被打断）
+        loop {
+            let ev = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+                .await
+                .expect("reconnect should not wait out the 60s backoff")
+                .unwrap();
+            if matches!(ev, WsEvent::Connected { .. }) {
+                break;
+            }
+        }
+
+        // 缓存的消息被重放到新连接
+        let replayed = tokio::time::timeout(Duration::from_secs(2), second)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(replayed, "buffered during backoff");
+
+        let _ = handle.close(1000, "done");
+    }
+
+    /// 多端点配置下 network_changed() 应重新竞速全部端点：
+    /// 原端点不可达时切换到其他端点（即使 race_count=1）
+    #[tokio::test]
+    async fn network_changed_re_races_all_endpoints() {
+        let listener_a = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr_a = listener_a.local_addr().unwrap();
+        let listener_b = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr_b = listener_b.local_addr().unwrap();
+
+        // A：接受初始连接后保持
+        let server_a = tokio::spawn(async move {
+            let (stream, _) = listener_a.accept().await.unwrap();
+            let ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+            tokio::spawn(async move {
+                let mut ws = ws;
+                while let Some(Ok(_)) = ws.next().await {}
+            });
+            listener_a // 持有 listener，稍后 drop 模拟端点不可达
+        });
+
+        // B：等待网络变化后的重连
+        let server_b = tokio::spawn(async move {
+            let (stream, _) = listener_b.accept().await.unwrap();
+            let ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+            tokio::spawn(async move {
+                let mut ws = ws;
+                while let Some(Ok(_)) = ws.next().await {}
+            });
+        });
+
+        let config = WsClientConfig {
+            urls: vec![format!("ws://{addr_a}"), format!("ws://{addr_b}")],
+            handshake_timeout_ms: 1_000,
+            race_count: 1, // 默认值：初始竞速只取第一个端点
+            ..Default::default()
+        };
+
+        let (handle, mut rx) = WsTransport::connect(&config).await.unwrap();
+        let first = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        match first {
+            WsEvent::Connected { ref url, .. } => assert!(url.contains(&addr_a.to_string())),
+            other => panic!("expected Connected, got {other:?}"),
+        }
+
+        // A 端点下线，通知网络变化 → 重竞速应连上 B
+        let listener_a = server_a.await.unwrap();
+        drop(listener_a);
+        handle.network_changed().unwrap();
+
+        loop {
+            let ev = tokio::time::timeout(Duration::from_secs(3), rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            if let WsEvent::Connected { url, .. } = ev {
+                assert!(
+                    url.contains(&addr_b.to_string()),
+                    "should fail over to endpoint B, got {url}"
+                );
+                break;
+            }
+        }
+
+        let _ = handle.close(1000, "done");
+        let _ = server_b.await;
+    }
+
+    /// 未配置 reconnect 时 network_changed() 也应执行一次立即重连
+    #[tokio::test]
+    async fn network_changed_reconnects_without_reconnect_config() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            for _ in 0..2 {
+                let (stream, _) = listener.accept().await.unwrap();
+                let ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+                tokio::spawn(async move {
+                    let mut ws = ws;
+                    while let Some(Ok(_)) = ws.next().await {}
+                });
+            }
+        });
+
+        let config = WsClientConfig {
+            urls: vec![format!("ws://127.0.0.1:{port}")],
+            handshake_timeout_ms: 1_000,
+            reconnect: None,
+            ..Default::default()
+        };
+
+        let (handle, mut rx) = WsTransport::connect(&config).await.unwrap();
+        let first = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(matches!(first, WsEvent::Connected { .. }));
+
+        handle.network_changed().unwrap();
+
+        // Disconnected → Reconnecting → Connected
+        let mut got_connected = false;
+        for _ in 0..3 {
+            let ev = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            if matches!(ev, WsEvent::Connected { .. }) {
+                got_connected = true;
+                break;
+            }
+        }
+        assert!(got_connected, "should reconnect even without reconnect config");
+
+        let _ = handle.close(1000, "done");
+        let _ = server.await;
+    }
     /// 验证 build_request 自动声明应用层压缩能力
     #[test]
     fn build_request_adds_application_compression_headers() {

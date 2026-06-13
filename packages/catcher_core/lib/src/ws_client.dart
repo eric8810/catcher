@@ -28,6 +28,7 @@ class CatcherWsClient {
   late final CatcherWsSendTextDart _sendText;
   late final CatcherWsSendBinaryDart _sendBinary;
   late final CatcherWsCloseDart _close;
+  late final CatcherWsNetworkChangedDart? _networkChanged;
   late final CatcherWsDestroyDart _destroy;
   late final CatcherFreeResultDart _freeResultFn;
   late final CatcherFreeEventDataDart _freeEventDataFn;
@@ -50,6 +51,15 @@ class CatcherWsClient {
             'catcher_ws_send_binary');
     _close = lib.lookupFunction<CatcherWsCloseNative, CatcherWsCloseDart>(
         'catcher_ws_close');
+    // 兼容旧版本动态库：符号不存在时降级为 null
+    CatcherWsNetworkChangedDart? networkChangedFn;
+    try {
+      networkChangedFn = lib.lookupFunction<CatcherWsNetworkChangedNative,
+          CatcherWsNetworkChangedDart>('catcher_ws_network_changed');
+    } catch (_) {
+      networkChangedFn = null;
+    }
+    _networkChanged = networkChangedFn;
     _destroy = lib.lookupFunction<CatcherWsDestroyNative, CatcherWsDestroyDart>(
         'catcher_ws_destroy');
 
@@ -123,6 +133,23 @@ class CatcherWsClient {
     }
     final result = _sendBinary(_handle!, ptr, data.length);
     malloc.free(ptr);
+    _checkResult(result);
+  }
+
+  /// 通知客户端网络环境已变化（WiFi 切换 / VPN 换节点 / 蜂窝切换等）。
+  ///
+  /// 在 connectivity_plus 等插件的网络变化回调中调用。立即丢弃当前
+  /// （大概率已半开的）连接、清空 DNS 缓存、重置重连退避并马上重连 —
+  /// 无需被动等待 10-30 秒心跳超时。多端点配置时重新竞速。
+  void networkChanged() {
+    _ensureHandle();
+    final fn = _networkChanged;
+    if (fn == null) {
+      throw StateError(
+          'networkChanged() requires a native library that exports '
+          'catcher_ws_network_changed — rebuild catcher-ffi');
+    }
+    final result = fn(_handle!);
     _checkResult(result);
   }
 
@@ -370,6 +397,10 @@ class WsClientConfig {
   final List<String> urls;
   final bool perMessageDeflate;
   final int handshakeTimeoutMs;
+
+  /// 单帧发送超时（毫秒，0 = 不限制）。
+  /// 半开连接上的发送超时后判定断线并进入重连流程。
+  final int sendTimeoutMs;
   final int maxPayloadBytes;
   final WsReconnectConfig? reconnect;
   final WsHeartbeatConfig? heartbeat;
@@ -388,6 +419,7 @@ class WsClientConfig {
     required this.urls,
     this.perMessageDeflate = true,
     this.handshakeTimeoutMs = 15000,
+    this.sendTimeoutMs = 10000,
     this.maxPayloadBytes = 67108864, // 64MB
     this.reconnect,
     this.heartbeat,
@@ -407,6 +439,7 @@ class WsClientConfig {
         'urls': urls,
         'per_message_deflate': perMessageDeflate,
         'handshake_timeout_ms': handshakeTimeoutMs,
+        'send_timeout_ms': sendTimeoutMs,
         'max_payload_bytes': maxPayloadBytes,
         if (reconnect != null) 'reconnect': reconnect!.toJson(),
         if (heartbeat != null) 'heartbeat': heartbeat!.toJson(),

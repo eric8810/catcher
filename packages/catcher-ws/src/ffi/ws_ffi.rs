@@ -46,6 +46,9 @@ fn invoke_event_callback(cb: EventCallback, event_name: &str, json: String, user
     );
 }
 
+/// 创建 WS 客户端。返回的句柄是注册表 id 直接编码为指针值（id ≥ 1，
+/// 与 null 不冲突），**不指向任何内存** — destroy 之后用旧句柄调用任何
+/// API 都安全返回 "handle not found"，而不是 use-after-free。
 #[no_mangle]
 pub unsafe extern "C" fn catcher_ws_create(
     config_json: *const c_char,
@@ -88,7 +91,7 @@ pub unsafe extern "C" fn catcher_ws_create(
         }
     });
 
-    Box::into_raw(Box::new(id)) as *mut c_void
+    id as *mut c_void
 }
 
 #[no_mangle]
@@ -99,7 +102,7 @@ pub unsafe extern "C" fn catcher_ws_send_text(
     if handle.is_null() {
         return FfiResult::error(1, "null handle");
     }
-    let id = *(handle as *const usize);
+    let id = handle as usize;
     let text = ffi_string_to_string(message, "");
     match WS_REGISTRY.get(id) {
         Some(h) => match h.send_text(&text) {
@@ -122,7 +125,7 @@ pub unsafe extern "C" fn catcher_ws_send_binary(
     if data.is_null() {
         return FfiResult::error(1, "null data pointer");
     }
-    let id = *(handle as *const usize);
+    let id = handle as usize;
     let bytes = std::slice::from_raw_parts(data, len);
     match WS_REGISTRY.get(id) {
         Some(h) => match h.send_binary(bytes) {
@@ -138,10 +141,27 @@ pub unsafe extern "C" fn catcher_ws_close(handle: *mut c_void, code: u16, reason
     if handle.is_null() {
         return;
     }
-    let id = *(handle as *const usize);
+    let id = handle as usize;
     let reason_str = ffi_string_to_string(reason, "normal");
     if let Some(h) = WS_REGISTRY.get(id) {
         let _ = h.close(code, &reason_str);
+    }
+}
+
+/// 通知 WS 客户端网络环境已变化（WiFi 切换 / VPN 换节点等）。
+/// 立即断开当前连接、清空 DNS 缓存、跳过退避延迟重连。
+#[no_mangle]
+pub unsafe extern "C" fn catcher_ws_network_changed(handle: *mut c_void) -> FfiResult {
+    if handle.is_null() {
+        return FfiResult::error(1, "null handle");
+    }
+    let id = handle as usize;
+    match WS_REGISTRY.get(id) {
+        Some(h) => match h.network_changed() {
+            Ok(()) => FfiResult::ok(std::ptr::null_mut(), 0),
+            Err(e) => FfiResult::error(1, &e.to_string()),
+        },
+        None => FfiResult::error(1, "handle not found"),
     }
 }
 
@@ -150,9 +170,8 @@ pub unsafe extern "C" fn catcher_ws_destroy(handle: *mut c_void) {
     if handle.is_null() {
         return;
     }
-    let id = *(handle as *const usize);
+    let id = handle as usize;
     WS_REGISTRY.remove(id);
-    drop(Box::from_raw(handle as *mut usize));
 }
 
 // Note: catcher_free_result is provided by catcher-core (ffi_types.rs).

@@ -106,6 +106,8 @@ export interface WsClientConfig {
   deflate_threshold_bytes?: number
   /** 握手超时（ms）。默认: 15000 */
   handshake_timeout_ms?: number
+  /** 单帧发送超时（ms，0 = 不限制）。半开连接上的发送超时后判定断线并重连。默认: 10000 */
+  send_timeout_ms?: number
   /** 最大 payload（字节）。默认: 64MB */
   max_payload_bytes?: number
   /** 重连配置 */

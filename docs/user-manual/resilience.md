@@ -13,6 +13,7 @@
 - [四、优先级队列（Priority Queue）](#四优先级队列priority-queue)
 - [五、自适应行为](#五自适应行为)
 - [六、参数调优推荐](#六参数调优推荐)
+- [七、网络变化通知](#七网络变化通知network-change-notification)
 
 ---
 
@@ -685,3 +686,111 @@ const client = createHttpClient({
 | 移动弱网 | 5 | exponential | 60s | 8 / 15s | 3 |
 | 批处理 | 10 | exponential | 300s | 20 / 60s | 2 |
 | 微服务内网 | 3 | exponential | 5s | 3 / 5s | 50 |
+
+---
+
+## 七、网络变化通知（Network Change Notification）
+
+### 7.1 问题：网络切换后的"半开连接"
+
+WiFi 切换热点、WiFi ↔ 蜂窝切换、VPN 连接/断开/换节点时，旧网络上建立的
+TCP 连接不会收到 RST/FIN，而是静默变成**半开连接**（half-open）。被动检测
+需要等待：
+
+| 协议 | 被动检测手段 | 检测延迟 |
+|------|------------|---------|
+| WebSocket | 心跳 pong 超时 / 连续丢 pong | 10-30 秒 |
+| HTTP | TCP keepalive 探针 / 请求失败 | 最长 20 秒+ |
+| DNS | 缓存 TTL 过期后后台刷新 | 最长 300 秒 |
+
+对 IM、实时推送等场景，这个延迟不可接受。
+
+### 7.2 方案：宿主 App 主动通知
+
+宿主应用通常能从操作系统**立即**感知网络变化（iOS `NWPathMonitor`、
+Android `ConnectivityManager`、Flutter `connectivity_plus`、浏览器
+`navigator.onLine`）。`networkChanged()` 把这个信号传给 catcher：
+
+**WebSocket 客户端**（`WsHandle::network_changed()` / `ws.networkChanged()`）：
+
+1. 立即丢弃当前（半开的）连接 — 不发 Close 帧，不等心跳超时
+2. 清空 DNS 缓存
+3. 重置重连退避计数（旧网络的失败不带入新网络）
+4. 跳过退避延迟立即重连；正在退避等待中的也会被打断
+5. 多端点配置时重新竞速 — 新网络下最优端点可能不同
+
+**HTTP 客户端**（`HttpTransport::network_changed()` / `client.networkChanged()`）：
+
+1. 清空 DNS 缓存
+2. 重建连接池 — 丢弃所有可能半开的 keep-alive 连接
+3. 重置熔断器 — 切换期间的失败不应让新网络背锅
+4. 飞行中的请求不受影响（其重试会自动建立新连接）
+
+### 7.3 各平台用法
+
+```typescript
+// Node.js / Electron (@eric8810/catcher-napi-http / catcher-napi-ws)
+import { HttpClient } from '@eric8810/catcher-napi-http'
+import { WsClient } from '@eric8810/catcher-napi-ws'
+
+// Electron 主进程可监听系统网络事件，或由渲染进程转发 navigator.onLine
+onNetworkChange(() => {
+  httpClient.networkChanged()
+  wsClient.networkChanged()
+})
+```
+
+```dart
+// Flutter (catcher_core) — 配合 connectivity_plus
+Connectivity().onConnectivityChanged.listen((_) {
+  httpClient.networkChanged();
+  wsClient.networkChanged();
+});
+```
+
+```swift
+// iOS (catcher-uniffi) — 配合 NWPathMonitor
+monitor.pathUpdateHandler = { _ in
+    try? httpClient.networkChanged()
+    try? wsClient.networkChanged()
+}
+```
+
+```kotlin
+// Android (catcher-uniffi) — 配合 ConnectivityManager
+override fun onAvailable(network: Network) {
+    httpClient.networkChanged()
+    wsClient.networkChanged()
+}
+```
+
+```rust
+// Rust (catcher-http / catcher-ws)
+transport.network_changed()?;   // HTTP
+ws_handle.network_changed()?;   // WebSocket
+```
+
+```c
+// C ABI (catcher-ffi)
+catcher_http_network_changed(http_handle);  // 0=成功
+catcher_ws_network_changed(ws_handle);      // FfiResult
+```
+
+### 7.4 注意事项
+
+- **幂等**：连续多次调用安全，每次都执行完整的清理+重建。
+- **防抖建议**：网络闪断（flapping）场景下建议宿主侧做 1-2 秒防抖，
+  避免每次通断都触发重连风暴。
+- **不调用也能恢复**：`networkChanged()` 是优化而非必需 — 不调用时
+  心跳超时/keepalive 探针仍会兜底自愈，只是慢 10-30 秒。
+- **DNS 服务器不会重读**：解析器的 nameserver 列表在创建时确定
+  （系统配置仅读取一次）。`networkChanged()` 清空解析缓存，但若新网络
+  推送了不同的系统 DNS 服务器，需要自定义 `dns.nameservers` 或重建客户端。
+- **发送超时**（WS）：半开连接上的发送会阻塞到 TCP 重传超时（分钟级）。
+  `send_timeout_ms`（默认 10s，0 = 不限制）保证单帧发送超时后立即判定
+  断线进入重连，事件循环不会被卡住。
+- **建议配合 reconnect 配置**：WS 未配置 `reconnect` 时 `networkChanged()`
+  只做一次立即重连；切换瞬间网络常有 1-3 秒不可用窗口，一次尝试可能失败
+  并以 `Error` 事件终止。配置了 `reconnect` 则失败后自动落入退避重试。
+- **连接建立前调用会报错**：客户端还在初始连接过程中时调用
+  `networkChanged()` 会返回"未连接"错误，宿主回调中建议忽略该错误。

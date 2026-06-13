@@ -89,6 +89,19 @@ export class HttpClient {
     this._raw.disableAdaptiveTimeout()
   }
 
+  /**
+   * 通知客户端网络环境已变化（WiFi 切换 / VPN 换节点 / 蜂窝切换等）。
+   *
+   * 清空 DNS 缓存、重建连接池（丢弃可能半开的 keep-alive 连接）、重置
+   * 熔断器 — 新请求立即走新网络上的全新连接。飞行中的请求不受影响。
+   */
+  networkChanged(): void {
+    if (!this._raw.networkChanged) {
+      throw new Error('networkChanged() requires rebuilt native addon (cargo build)')
+    }
+    this._raw.networkChanged()
+  }
+
   cancelAll(): void {
     this._raw.cancelAll()
   }

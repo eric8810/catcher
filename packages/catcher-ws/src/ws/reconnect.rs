@@ -66,6 +66,16 @@ impl ReconnectManager {
         self.current_delay_ms = 0;
     }
 
+    /// 重置重试计数与退避延迟，保留当前状态。
+    ///
+    /// 网络环境变化（WiFi 切换 / VPN 换节点）时调用：之前的失败是旧网络
+    /// 造成的，新网络应该从头开始计数，避免带着累积的退避延迟和已耗尽
+    /// 的次数进入新环境。
+    pub fn reset(&mut self) {
+        self.attempt = 0;
+        self.current_delay_ms = 0;
+    }
+
     /// 当前状态
     pub fn state(&self) -> WsState {
         self.state
@@ -150,6 +160,19 @@ mod tests {
         mgr.on_connected();
         assert_eq!(mgr.state(), WsState::Connected);
         assert!(!mgr.is_exhausted());
+    }
+
+    #[test]
+    fn reset_clears_attempt_and_delay() {
+        let mut mgr = ReconnectManager::new(test_config());
+        for _ in 0..5 {
+            mgr.on_disconnect();
+        }
+        // 已用尽 5 次，reset 后重新可用且从 initial_delay 开始
+        mgr.reset();
+        let delay = mgr.on_disconnect();
+        assert_eq!(delay, Some(500));
+        assert_eq!(mgr.attempt(), 1);
     }
 
     #[test]
