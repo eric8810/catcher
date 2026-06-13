@@ -150,8 +150,6 @@ export interface HttpClientConfig {
   xsrfCookieName?: string
   /** XSRF/CSRF header name. Default: "X-XSRF-TOKEN" */
   xsrfHeaderName?: string
-  /** Network path version. Recreate clients after VPN/proxy/DNS changes with a new value. */
-  networkPathId?: string
 }
 
 // === Per-request Options ===
@@ -293,8 +291,6 @@ export interface ResilientWSOptions {
   cookie?: string
   // --- G4: Proxy for WS connections ---
   proxy?: boolean | string | ProxyConfig
-  /** Network path version. Recreate clients after VPN/proxy/DNS changes with a new value. */
-  networkPathId?: string
 }
 
 export interface ResilientWS extends EventTarget {

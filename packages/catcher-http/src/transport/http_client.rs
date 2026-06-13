@@ -134,10 +134,14 @@ impl HttpTransport {
     /// TCP keepalive 探针（默认 20s）或请求失败才会清理。调用此方法立即：
     ///
     /// 1. 清空 DNS 缓存 — 新网络下解析结果可能不同（VPN 场景尤其明显）
-    /// 2. 重建底层客户端 — 丢弃整个旧连接池，后续请求走全新 TCP 连接
+    /// 2. 重建底层客户端 — 丢弃整个旧连接池，**后续新请求**走全新 TCP 连接
     /// 3. 重置熔断器 — 切换期间的失败属于旧网络，不应惩罚新网络
     ///
-    /// 飞行中的请求不受影响：其内部重试会自动建立新连接。
+    /// 注意：连接池热替换只影响**调用之后发起的新请求**。调用时正在进行中的
+    /// 请求（尤其 `execute_stream` 流式下载、慢响应）仍持有旧连接，会继续阻塞
+    /// 在已半开的 socket 上，直到其自身 `response_timeout_ms` 超时——除非配置了
+    /// 可重试的 `retry` 且失败可重试。若希望网络切换时连同在途请求一并恢复，请在
+    /// `network_changed()` 之后调用 `cancel_all()`（在途请求会失败，由上层决定重发）。
     pub fn network_changed(&self) -> Result<(), CatcherError> {
         // 清缓存 + 重建解析器（重读系统 DNS 配置、重连 nameserver）。
         // 重建失败时旧解析器仍可用且缓存已清空，继续重建连接池
@@ -196,6 +200,16 @@ fn build_middleware_client(
     reqwest_builder = build_tls_config(reqwest_builder, &config.tls)?;
 
     // G7: DNS resolution — only use Catcher resolver when explicitly configured.
+    //
+    // 正确性依赖 reqwest 的内部行为（issue #031）：当请求走代理时，reqwest **不会**
+    // 调用这里注入的自定义 dns_resolver —— 目标域名交给代理远端解析（socks5h / HTTP
+    // CONNECT 把 authority 原样转发）。因此即使开启 Catcher DNS，代理路径上的目标域名
+    // 也不会被本地解析成 IP（否则会破坏 Clash 域名分流）。resolver 只作用于直连 /
+    // no_proxy 命中的 host，故必须始终注入、不能"配了代理就不注入"。
+    //
+    // 这一行为未见于 reqwest 的稳定 API 承诺。唯一回归护栏是 proxy_dns_behavior_test
+    // （协议级断言代理收到的是域名而非 IP），随 `cargo test --workspace`（默认含
+    // hickory-dns）在 CI 运行。**升级 reqwest 必须重跑该测试。**
     #[cfg(feature = "hickory-dns")]
     {
         if let Some(resolver) = dns_resolver {

@@ -57,6 +57,36 @@ fn runtime() -> &'static tokio::runtime::Runtime {
     })
 }
 
+/// 已销毁句柄的 id 集合。请求在全局 runtime 上异步执行，destroy 后其回调仍可能触发；
+/// 标记取消后，回调前检查此集合即可避免在 destroy 后再回调宿主的 `user_data`
+/// （宿主可能已释放 → use-after-free）。与 WS 的 `cancelled_ws_ids` 对齐。详见 issue #034。
+/// id 由 HandleRegistry 单调分配、不复用，故集合只增不清是安全的。
+fn cancelled_http_ids() -> &'static std::sync::RwLock<std::collections::HashSet<usize>> {
+    static CANCELLED: std::sync::OnceLock<std::sync::RwLock<std::collections::HashSet<usize>>> =
+        std::sync::OnceLock::new();
+    CANCELLED.get_or_init(|| std::sync::RwLock::new(std::collections::HashSet::new()))
+}
+
+fn mark_http_cancelled(id: usize) {
+    let lock = cancelled_http_ids();
+    match lock.write() {
+        Ok(mut ids) => {
+            ids.insert(id);
+        }
+        Err(poisoned) => {
+            poisoned.into_inner().insert(id);
+        }
+    }
+}
+
+fn is_http_cancelled(id: usize) -> bool {
+    let lock = cancelled_http_ids();
+    match lock.read() {
+        Ok(ids) => ids.contains(&id),
+        Err(poisoned) => poisoned.into_inner().contains(&id),
+    }
+}
+
 fn ffi_string_to_string(s: FfiString, default: &str) -> String {
     s.to_string_lossy(default)
 }
@@ -101,6 +131,21 @@ fn invoke_http_callback(callback: EventCallback, event_name: &str, json: String,
     );
 }
 
+/// 仅当句柄未被 destroy 时才回调。用于异步任务在请求完成时的回调点，避免 destroy
+/// 后仍触发宿主 `user_data`（issue #034）。
+fn invoke_http_callback_if_active(
+    id: usize,
+    callback: EventCallback,
+    event_name: &str,
+    json: String,
+    user_data: usize,
+) {
+    if is_http_cancelled(id) {
+        return;
+    }
+    invoke_http_callback(callback, event_name, json, user_data);
+}
+
 // ── Lifecycle ──
 
 /// 创建 HTTP 客户端。返回的句柄是注册表 id 直接编码为指针值（id ≥ 1，
@@ -130,6 +175,13 @@ pub unsafe extern "C" fn catcher_http_client_destroy(handle: *mut c_void) {
         return;
     }
     let id = handle as usize;
+    // 标记取消，阻止 destroy 后在途请求的回调再触发宿主 `user_data`（与 WS 对齐，
+    // 避免宿主在 destroy 后释放 user_data 造成 use-after-free，issue #034）。
+    mark_http_cancelled(id);
+    // 取消在途请求，使其尽快终止（其回调会被上面的标记抑制）。
+    if let Some(t) = REGISTRY.get(id) {
+        t.cancel_all();
+    }
     REGISTRY.remove(id);
 }
 
@@ -170,7 +222,7 @@ pub unsafe extern "C" fn catcher_http_get(
             };
             let result = t.execute(request).await;
             let json = http_result_to_json(result);
-            invoke_http_callback(callback, "http_result", json, ud);
+            invoke_http_callback_if_active(id, callback, "http_result", json, ud);
         });
     }
 }
@@ -215,7 +267,7 @@ pub unsafe extern "C" fn catcher_http_post(
             };
             let result = t.execute(request).await;
             let json = http_result_to_json(result);
-            invoke_http_callback(callback, "http_result", json, ud);
+            invoke_http_callback_if_active(id, callback, "http_result", json, ud);
         });
     }
 }
@@ -289,7 +341,7 @@ pub unsafe extern "C" fn catcher_http_execute(
             };
             let result = t.execute(request).await;
             let json = http_result_to_json(result);
-            invoke_http_callback(callback, "http_result", json, ud);
+            invoke_http_callback_if_active(id, callback, "http_result", json, ud);
         });
     }
 }
@@ -407,7 +459,7 @@ pub unsafe extern "C" fn catcher_http_execute_with_id(
                     }
                 }
             };
-            invoke_http_callback(callback, "http_result", json, ud);
+            invoke_http_callback_if_active(id, callback, "http_result", json, ud);
         });
         request_id
     } else {
@@ -604,7 +656,7 @@ pub unsafe extern "C" fn catcher_http_execute_stream(
                         ("stream_error", serde_json::json!({"error":msg,"request_id":request_id}).to_string())
                     }
                 };
-                invoke_http_callback(callback, et, ed, ud);
+                invoke_http_callback_if_active(id, callback, et, ed, ud);
             }).await;
         });
         request_id
@@ -735,7 +787,7 @@ pub unsafe extern "C" fn catcher_http_multipart(
             };
             let result = t.execute(request).await;
             let json = http_result_to_json(result);
-            invoke_http_callback(callback, "http_result", json, ud);
+            invoke_http_callback_if_active(id_val, callback, "http_result", json, ud);
         });
     }
 }

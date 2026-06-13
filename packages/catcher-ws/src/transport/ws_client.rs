@@ -358,8 +358,13 @@ fn build_reqwest_tls_config(
         builder = builder.max_tls_version(map_tls_version(max));
     }
 
+    // SNI 主机名覆写：reqwest 0.13 的 `tls_sni()` 只接受布尔开关，无法覆写 SNI 主机名。
+    // 与其静默忽略，不如显式报错，避免调用方误以为生效。详见 docs/issues/028。
     if config.tls_sni_override.is_some() {
-        builder = builder.tls_sni(true);
+        return Err(CatcherError::InvalidConfig(
+            "ws tls.tls_sni_override is not supported: reqwest cannot override the SNI hostname"
+                .into(),
+        ));
     }
 
     Ok(builder)
@@ -376,6 +381,10 @@ pub(crate) fn build_reqwest_client(
 
     builder = build_reqwest_tls_config(builder, &config.tls)?;
 
+    // 仅在显式 Catcher DNS 模式下注入自定义 resolver。与 HTTP 路径一致，正确性依赖
+    // reqwest 的内部行为（issue #031）：走代理时 reqwest 不调用此 resolver，目标域名
+    // 交给代理远端解析。护栏为 proxy_dns_behavior_test（随 cargo test --workspace 运行）。
+    // **升级 reqwest 必须重跑该测试。**
     if let Some(ref dns_config) = config.dns {
         if dns_config.use_catcher_resolver() {
             let resolver = build_reqwest_resolver(dns_config)?;
@@ -1607,7 +1616,7 @@ mod tests {
     }
 
     #[test]
-    fn config_accepts_proxy_tls_dns_and_network_path() {
+    fn config_accepts_proxy_tls_and_dns() {
         let json = r#"{
             "urls": ["wss://example.com/ws"],
             "proxy": {
@@ -1616,8 +1625,7 @@ mod tests {
                 "no_proxy": ["localhost"]
             },
             "tls": {"reject_unauthorized": false, "min_tls_version": "Tls1_2"},
-            "dns": {"mode": "native"},
-            "network_path_id": "vpn-on"
+            "dns": {"mode": "native"}
         }"#;
 
         let config: WsClientConfig = serde_json::from_str(json).unwrap();
@@ -1628,6 +1636,5 @@ mod tests {
         assert!(!config.tls.reject_unauthorized);
         assert_eq!(config.tls.min_tls_version, Some(TlsVersion::Tls1_2));
         assert!(!config.dns.as_ref().unwrap().use_catcher_resolver());
-        assert_eq!(config.network_path_id.as_deref(), Some("vpn-on"));
     }
 }

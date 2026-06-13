@@ -422,7 +422,6 @@ class WsClientConfig {
   final TlsConfig tls;
   final ProxyConfig? proxy;
   final bool msgpack;
-  final String? networkPathId;
 
   const WsClientConfig({
     required this.urls,
@@ -441,7 +440,6 @@ class WsClientConfig {
     this.tls = const TlsConfig(),
     this.proxy,
     this.msgpack = false,
-    this.networkPathId,
   });
 
   Map<String, dynamic> toJson() => {
@@ -462,7 +460,6 @@ class WsClientConfig {
         'tls': tls.toJson(),
         if (proxy != null) 'proxy': proxy!.toJson(),
         'msgpack': msgpack,
-        if (networkPathId != null) 'network_path_id': networkPathId,
       };
 }
 

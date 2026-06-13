@@ -48,7 +48,14 @@ jobs:
           workspaces: "packages -> target"
       - run: cd packages && cargo check --workspace
       - run: cd packages && cargo clippy --workspace --all-targets -- -D warnings
-      - run: cd packages && cargo test --workspace
+      # `cargo test --workspace` 使用各 crate 默认 features：catcher-http 默认含
+      # `hickory-dns`、catcher-ws 始终启用 `reqwest-resolver`，因此 proxy_dns_behavior_test
+      # 会在此运行。这是「代理路径目标域名不被本地解析」对 reqwest 内部行为依赖的唯一护栏
+      # （见 docs/arch-rs/04-transport.md，issue #031）。升级 reqwest 时务必确认其通过。
+      #
+      # `--no-fail-fast`：默认 cargo test 在第一个失败的测试二进制处停止，会让单个 flaky
+      # 测试（如 catcher-ffi quality_test）掩盖后续整个套件的执行结果（issue #033）。
+      - run: cd packages && cargo test --workspace --no-fail-fast
 
   dart-ffi-roundtrip:
     runs-on: ubuntu-latest

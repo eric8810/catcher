@@ -124,8 +124,6 @@ export interface WsClientConfig {
   dns?: DnsConfig
   /** 启用 msgpack 编解码 — send 自动 JSON→msgpack, receive 自动 msgpack→JSON. 默认 false */
   msgpack?: boolean
-  /** 网络路径版本。VPN / 代理 / DNS 变化后传入新值并重建 client。 */
-  network_path_id?: string
 }
 
 /** WebSocket 事件 — 所有回调参数的联合类型 */

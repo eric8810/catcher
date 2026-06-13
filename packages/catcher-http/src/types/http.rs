@@ -201,10 +201,6 @@ pub struct HttpClientConfig {
     /// 启用 msgpack 编解码 — body 自动 JSON↔msgpack 转码
     #[serde(default)]
     pub msgpack: bool,
-
-    /// 网络路径版本。外部平台在 VPN / 代理 / DNS 变化时应传入新的值并重建 client。
-    #[serde(alias = "networkPathId", skip_serializing_if = "Option::is_none")]
-    pub network_path_id: Option<String>,
 }
 
 fn default_connect_timeout() -> u64 {
@@ -236,7 +232,6 @@ impl Default for HttpClientConfig {
             auth: None,
             bearer_token: None,
             msgpack: false,
-            network_path_id: None,
         }
     }
 }

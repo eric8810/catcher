@@ -45,7 +45,11 @@ pub struct TlsConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub client_identity_password: Option<String>,
-    /// TLS SNI 覆写。
+    /// TLS SNI 主机名覆写。
+    ///
+    /// 仅纯 TS 路径（catcher-http-ts 的 Node Agent，通过 `servername`）支持。
+    /// 原生 transport（catcher-http / catcher-ws）基于 reqwest，无法覆写 SNI 主机名，
+    /// 设置此字段会在构建客户端时返回 `InvalidConfig` 错误（而非静默忽略）。详见 issue #028。
     #[serde(alias = "tlsSniOverride", skip_serializing_if = "Option::is_none")]
     pub tls_sni_override: Option<String>,
     /// 最低 TLS 版本。
