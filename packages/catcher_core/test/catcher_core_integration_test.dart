@@ -7,6 +7,8 @@ import 'dart:io';
 import 'package:test/test.dart';
 import 'package:catcher_core/catcher_core.dart';
 
+import 'http_test_server.dart';
+
 void main() {
   // Skip entire test file if no native library is available
   final ffiPath = Platform.environment['CATCHER_FFI_PATH'];
@@ -20,11 +22,20 @@ void main() {
   }
 
   group('FFI HTTP client', () {
+    late LocalHttpEchoServer server;
     late CatcherHttpClient client;
+
+    setUpAll(() async {
+      server = await LocalHttpEchoServer.start();
+    });
+
+    tearDownAll(() async {
+      await server.close();
+    });
 
     setUp(() {
       client = CatcherHttpClient(HttpClientConfig(
-        baseUrl: 'https://httpbin.org',
+        baseUrl: server.baseUrl,
         retry: RetryConfig(maxAttempts: 2),
       ));
     });
