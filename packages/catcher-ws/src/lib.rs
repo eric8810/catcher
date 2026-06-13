@@ -19,7 +19,7 @@ pub use codec::{pack, unpack, unpack_value};
 pub use transport::ws_client::{WsHandle, WsTransport};
 pub use types::ws::{
     ApplicationCompressionAlgorithm, ApplicationCompressionConfig, DnsConfig, HeartbeatConfig,
-    ReconnectConfig, WsClientConfig, WsEvent, WsState,
+    ProxyConfig, ReconnectConfig, TlsConfig, TlsVersion, WsClientConfig, WsEvent, WsState,
 };
 pub use ws::{
     build_ws_config, decode_application_compression_frame, encode_application_compression_frame,

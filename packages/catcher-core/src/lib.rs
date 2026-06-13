@@ -16,6 +16,7 @@ pub mod types;
 pub use error::{CatcherError, ErrorCategory};
 pub use ffi_types::{EventCallback, FfiBytes, FfiResult, FfiString};
 pub use handle_registry::HandleRegistry;
+pub use types::network::{ProxyAuth, ProxyConfig, TlsConfig, TlsVersion};
 pub use types::observability::{
     ConnectionType, NetworkQualityLevel, NetworkQualityResult, Priority, RttSnapshot,
 };

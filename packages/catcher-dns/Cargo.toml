@@ -9,6 +9,7 @@ repository = "https://github.com/eric8810/catcher"
 [features]
 default = ["hickory-dns"]
 hickory-dns = ["dep:hickory-resolver", "dep:hickory-proto", "dep:moka"]
+reqwest-resolver = ["dep:reqwest"]
 
 [dependencies]
 catcher-core = { path = "../catcher-core", version = "0.3.12" }
@@ -18,6 +19,7 @@ parking_lot = "0.12"
 hickory-resolver = { version = "0.25", optional = true, features = ["tokio"] }
 hickory-proto = { version = "0.25", optional = true }
 moka = { version = "0.12", optional = true, features = ["future"] }
+reqwest = { version = "0.13", optional = true, default-features = false }
 
 [dev-dependencies]
 serde_json = "1"

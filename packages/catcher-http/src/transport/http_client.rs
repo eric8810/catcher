@@ -64,12 +64,15 @@ impl HttpTransport {
         // G8: TLS configuration
         reqwest_builder = build_tls_config(reqwest_builder, &config.tls)?;
 
-        // G7: DNS resolution — always build shared DNS resolver for caching
+        // G7: DNS resolution — only use Catcher resolver when explicitly configured.
         #[cfg(feature = "hickory-dns")]
         {
-            let dns_config = config.dns.clone().unwrap_or_default();
-            let resolver = crate::transport::dns::build_stale_aware_resolver(&dns_config)?;
-            reqwest_builder = reqwest_builder.dns_resolver(resolver);
+            if let Some(ref dns_config) = config.dns {
+                if dns_config.use_catcher_resolver() {
+                    let resolver = crate::transport::dns::build_reqwest_resolver(dns_config)?;
+                    reqwest_builder = reqwest_builder.dns_resolver(resolver);
+                }
+            }
         }
 
         // G4: Proxy configuration

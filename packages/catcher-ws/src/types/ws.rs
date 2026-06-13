@@ -1,4 +1,5 @@
 use catcher_core::types::default_true;
+pub use catcher_core::types::network::{ProxyConfig, TlsConfig, TlsVersion};
 pub use catcher_dns::DnsConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -206,6 +207,14 @@ pub struct WsClientConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub heartbeat: Option<HeartbeatConfig>,
 
+    /// TLS 配置
+    #[serde(default)]
+    pub tls: TlsConfig,
+
+    /// 代理配置
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub proxy: Option<ProxyConfig>,
+
     /// 同时竞速的端点数
     #[serde(alias = "raceCount", default = "default_race_count")]
     pub race_count: u32,
@@ -217,6 +226,10 @@ pub struct WsClientConfig {
     /// DNS 配置
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dns: Option<DnsConfig>,
+
+    /// 网络路径版本。外部平台在 VPN / 代理 / DNS 变化时应传入新的值并重建 client。
+    #[serde(alias = "networkPathId", skip_serializing_if = "Option::is_none")]
+    pub network_path_id: Option<String>,
 }
 
 fn default_deflate_threshold() -> u32 {
@@ -245,9 +258,12 @@ impl Default for WsClientConfig {
             max_payload_bytes: default_max_payload(),
             reconnect: None,
             heartbeat: None,
+            tls: TlsConfig::default(),
+            proxy: None,
             race_count: default_race_count(),
             msgpack: false,
             dns: None,
+            network_path_id: None,
         }
     }
 }

@@ -60,6 +60,8 @@ export interface TlsConfig {
 
 /** DNS 配置 — 对应 Rust DnsConfig */
 export interface DnsConfig {
+  /** DNS 模式。默认: 'catcher'。不配置 dns 时使用 reqwest 原生解析。 */
+  mode?: 'catcher' | 'native'
   /** 缓存条目数上限。默认: 512 */
   cache_size?: number
   /** DNS 缓存 TTL（秒）。默认: 300 */
@@ -74,6 +76,8 @@ export interface DnsConfig {
   nameservers?: string[]
   /** Hostname → IP 映射 */
   host_mapping?: Record<string, string>
+  /** 读取系统 DNS 失败时是否退回默认 DNS。默认: false */
+  fallback_to_default_nameservers?: boolean
 }
 
 /** 退避策略 */
@@ -115,7 +119,7 @@ export interface ProxyAuth {
 
 /** 代理配置 — 对应 Rust ProxyConfig */
 export interface ProxyConfig {
-  /** 代理 URL: "http://host:port" | "https://host:port" | "socks5://host:port" */
+  /** 代理 URL: "http://host:port" | "https://host:port" | "socks5://host:port" | "socks5h://host:port" */
   url: string
   auth?: ProxyAuth
   /** 不走代理的 hostname 列表 */
@@ -169,6 +173,8 @@ export interface HttpClientConfig {
   bearer_token?: string
   /** 启用 msgpack 编解码 — body 自动 JSON↔msgpack 转码. 默认 false */
   msgpack?: boolean
+  /** 网络路径版本。VPN / 代理 / DNS 变化后传入新值并重建 client。 */
+  network_path_id?: string
 }
 
 /** SSE 客户端配置 — 对应 Rust SseClientConfig */

@@ -347,7 +347,7 @@ async fn h11_cancel_all_with_per_request() {
     let handle = unsafe { http::catcher_http_client_create(c_config.as_ptr()) };
     assert!(!handle.is_null());
 
-    let (_c1, ud1) = make_result_cell();
+    let (cell1, ud1) = make_result_cell();
     let id1 = unsafe {
         http::catcher_http_execute_with_id(
             handle, ffi_string("GET"), ffi_string("/test"),
@@ -358,8 +358,9 @@ async fn h11_cancel_all_with_per_request() {
     assert!(id1 > 0);
 
     unsafe { http::catcher_http_client_cancel_all(handle); }
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
-    let (_c2, ud2) = make_result_cell();
+    let (cell2, ud2) = make_result_cell();
     let new_id = unsafe {
         http::catcher_http_execute_with_id(
             handle, ffi_string("GET"), ffi_string("/test"),
@@ -369,6 +370,11 @@ async fn h11_cancel_all_with_per_request() {
     };
     assert!(new_id > 0);
     assert_ne!(new_id, id1);
+
+    unsafe { http::catcher_http_client_cancel_all(handle); }
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    drop(cell1.lock().unwrap());
+    drop(cell2.lock().unwrap());
 
     unsafe { http::catcher_http_client_destroy(handle); }
 }
