@@ -12,11 +12,9 @@
 //! }
 //! ```
 
-use napi::*;
 use napi::bindgen_prelude::Buffer;
-use napi::threadsafe_function::{
-    ThreadSafeCallContext, ThreadsafeFunctionCallMode,
-};
+use napi::threadsafe_function::{ThreadSafeCallContext, ThreadsafeFunctionCallMode};
+use napi::*;
 use napi_derive::napi;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -140,7 +138,8 @@ impl JsHttpClient {
         url: String,
         options: Option<RequestOptions>,
     ) -> napi::Result<JsHttpResponse> {
-        self.do_execute(HttpMethod::DELETE, url, None, options).await
+        self.do_execute(HttpMethod::DELETE, url, None, options)
+            .await
     }
 
     /// PATCH request
@@ -282,13 +281,14 @@ impl JsHttpClient {
         let inner = self.inner.clone();
         tokio::spawn(async move {
             let _ = inner
-                .execute_stream(request, tokio_util::sync::CancellationToken::new(), move |event| {
-                    let json = stream_event_to_json(&event);
-                    let _ = tsfn.call(
-                        Ok(json),
-                        ThreadsafeFunctionCallMode::NonBlocking,
-                    );
-                })
+                .execute_stream(
+                    request,
+                    tokio_util::sync::CancellationToken::new(),
+                    move |event| {
+                        let json = stream_event_to_json(&event);
+                        let _ = tsfn.call(Ok(json), ThreadsafeFunctionCallMode::NonBlocking);
+                    },
+                )
                 .await;
         });
 

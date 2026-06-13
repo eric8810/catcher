@@ -1,6 +1,6 @@
 use catcher_core::types::default_true;
 pub use catcher_core::types::network::{ProxyConfig, TlsConfig, TlsVersion};
-pub use catcher_dns::DnsConfig;
+pub use catcher_dns::{DnsConfig, DnsMode};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

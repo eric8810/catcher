@@ -20,7 +20,7 @@ export interface SharedAgentOptions {
 // === Proxy ===
 
 export interface ProxyConfig {
-  /** "http://host:port" | "https://host:port" | "socks5://host:port" | "socks5h://host:port" */
+  /** "http://host:port" | "https://host:port" | "socks5://host:port" | "socks5h://host:port". Catcher treats socks5 as remote DNS. */
   url: string
   auth?: { username: string; password: string }
   noProxy?: string[]
@@ -29,7 +29,7 @@ export interface ProxyConfig {
 // === DNS ===
 
 export interface DnsConfig {
-  /** DNS mode. Not setting dns lets the transport use its native resolver. */
+  /** DNS mode. Default catcher. Use native only when you want the transport resolver. */
   mode?: 'catcher' | 'native'
   /** Custom DNS nameservers (e.g. ["8.8.8.8"]) */
   nameservers?: string[]

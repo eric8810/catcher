@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
+use catcher_core::types::sse::SseClientConfig;
 use catcher_http::{
     types::http::{HttpClientConfig, HttpMethod, StreamEvent},
     HttpTransport, MetricsSnapshot,
 };
-use catcher_core::types::sse::SseClientConfig;
 
 use super::client::JsMetrics;
 use super::helpers::{parse_method, stream_event_to_json};
@@ -17,7 +17,10 @@ fn parse_method_all() {
     assert!(matches!(parse_method("get").unwrap(), HttpMethod::GET));
     assert!(matches!(parse_method("POST").unwrap(), HttpMethod::POST));
     assert!(matches!(parse_method("PUT").unwrap(), HttpMethod::PUT));
-    assert!(matches!(parse_method("DELETE").unwrap(), HttpMethod::DELETE));
+    assert!(matches!(
+        parse_method("DELETE").unwrap(),
+        HttpMethod::DELETE
+    ));
     assert!(matches!(parse_method("PATCH").unwrap(), HttpMethod::PATCH));
     assert!(parse_method("INVALID").is_err());
 }

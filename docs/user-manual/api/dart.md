@@ -42,7 +42,7 @@ class CatcherHttpClient {
 | `connectTimeoutMs` | `int` | `10000` | 连接超时（ms） |
 | `responseTimeoutMs` | `int` | `30000` | 响应超时（ms） |
 | `pool` | `PoolConfig` | 默认配置 | 连接池配置 |
-| `dns` | `DnsConfig?` | — | DNS 缓存、旧缓存兜底、自定义解析 |
+| `dns` | `DnsConfig?` | — | DNS 缓存、旧缓存兜底、自定义解析；显式 `mode: 'native'` 时使用原生解析 |
 | `retry` | `RetryConfig?` | — | 重试配置 |
 | `circuitBreaker` | `CircuitBreakerConfig?` | — | 熔断器配置 |
 | `msgpack` | `bool` | `false` | 启用 HTTP body 自动 JSON ↔ msgpack |
@@ -51,6 +51,7 @@ class CatcherHttpClient {
 
 | 参数 | 类型 | 默认 | 说明 |
 |------|------|------|------|
+| `mode` | `String` | `'catcher'` | `'native'` 使用原生解析 |
 | `cacheSize` | `int` | `512` | DNS 缓存条目上限 |
 | `cacheTtlSecs` | `int` | `300` | 正常缓存有效时间（秒） |
 | `negativeTtlSecs` | `int` | `60` | 失败结果缓存时间（秒） |
@@ -159,7 +160,7 @@ class CatcherWsClient {
 | `heartbeat` | `HeartbeatConfig?` | — | 心跳 |
 | `heartbeat.intervalMs` | `int` | `30000` | 心跳间隔（ms） |
 | `heartbeat.adaptive` | `bool` | `true` | 自适应间隔 |
-| `dns` | `DnsConfig?` | — | DNS 缓存、旧缓存兜底、自定义解析 |
+| `dns` | `DnsConfig?` | — | DNS 缓存、旧缓存兜底、自定义解析；显式 `mode: 'native'` 时使用原生解析 |
 | `msgpack` | `bool` | `false` | 启用 WS 文本消息 JSON ↔ msgpack |
 
 ### WsEvent 类型

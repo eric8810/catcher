@@ -16,7 +16,10 @@ struct CallbackState {
 }
 
 fn make_callback_state() -> (Arc<Mutex<CallbackState>>, *mut c_void) {
-    let state = Arc::new(Mutex::new(CallbackState { count: 0, last_event: None }));
+    let state = Arc::new(Mutex::new(CallbackState {
+        count: 0,
+        last_event: None,
+    }));
     let ptr = Arc::as_ptr(&state) as *mut c_void;
     (state, ptr)
 }
@@ -27,10 +30,17 @@ extern "C" fn capture_quality_callback(
     event_data_len: usize,
     user_data: *mut c_void,
 ) {
-    if user_data.is_null() { return; }
+    if user_data.is_null() {
+        return;
+    }
     let bytes = unsafe { std::slice::from_raw_parts(event_data, event_data_len) };
     let json = String::from_utf8_lossy(bytes).to_string();
-    unsafe { catcher_core::ffi_types::catcher_free_event_data(_event_type as *mut c_char, event_data as *mut u8); }
+    unsafe {
+        catcher_core::ffi_types::catcher_free_event_data(
+            _event_type as *mut c_char,
+            event_data as *mut u8,
+        );
+    }
     let state: &Mutex<CallbackState> = unsafe { &*(user_data as *const Mutex<CallbackState>) };
     let mut s = state.lock().unwrap();
     s.count += 1;
@@ -62,7 +72,10 @@ async fn q02_subscribe_receives_callback() {
     tokio::time::sleep(std::time::Duration::from_secs(3)).await;
 
     let count = state.lock().unwrap().count;
-    assert!(count >= 1, "should receive at least 1 callback, got {count}");
+    assert!(
+        count >= 1,
+        "should receive at least 1 callback, got {count}"
+    );
 
     let event = state.lock().unwrap().last_event.clone();
     assert!(event.is_some(), "should have captured an event");
@@ -90,14 +103,20 @@ async fn q03_subscribe_unsubscribe() {
 
     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
     let count_before = state.lock().unwrap().count;
-    assert!(count_before >= 1, "should have callbacks before unsubscribe");
+    assert!(
+        count_before >= 1,
+        "should have callbacks before unsubscribe"
+    );
 
     unsafe { quality::catcher_quality_unsubscribe(sub_handle) };
 
     let count_at_unsub = state.lock().unwrap().count;
     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
     let count_after = state.lock().unwrap().count;
-    assert_eq!(count_after, count_at_unsub, "should have no new callbacks after unsubscribe");
+    assert_eq!(
+        count_after, count_at_unsub,
+        "should have no new callbacks after unsubscribe"
+    );
 }
 
 /// q04: Subscribe to invalid host doesn't crash
@@ -155,7 +174,10 @@ async fn q05_subscribe_multiple() {
     let count1 = state1.lock().unwrap().count;
     let count2 = state2.lock().unwrap().count;
     // sub2 should still be receiving callbacks (or at least not panicked)
-    assert!(count2 >= count1, "sub2 should have at least as many callbacks as sub1");
+    assert!(
+        count2 >= count1,
+        "sub2 should have at least as many callbacks as sub1"
+    );
 
     unsafe { quality::catcher_quality_unsubscribe(sub2) };
 }

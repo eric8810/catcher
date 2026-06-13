@@ -1,0 +1,8 @@
+[package]
+name = "catcher-test-support"
+version = "0.3.12"
+edition = "2021"
+publish = false
+
+[dependencies]
+tokio = { version = "1", features = ["rt", "net", "io-util", "sync", "time"] }

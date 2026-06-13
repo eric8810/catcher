@@ -34,12 +34,13 @@ catcher-ws = "0.3.11"
 ### Basic WebSocket connection
 
 ```rust
-use catcher_ws::{DnsConfig, HeartbeatConfig, ReconnectConfig, WsEvent, WsTransport};
+use catcher_ws::{DnsConfig, DnsMode, HeartbeatConfig, ReconnectConfig, WsEvent, WsTransport};
 use catcher_ws::types::ws::WsClientConfig;
 
 let config = WsClientConfig {
     urls: vec!["wss://echo.example.com".into()],
     dns: Some(DnsConfig {
+        mode: DnsMode::Catcher,
         cache_ttl_secs: 300,
         stale_on_error: true,
         ..Default::default()

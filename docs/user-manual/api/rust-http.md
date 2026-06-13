@@ -143,6 +143,7 @@ pub struct TlsConfig {
 
 ```rust
 pub struct DnsConfig {
+    pub mode: DnsMode,                       // 默认 Native；Catcher 才启用缓存和 host_mapping
     pub cache_ttl_secs: u32,                 // 默认 300
     pub nameservers: Vec<String>,
     pub host_mapping: HashMap<String, String>,
@@ -153,7 +154,7 @@ pub struct DnsConfig {
 
 ```rust
 pub struct ProxyConfig {
-    pub url: String,                         // "http://host:port" | "socks5://host:port"
+    pub url: String,                         // http / https / socks5 / socks5h
     pub auth: Option<ProxyAuth>,
     pub no_proxy: Vec<String>,
 }
@@ -163,6 +164,9 @@ pub struct ProxyAuth {
     pub password: String,
 }
 ```
+
+`socks5://` 会按 `socks5h://` 处理，让代理解析目标域名，避免 Clash
+fake-ip、VPN 分流等场景下提前本地解析。
 
 ### RedirectConfig
 

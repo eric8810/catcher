@@ -7,8 +7,8 @@ use std::ffi::{c_char, c_void, CStr, CString};
 use std::sync::Mutex;
 
 use catcher_core::ffi_types::FfiString;
-use catcher_http::ffi::sse_ffi as sse;
 use catcher_http::ffi::http_ffi as http;
+use catcher_http::ffi::sse_ffi as sse;
 
 static LAST_SSE_EVENT: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
@@ -20,7 +20,9 @@ fn ffi_string(s: &str) -> FfiString {
 }
 
 unsafe fn read_c_string(ptr: *mut c_char) -> String {
-    if ptr.is_null() { return String::new(); }
+    if ptr.is_null() {
+        return String::new();
+    }
     let s = CStr::from_ptr(ptr).to_string_lossy().to_string();
     catcher_ffi::catcher_free_data(ptr as *mut c_void, s.len() + 1);
     s
@@ -45,8 +47,8 @@ extern "C" fn sse_callback(
 
 #[tokio::test]
 async fn s01_sse_stream_basic() {
-    use wiremock::{MockServer, Mock, ResponseTemplate};
     use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     let server = MockServer::start().await;
     // Return a simple SSE stream response
@@ -91,19 +93,25 @@ async fn s01_sse_stream_basic() {
     let events = LAST_SSE_EVENT.lock().unwrap().clone();
     assert!(!events.is_empty(), "should have received SSE events");
     // First event should be "open", followed by data events, ending with "close"
-    let types: Vec<String> = events.iter()
+    let types: Vec<String> = events
+        .iter()
         .filter_map(|e| serde_json::from_str::<serde_json::Value>(e).ok())
         .filter_map(|v| v["type"].as_str().map(|s| s.to_string()))
         .collect();
-    assert!(types.contains(&"data".to_string()), "should contain data events");
+    assert!(
+        types.contains(&"data".to_string()),
+        "should contain data events"
+    );
 
-    unsafe { http::catcher_http_client_destroy(http_handle); }
+    unsafe {
+        http::catcher_http_client_destroy(http_handle);
+    }
 }
 
 #[test]
 fn s02_sse_connect_and_ready_state() {
-    use wiremock::{MockServer, Mock, ResponseTemplate};
     use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     // Use a temporary runtime for async mock setup. We keep rt alive so the
     // mock server stays running, but after block_on returns the thread is no
@@ -131,9 +139,8 @@ fn s02_sse_connect_and_ready_state() {
 
     LAST_SSE_EVENT.lock().unwrap().clear();
 
-    let sse_handle = unsafe {
-        sse::catcher_sse_connect(c_config.as_ptr(), sse_callback, std::ptr::null_mut())
-    };
+    let sse_handle =
+        unsafe { sse::catcher_sse_connect(c_config.as_ptr(), sse_callback, std::ptr::null_mut()) };
     assert!(!sse_handle.is_null(), "SSE connect should succeed");
 
     std::thread::sleep(std::time::Duration::from_millis(500));
@@ -144,14 +151,18 @@ fn s02_sse_connect_and_ready_state() {
     let events = LAST_SSE_EVENT.lock().unwrap().clone();
     assert!(!events.is_empty(), "should have received SSE events");
 
-    unsafe { sse::catcher_sse_close(sse_handle); }
-    unsafe { sse::catcher_sse_destroy(sse_handle); }
+    unsafe {
+        sse::catcher_sse_close(sse_handle);
+    }
+    unsafe {
+        sse::catcher_sse_destroy(sse_handle);
+    }
 }
 
 #[test]
 fn s03_sse_last_event_id() {
-    use wiremock::{MockServer, Mock, ResponseTemplate};
     use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     // Use a temporary runtime for async mock setup. We keep rt alive so the
     // mock server stays running, but after block_on returns the thread is no
@@ -177,9 +188,8 @@ fn s03_sse_last_event_id() {
     });
     let c_config = CString::new(config.to_string()).unwrap();
 
-    let sse_handle = unsafe {
-        sse::catcher_sse_connect(c_config.as_ptr(), sse_callback, std::ptr::null_mut())
-    };
+    let sse_handle =
+        unsafe { sse::catcher_sse_connect(c_config.as_ptr(), sse_callback, std::ptr::null_mut()) };
     assert!(!sse_handle.is_null());
 
     std::thread::sleep(std::time::Duration::from_millis(500));
@@ -189,6 +199,10 @@ fn s03_sse_last_event_id() {
     // Should have an event ID (might be empty if not yet set, or "42")
     println!("last_event_id: {:?}", id);
 
-    unsafe { sse::catcher_sse_close(sse_handle); }
-    unsafe { sse::catcher_sse_destroy(sse_handle); }
+    unsafe {
+        sse::catcher_sse_close(sse_handle);
+    }
+    unsafe {
+        sse::catcher_sse_destroy(sse_handle);
+    }
 }

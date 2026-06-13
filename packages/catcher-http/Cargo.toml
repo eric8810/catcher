@@ -58,5 +58,6 @@ napi = { version = "2", optional = true, default-features = false, features = ["
 napi-derive = { version = "2", optional = true }
 
 [dev-dependencies]
+catcher-test-support = { path = "../catcher-test-support" }
 tokio-test = "0.4"
 wiremock = "0.6"

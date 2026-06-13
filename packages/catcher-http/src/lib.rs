@@ -10,20 +10,18 @@
 //! - FFI C ABI for cross-language bindings
 //! - SSE streaming client with auto-reconnect
 
-pub mod types;
-pub mod transport;
+pub mod ffi;
+pub mod observability;
 pub mod resilience;
 pub mod scheduler;
-pub mod observability;
-pub mod ffi;
 pub mod sse;
+pub mod transport;
+pub mod types;
 
 // Re-export key types
-pub use transport::HttpTransport;
-pub use resilience::{
-    build_retry_policy, retry_with_backoff, AdaptiveTimeout, CircuitBreaker,
-};
-pub use scheduler::{concurrency_for_quality, PriorityRequestQueue};
-pub use observability::{MetricsCollector, MetricsSnapshot, NetworkQualityEvaluator};
-pub use sse::{SseClient, SseStream};
 pub use catcher_core::types::sse::{SseClientConfig, SseMethod, SseReconnectConfig};
+pub use observability::{MetricsCollector, MetricsSnapshot, NetworkQualityEvaluator};
+pub use resilience::{build_retry_policy, retry_with_backoff, AdaptiveTimeout, CircuitBreaker};
+pub use scheduler::{concurrency_for_quality, PriorityRequestQueue};
+pub use sse::{SseClient, SseStream};
+pub use transport::HttpTransport;

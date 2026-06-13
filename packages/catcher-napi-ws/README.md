@@ -59,7 +59,6 @@ const ws = new WsClient(
     urls: ['wss://echo.example.com'],
     reconnect: { initial_delay_ms: 500, max_delay_ms: 30000 },
     heartbeat: { interval_ms: 30000, adaptive: true },
-    dns: { cache_ttl_secs: 300, stale_on_error: true },
     msgpack: true,
   },
   (event: WsEvent) => {
@@ -116,6 +115,7 @@ interface WsClientConfig {
 }
 
 interface DnsConfig {
+  mode?: 'catcher' | 'native'             // default: 'catcher'
   cache_size?: number                         // default: 512
   cache_ttl_secs?: number                     // default: 300
   negative_ttl_secs?: number                  // default: 60

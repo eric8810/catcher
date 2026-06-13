@@ -6,7 +6,9 @@
 use std::ffi::{c_char, c_void, CStr, CString};
 
 unsafe fn read_c_string(ptr: *mut c_char) -> String {
-    if ptr.is_null() { return String::new(); }
+    if ptr.is_null() {
+        return String::new();
+    }
     let s = CStr::from_ptr(ptr).to_string_lossy().to_string();
     catcher_ffi::catcher_free_data(ptr as *mut c_void, s.len() + 1);
     s
@@ -25,7 +27,8 @@ fn c01_pack_roundtrip() {
     assert!(packed.data_len > 0);
 
     // Unpack back
-    let unpacked = unsafe { catcher_ffi::catcher_unpack(packed.data as *const u8, packed.data_len) };
+    let unpacked =
+        unsafe { catcher_ffi::catcher_unpack(packed.data as *const u8, packed.data_len) };
     assert_eq!(unpacked.error_code, 0, "unpack should succeed");
 
     // Free

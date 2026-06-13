@@ -60,7 +60,7 @@ export interface TlsConfig {
 
 /** DNS 配置 — 对应 Rust DnsConfig */
 export interface DnsConfig {
-  /** DNS 模式。默认: 'catcher'。不配置 dns 时使用 reqwest 原生解析。 */
+  /** DNS 模式。默认: 'catcher'。仅显式 native 时使用协议库原生解析。 */
   mode?: 'catcher' | 'native'
   /** 缓存条目数上限。默认: 512 */
   cache_size?: number
@@ -119,7 +119,7 @@ export interface ProxyAuth {
 
 /** 代理配置 — 对应 Rust ProxyConfig */
 export interface ProxyConfig {
-  /** 代理 URL: "http://host:port" | "https://host:port" | "socks5://host:port" | "socks5h://host:port" */
+  /** 代理 URL。Catcher 会把 socks5:// 按 socks5h:// 处理，避免代理场景提前本地解析域名。 */
   url: string
   auth?: ProxyAuth
   /** 不走代理的 hostname 列表 */

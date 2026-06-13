@@ -19,6 +19,7 @@ void main() {
         baseUrl: 'https://api.example.com',
         retry: RetryConfig(maxAttempts: 3),
         dns: DnsConfig(
+          mode: 'catcher',
           cacheSize: 1024,
           cacheTtlSecs: 600,
           negativeTtlSecs: 30,
@@ -32,6 +33,7 @@ void main() {
       final json = config.toJson();
       expect(json['base_url'], 'https://api.example.com');
       expect(json['retry']['max_attempts'], 3);
+      expect(json['dns']['mode'], 'catcher');
       expect(json['dns']['cache_size'], 1024);
       expect(json['dns']['cache_ttl_secs'], 600);
       expect(json['dns']['negative_ttl_secs'], 30);
@@ -107,13 +109,17 @@ void main() {
         urls: ['wss://example.com'],
         perMessageDeflate: true,
         reconnect: WsReconnectConfig(maxAttempts: 3),
-        dns: DnsConfig(hostMapping: {'example.com': '127.0.0.1'}),
+        dns: DnsConfig(
+          mode: 'catcher',
+          hostMapping: {'example.com': '127.0.0.1'},
+        ),
         msgpack: true,
       );
       final json = config.toJson();
       expect(json['urls'], ['wss://example.com']);
       expect(json['per_message_deflate'], true);
       expect(json['reconnect']['max_attempts'], 3);
+      expect(json['dns']['mode'], 'catcher');
       expect(json['dns']['host_mapping']['example.com'], '127.0.0.1');
       expect(json['msgpack'], true);
     });

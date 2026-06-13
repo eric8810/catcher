@@ -2,9 +2,9 @@ use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot, Semaphore};
 
-use catcher_core::CatcherError;
 use catcher_core::types::observability::Priority;
 use catcher_core::types::scheduler::QueueConfig;
+use catcher_core::CatcherError;
 
 type BoxedFuture<T> = Pin<Box<dyn std::future::Future<Output = Result<T, CatcherError>> + Send>>;
 
@@ -30,8 +30,7 @@ pub struct PriorityRequestQueue<T: Send + 'static> {
 
 impl<T: Send + 'static> PriorityRequestQueue<T> {
     pub fn new(config: QueueConfig) -> Self {
-        let (high_tx, mut high_rx) =
-            mpsc::channel::<PrioritizedTask<T>>(config.queue_capacity);
+        let (high_tx, mut high_rx) = mpsc::channel::<PrioritizedTask<T>>(config.queue_capacity);
         let (low_tx, mut low_rx) = mpsc::channel::<PrioritizedTask<T>>(config.queue_capacity);
         let sem = Arc::new(Semaphore::new(config.max_concurrency));
 

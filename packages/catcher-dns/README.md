@@ -23,9 +23,10 @@ catcher-dns = "0.3.11"
 ```
 
 ```rust
-use catcher_dns::{build_stale_aware_resolver, DnsConfig};
+use catcher_dns::{build_stale_aware_resolver, DnsConfig, DnsMode};
 
 let config = DnsConfig {
+    mode: DnsMode::Catcher,
     cache_size: 512,
     cache_ttl_secs: 300,
     negative_ttl_secs: 60,

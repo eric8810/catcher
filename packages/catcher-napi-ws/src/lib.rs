@@ -7,7 +7,7 @@
 //!   "headers": { "Authorization": "Bearer ..." },
 //!   "protocols": ["v1", "v2"],
 //!   "per_message_deflate": true,
-//!   "dns": { "cache_ttl_secs": 300 },
+//!   "dns": { "mode": "catcher", "cache_ttl_secs": 300 },
 //!   "msgpack": true,
 //!   "reconnect": { "initial_delay_ms": 500, "max_delay_ms": 30000, "max_attempts": 20 },
 //!   "heartbeat": { "interval_ms": 30000, "pong_timeout_ms": 10000 }
@@ -188,6 +188,7 @@ mod tests {
             "protocols": ["v1"],
             "per_message_deflate": true,
             "dns": {
+                "mode": "catcher",
                 "cache_size": 256,
                 "cache_ttl_secs": 60,
                 "negative_ttl_secs": 30,

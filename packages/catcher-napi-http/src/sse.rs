@@ -1,12 +1,10 @@
+use napi::threadsafe_function::{ThreadSafeCallContext, ThreadsafeFunctionCallMode};
 use napi::*;
-use napi::threadsafe_function::{
-    ThreadSafeCallContext, ThreadsafeFunctionCallMode,
-};
 use napi_derive::napi;
 use serde::{Deserialize, Serialize};
 
-use catcher_http::{SseClient, SseStream};
 use catcher_core::types::sse::SseClientConfig;
+use catcher_http::{SseClient, SseStream};
 
 use crate::helpers::Tsfn;
 
@@ -56,13 +54,11 @@ pub fn sse_stream(
     config_json: String,
     #[napi(ts_arg_type = "(eventJson: string) => void")] on_event: JsFunction,
 ) -> napi::Result<JsSseStream> {
-    let config: SseClientConfig = serde_json::from_str(&config_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let config: SseClientConfig =
+        serde_json::from_str(&config_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
 
     let tsfn: Tsfn = on_event
-        .create_threadsafe_function(0, |ctx: ThreadSafeCallContext<String>| {
-            Ok(vec![ctx.value])
-        })?;
+        .create_threadsafe_function(0, |ctx: ThreadSafeCallContext<String>| Ok(vec![ctx.value]))?;
 
     let (cancel_tx, mut cancel_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
 
@@ -92,10 +88,7 @@ pub fn sse_stream(
                         _ = cancel_rx.recv() => break,
                     }
                 }
-                let _ = tsfn.call(
-                    Ok(sse_end_json()),
-                    ThreadsafeFunctionCallMode::NonBlocking,
-                );
+                let _ = tsfn.call(Ok(sse_end_json()), ThreadsafeFunctionCallMode::NonBlocking);
             }
             Err(e) => {
                 let _ = tsfn.call(
@@ -117,13 +110,11 @@ pub fn sse_client(
     config_json: String,
     #[napi(ts_arg_type = "(eventJson: string) => void")] on_event: JsFunction,
 ) -> napi::Result<JsSseClient> {
-    let config: SseClientConfig = serde_json::from_str(&config_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let config: SseClientConfig =
+        serde_json::from_str(&config_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
 
     let tsfn: Tsfn = on_event
-        .create_threadsafe_function(0, |ctx: ThreadSafeCallContext<String>| {
-            Ok(vec![ctx.value])
-        })?;
+        .create_threadsafe_function(0, |ctx: ThreadSafeCallContext<String>| Ok(vec![ctx.value]))?;
 
     let (cancel_tx, mut cancel_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
 
@@ -155,10 +146,7 @@ pub fn sse_client(
                         }
                     }
                 }
-                let _ = tsfn.call(
-                    Ok(sse_end_json()),
-                    ThreadsafeFunctionCallMode::NonBlocking,
-                );
+                let _ = tsfn.call(Ok(sse_end_json()), ThreadsafeFunctionCallMode::NonBlocking);
             }
             Err(e) => {
                 let _ = tsfn.call(
@@ -186,11 +174,17 @@ pub(crate) enum SseEvent {
 }
 
 pub(crate) fn sse_line_json(line: &str) -> String {
-    serde_json::to_string(&SseEvent::Line { data: line.to_owned() }).unwrap_or_default()
+    serde_json::to_string(&SseEvent::Line {
+        data: line.to_owned(),
+    })
+    .unwrap_or_default()
 }
 
 pub(crate) fn sse_error_json(msg: &str) -> String {
-    serde_json::to_string(&SseEvent::Error { message: msg.to_owned() }).unwrap_or_default()
+    serde_json::to_string(&SseEvent::Error {
+        message: msg.to_owned(),
+    })
+    .unwrap_or_default()
 }
 
 pub(crate) fn sse_end_json() -> String {

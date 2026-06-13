@@ -22,6 +22,8 @@ import 'package:catcher_core/src/ffi_bindings.dart';
 import 'package:ffi/ffi.dart';
 import 'package:test/test.dart';
 
+import 'http_test_server.dart';
+
 void main() {
   // Skip entire suite if the native library is not available.
   final ffiPath = Platform.environment['CATCHER_FFI_PATH'];
@@ -156,7 +158,7 @@ void main() {
   group('HTTP client lifecycle', () {
     test('create and destroy client without error', () {
       final client = CatcherHttpClient(HttpClientConfig(
-        baseUrl: 'https://httpbin.org',
+        baseUrl: 'http://127.0.0.1',
         connectTimeoutMs: 5000,
         responseTimeoutMs: 10000,
       ));
@@ -179,7 +181,7 @@ void main() {
 
     test('dispose is idempotent', () {
       final client = CatcherHttpClient(HttpClientConfig(
-        baseUrl: 'https://httpbin.org',
+        baseUrl: 'http://127.0.0.1',
       ));
       client.dispose();
       // Second dispose should not crash
@@ -188,12 +190,21 @@ void main() {
     });
   });
 
-  group('HTTP roundtrip (network required)', () {
+  group('HTTP roundtrip (local server)', () {
+    late LocalHttpEchoServer server;
     CatcherHttpClient? client;
+
+    setUpAll(() async {
+      server = await LocalHttpEchoServer.start();
+    });
+
+    tearDownAll(() async {
+      await server.close();
+    });
 
     setUp(() {
       client = CatcherHttpClient(HttpClientConfig(
-        baseUrl: 'https://httpbin.org',
+        baseUrl: server.baseUrl,
         connectTimeoutMs: 5000,
         responseTimeoutMs: 15000,
         retry: RetryConfig(maxAttempts: 2),
@@ -238,7 +249,7 @@ void main() {
       expect(resp.status, equals(200));
       final body = jsonDecode(resp.bodyAsString) as Map;
       final headers = body['headers'] as Map;
-      // httpbin capitalizes headers as "X-Custom-Header" or similar
+      // Header name casing can vary by transport.
       final hasHeader = headers.keys.any(
         (k) => (k as String).toLowerCase() == 'x-custom-header',
       );
@@ -281,7 +292,7 @@ void main() {
   group('Per-request cancel API', () {
     test('cancelRequest returns false for non-existent request', () {
       final client = CatcherHttpClient(HttpClientConfig(
-        baseUrl: 'https://httpbin.org',
+        baseUrl: 'http://127.0.0.1',
       ));
       // No requests in flight — cancel should return false
       final result = client.cancelRequest(99999);
@@ -294,7 +305,7 @@ void main() {
   group('Adaptive timeout API', () {
     test('setAdaptiveToggle does not crash', () {
       final client = CatcherHttpClient(HttpClientConfig(
-        baseUrl: 'https://httpbin.org',
+        baseUrl: 'http://127.0.0.1',
       ));
       // Enable
       client.setAdaptiveTimeout(

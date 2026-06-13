@@ -8,6 +8,7 @@ resolver = "2"
 members = [
     "catcher-core",
     "catcher-dns",
+    "catcher-test-support",
     "catcher-http",
     "catcher-ws",
     "catcher-ffi",
@@ -30,6 +31,22 @@ thiserror = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ```
+
+## catcher-test-support
+
+```toml
+[package]
+name = "catcher-test-support"
+version = "0.3.12"
+edition = "2021"
+publish = false
+
+[dependencies]
+tokio = { version = "1", features = ["rt", "net", "io-util", "sync", "time"] }
+```
+
+用途：只给 Rust 自动化测试使用，不发布到 crates.io。当前提供假的 SOCKS5
+代理，HTTP 和 WebSocket 测试共用它来检查代理收到的目标地址。
 
 ## catcher-http
 

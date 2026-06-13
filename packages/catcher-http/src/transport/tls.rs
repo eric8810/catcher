@@ -1,5 +1,5 @@
-use catcher_core::CatcherError;
 use crate::types::http::TlsConfig;
+use catcher_core::CatcherError;
 use reqwest::ClientBuilder;
 
 /// 将 TlsConfig 应用到 reqwest ClientBuilder
@@ -13,7 +13,11 @@ pub fn build_tls_config(
 ) -> Result<ClientBuilder, CatcherError> {
     // If pin_sha256 is set, build a full rustls::ClientConfig with pinning verifier
     #[cfg(feature = "rustls-tls")]
-    if config.pin_sha256.as_ref().is_some_and(|pins| !pins.is_empty()) {
+    if config
+        .pin_sha256
+        .as_ref()
+        .is_some_and(|pins| !pins.is_empty())
+    {
         return build_tls_with_pinning(builder, config);
     }
 
@@ -58,8 +62,9 @@ pub fn build_tls_config(
         let key_pem = std::fs::read_to_string(key_path)
             .map_err(|e| CatcherError::TlsError(format!("read client key {}: {e}", key_path)))?;
         let identity_pem = format!("{cert_pem}\n{key_pem}");
-        let identity = reqwest::Identity::from_pem(identity_pem.as_bytes())
-            .map_err(|e| CatcherError::TlsError(format!("parse client identity from files: {e}")))?;
+        let identity = reqwest::Identity::from_pem(identity_pem.as_bytes()).map_err(|e| {
+            CatcherError::TlsError(format!("parse client identity from files: {e}"))
+        })?;
         builder = builder.identity(identity);
     }
 
@@ -109,9 +114,9 @@ fn build_tls_with_pinning(
     builder: ClientBuilder,
     config: &TlsConfig,
 ) -> Result<ClientBuilder, CatcherError> {
-    use std::sync::Arc;
-    use rustls_pki_types::pem::PemObject;
     use crate::transport::tls_pinning::PinningVerifier;
+    use rustls_pki_types::pem::PemObject;
+    use std::sync::Arc;
 
     // Build root certificate store
     let mut root_store = rustls::RootCertStore::empty();
@@ -123,7 +128,8 @@ fn build_tls_with_pinning(
     if let Some(ref pem) = config.ca_cert_pem {
         for cert in rustls_pki_types::CertificateDer::pem_slice_iter(pem.as_bytes()) {
             let cert = cert.map_err(|e| CatcherError::TlsError(format!("parse PEM cert: {e}")))?;
-            root_store.add(cert)
+            root_store
+                .add(cert)
                 .map_err(|e| CatcherError::TlsError(format!("add CA cert: {e}")))?;
         }
     }
@@ -134,7 +140,8 @@ fn build_tls_with_pinning(
             .map_err(|e| CatcherError::TlsError(format!("read CA cert file {}: {e}", path)))?;
         for cert in rustls_pki_types::CertificateDer::pem_slice_iter(&pem_bytes) {
             let cert = cert.map_err(|e| CatcherError::TlsError(format!("parse PEM cert: {e}")))?;
-            root_store.add(cert)
+            root_store
+                .add(cert)
                 .map_err(|e| CatcherError::TlsError(format!("add CA cert from file: {e}")))?;
         }
     }
@@ -192,7 +199,8 @@ mod tests {
 
     #[test]
     fn tls3_config_with_ca_cert_pem_invalid() {
-        let invalid_pem = "-----BEGIN CERTIFICATE-----\nnot-a-real-cert\n-----END CERTIFICATE-----\n";
+        let invalid_pem =
+            "-----BEGIN CERTIFICATE-----\nnot-a-real-cert\n-----END CERTIFICATE-----\n";
         let config = TlsConfig {
             ca_cert_pem: Some(invalid_pem.to_string()),
             ..Default::default()

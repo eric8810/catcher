@@ -53,6 +53,7 @@ const client = new HttpClient({
   retry: { max_attempts: 3, backoff: 'Fixed' },
   circuit_breaker: { failure_threshold: 5, reset_timeout_ms: 30000 },
   dns: {
+    mode: 'catcher',
     cache_size: 512,
     cache_ttl_secs: 300,
     negative_ttl_secs: 60,
@@ -127,6 +128,7 @@ interface HttpClientConfig {
 }
 
 interface DnsConfig {
+  mode?: 'catcher' | 'native'        // default: 'catcher'
   cache_size?: number                // default: 512
   cache_ttl_secs?: number            // default: 300
   negative_ttl_secs?: number         // default: 60

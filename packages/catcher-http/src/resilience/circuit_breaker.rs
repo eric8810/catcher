@@ -1,5 +1,5 @@
-use catcher_core::CatcherError;
 use catcher_core::types::resilience::{CbState, CircuitBreakerConfig};
+use catcher_core::CatcherError;
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};

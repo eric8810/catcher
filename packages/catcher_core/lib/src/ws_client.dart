@@ -37,6 +37,7 @@ class CatcherWsClient {
       StreamController<WsEvent>.broadcast();
 
   NativeCallable<EventCallbackNative>? _nativeCallback;
+  bool _disposed = false;
 
   CatcherWsClient(WsClientConfig config) {
     final lib = loadCatcherLibrary();
@@ -80,22 +81,24 @@ class CatcherWsClient {
 
         // Free the CStrings that Rust leaked via CString::into_raw()
         _freeEventData(eventType, eventData);
+        if (_disposed) {
+          return;
+        }
 
         final Map<String, dynamic> json;
         try {
           json = jsonDecode(jsonStr) as Map<String, dynamic>;
         } catch (_) {
-          _eventController.add(WsErrorEvent('Failed to parse event: $jsonStr'));
+          _emitEvent(WsErrorEvent('Failed to parse event: $jsonStr'));
           return;
         }
 
         if (typeStr == 'ws_error' || json.containsKey('error')) {
-          _eventController
-              .add(WsErrorEvent(json['error']?.toString() ?? jsonStr));
+          _emitEvent(WsErrorEvent(json['error']?.toString() ?? jsonStr));
           return;
         }
 
-        _eventController.add(_parseWsEvent(json));
+        _emitEvent(_parseWsEvent(json));
       },
     );
 
@@ -163,21 +166,27 @@ class CatcherWsClient {
 
   /// Release all resources
   void dispose() {
-    // Close native callback FIRST to prevent Rust from invoking
-    // the function pointer after the handle is destroyed.
-    _nativeCallback?.close();
-    _nativeCallback = null;
+    if (_disposed) return;
+    _disposed = true;
 
     if (_handle != null && _handle != nullptr) {
       _destroy(_handle!);
       _handle = null;
     }
+    _nativeCallback?.close();
+    _nativeCallback = null;
     if (!_eventController.isClosed) {
       _eventController.close();
     }
   }
 
   // ── Internal ──
+
+  void _emitEvent(WsEvent event) {
+    if (!_disposed && !_eventController.isClosed) {
+      _eventController.add(event);
+    }
+  }
 
   void _ensureHandle() {
     if (_handle == null || _handle == nullptr) {

@@ -41,7 +41,11 @@ mod tests {
     }
 
     /// Extract delay as millis (f64) from RetryDecision
-    fn delay_ms(policy: &retry_policies::policies::ExponentialBackoff, start: SystemTime, n: u32) -> Option<f64> {
+    fn delay_ms(
+        policy: &retry_policies::policies::ExponentialBackoff,
+        start: SystemTime,
+        n: u32,
+    ) -> Option<f64> {
         match policy.should_retry(start, n) {
             retry_policies::RetryDecision::Retry { execute_after } => {
                 Some(execute_after.duration_since(start).unwrap().as_secs_f64() * 1000.0)
@@ -81,9 +85,18 @@ mod tests {
         let d1 = delay_ms(&policy, start, 1).unwrap();
         let d2 = delay_ms(&policy, start, 2).unwrap();
 
-        assert!((d0 - 100.0).abs() < 2.0, "attempt 0: expected ~100ms, got {d0:.3}ms");
-        assert!((d1 - 200.0).abs() < 2.0, "attempt 1: expected ~200ms, got {d1:.3}ms");
-        assert!((d2 - 400.0).abs() < 2.0, "attempt 2: expected ~400ms, got {d2:.3}ms");
+        assert!(
+            (d0 - 100.0).abs() < 2.0,
+            "attempt 0: expected ~100ms, got {d0:.3}ms"
+        );
+        assert!(
+            (d1 - 200.0).abs() < 2.0,
+            "attempt 1: expected ~200ms, got {d1:.3}ms"
+        );
+        assert!(
+            (d2 - 400.0).abs() < 2.0,
+            "attempt 2: expected ~400ms, got {d2:.3}ms"
+        );
     }
 
     #[test]
@@ -96,8 +109,7 @@ mod tests {
         // The calculated backoff grows exponentially but jitter may push it below min_backoff.
         // Verify delays are within a reasonable range [0, max_backoff + overhead].
         for attempt in 0..3 {
-            let d = delay_ms(&policy, start, attempt)
-                .expect("expected Retry decision");
+            let d = delay_ms(&policy, start, attempt).expect("expected Retry decision");
             assert!(
                 (0.0..=10_002.0).contains(&d),
                 "attempt {attempt}: delay {d:.3}ms out of [0ms, 10000ms] range"

@@ -13,10 +13,7 @@ use std::fmt;
 #[derive(Debug, Clone)]
 pub enum Part {
     /// A text form field.
-    Text {
-        name: String,
-        value: String,
-    },
+    Text { name: String, value: String },
     /// A binary file field.
     File {
         name: String,
@@ -229,9 +226,12 @@ mod tests {
 
     #[test]
     fn mp2_file_upload() {
-        let form = MultipartForm::new()
-            .text("description", "my avatar")
-            .file("avatar", "photo.png", "image/png", vec![0x89, 0x50, 0x4E, 0x47]);
+        let form = MultipartForm::new().text("description", "my avatar").file(
+            "avatar",
+            "photo.png",
+            "image/png",
+            vec![0x89, 0x50, 0x4E, 0x47],
+        );
 
         let (body, ct) = form.encode();
         let body_str = String::from_utf8_lossy(&body);
@@ -244,8 +244,11 @@ mod tests {
 
     #[test]
     fn mp3_bytes_field() {
-        let form = MultipartForm::new()
-            .bytes("binary_data", "application/octet-stream", vec![0x00, 0x01, 0x02]);
+        let form = MultipartForm::new().bytes(
+            "binary_data",
+            "application/octet-stream",
+            vec![0x00, 0x01, 0x02],
+        );
 
         let (body, _ct) = form.encode();
         assert!(!body.is_empty());

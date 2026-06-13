@@ -123,10 +123,7 @@ pub extern "C" fn catcher_free_result(result: FfiResult) {
 /// - `event_data` must be a valid pointer returned by `CString::into_raw()`, or null.
 /// - Both pointers must not have been freed already (no double-free).
 #[no_mangle]
-pub unsafe extern "C" fn catcher_free_event_data(
-    event_type: *mut c_char,
-    event_data: *mut u8,
-) {
+pub unsafe extern "C" fn catcher_free_event_data(event_type: *mut c_char, event_data: *mut u8) {
     if !event_type.is_null() {
         let _ = std::ffi::CString::from_raw(event_type);
     }

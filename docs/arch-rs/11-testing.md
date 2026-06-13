@@ -70,6 +70,35 @@ async fn decode_error_is_non_retryable() {
 - 使用 `tokio-tungstenite`（dev-only）搭建 WebSocket echo server，验证 yawc 客户端连接建立、消息收发、断开重连与断线期间消息缓冲重放。
 - 覆盖场景：正常响应、超时、5xx 重试、4xx 快速失败、连接被拒绝。
 
+### 代理与 DNS 集成测试
+
+移动端 Clash / VPN 问题必须有稳定的自动化测试，不能只依赖真实 Clash
+环境。测试分两层：
+
+| 测试 | 位置 | 是否进入 CI | 目标 |
+|------|------|-------------|------|
+| 假 SOCKS5 代理测试 | `catcher-http/tests/proxy_dns_behavior_test.rs` | 是 | HTTP 配 `socks5://` 且启用 Catcher DNS 时，代理收到的目标必须是域名 |
+| 假 SOCKS5 代理测试 | `catcher-ws/tests/proxy_dns_behavior_test.rs` | 是 | WebSocket 配 `socks5://` 且启用 Catcher DNS 时，代理收到的目标必须是域名 |
+| 假 HTTP 代理 CONNECT 测试 | `catcher-http/tests/proxy_dns_behavior_test.rs` | 是 | HTTPS 过 HTTP proxy 时，CONNECT 目标必须是域名 |
+| 假 HTTP 代理 CONNECT 测试 | `catcher-ws/tests/proxy_dns_behavior_test.rs` | 是 | WSS 过 HTTP proxy 时，CONNECT 目标必须是域名 |
+| `no_proxy` 绕过测试 | `catcher-http/tests/proxy_dns_behavior_test.rs` | 是 | HTTP 命中 `no_proxy` 时不连接代理 |
+| `no_proxy` 绕过测试 | `catcher-ws/tests/proxy_dns_behavior_test.rs` | 是 | WS 命中 `no_proxy` 时不连接代理 |
+| 真实本地代理测试 | `catcher-http/tests/local_proxy_test.rs` | 否，`#[ignore]` | 用本机 Clash / 代理确认真实连通 |
+| 真实本地代理测试 | `catcher-ws/tests/local_proxy_test.rs` | 否，`#[ignore]` | 用本机 Clash / 代理确认真实 WS 连通 |
+
+假的 SOCKS5 代理和 HTTP 代理由 `catcher-test-support` 提供。它们不访问公网，
+只读取客户端发来的代理请求。如果实现错误地在本地先解析目标域名，测试会收到 IP；
+正确行为是收到 `example.com` 和端口。
+
+这组测试的关键断言：
+
+1. `socks5://127.0.0.1:port` 在 Catcher 内部按远端 DNS 处理。
+2. 即使 `dns.mode = "catcher"` 且配置了 `host_mapping`，代理路径也不能把目标
+   域名提前解析成 IP。
+3. HTTPS / WSS 过 HTTP proxy 时，CONNECT 目标仍是域名。
+4. 命中 `no_proxy` 时，HTTP 和 WS 都不应连接代理。
+5. HTTP 和 WebSocket 行为一致。
+
 ---
 
 ## 韧性测试
@@ -170,4 +199,3 @@ Rust 核心逻辑 ──── ✅ 105 个测试
 - UniFFI scaffolding 编译
 - HTTP client 创建/destroy
 - WS client 事件回调
-
