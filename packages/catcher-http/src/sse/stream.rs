@@ -197,9 +197,9 @@ mod tests {
     async fn rs1_full_event_consumption() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(200).set_body_string(
-                "data: Hello\n\ndata: World\n\n",
-            ))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_string("data: Hello\n\ndata: World\n\n"),
+            )
             .mount(&server)
             .await;
 
@@ -213,9 +213,10 @@ mod tests {
     async fn rs2_control_line_filtering() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(200).set_body_string(
-                ": comment\ndata: A\nid: 1\n\ndata: B\n",
-            ))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(": comment\ndata: A\nid: 1\n\ndata: B\n"),
+            )
             .mount(&server)
             .await;
 
@@ -230,9 +231,7 @@ mod tests {
     async fn rs3_crlf_tolerance() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(200).set_body_string(
-                "data: X\r\n\r\n",
-            ))
+            .respond_with(ResponseTemplate::new(200).set_body_string("data: X\r\n\r\n"))
             .mount(&server)
             .await;
 
@@ -263,9 +262,7 @@ mod tests {
     async fn rs5_stream_trait_consumption() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(200).set_body_string(
-                "data: line1\ndata: line2\n",
-            ))
+            .respond_with(ResponseTemplate::new(200).set_body_string("data: line1\ndata: line2\n"))
             .mount(&server)
             .await;
 
@@ -284,9 +281,9 @@ mod tests {
     async fn rs6_event_line_passthrough() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(200).set_body_string(
-                "event: message_start\ndata: hi\n\n",
-            ))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_string("event: message_start\ndata: hi\n\n"),
+            )
             .mount(&server)
             .await;
 

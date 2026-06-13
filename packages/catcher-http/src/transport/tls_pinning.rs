@@ -4,12 +4,12 @@
 //! the SHA-256 hash of the end-entity certificate's DER bytes must match
 //! one of the configured pins.
 
-use std::sync::Arc;
-use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerifier, ServerCertVerified};
-use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
-use rustls::{Error as TlsError, SignatureScheme, DigitallySignedStruct};
-use sha2::{Digest, Sha256};
 use base64::Engine;
+use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+use rustls::{DigitallySignedStruct, Error as TlsError, SignatureScheme};
+use sha2::{Digest, Sha256};
+use std::sync::Arc;
 
 /// A certificate verifier that enforces SHA-256 pinning on top of normal validation.
 #[derive(Debug)]
@@ -134,7 +134,10 @@ mod tests {
 
     #[test]
     fn pin2_ignore_invalid_pins() {
-        let v = PinningVerifier::new(make_mock_verifier(), &["not-base64!!!".to_string(), "AAAA".to_string()]);
+        let v = PinningVerifier::new(
+            make_mock_verifier(),
+            &["not-base64!!!".to_string(), "AAAA".to_string()],
+        );
         assert_eq!(v.pins.len(), 0);
     }
 }

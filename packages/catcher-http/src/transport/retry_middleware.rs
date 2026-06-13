@@ -2,16 +2,14 @@
 //!
 //! Replaces `reqwest_retry::RetryTransientMiddleware` which has no callback mechanism.
 
-use std::sync::Weak;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Weak;
 use std::time::{Duration, SystemTime};
 
 use http::Extensions;
 use reqwest::{Request, Response};
 use reqwest_middleware::{Error, Middleware, Next, Result};
-use reqwest_retry::{
-    DefaultRetryableStrategy, Retryable, RetryableStrategy, RetryError,
-};
+use reqwest_retry::{DefaultRetryableStrategy, RetryError, Retryable, RetryableStrategy};
 use retry_policies::RetryPolicy;
 
 /// Retry middleware that notifies `MetricsCollector` on each retry attempt.
@@ -71,9 +69,9 @@ where
         let start_time = SystemTime::now();
 
         loop {
-            let duplicate_request = req.try_clone().ok_or_else(|| {
-                Error::middleware(NoCloneError)
-            })?;
+            let duplicate_request = req
+                .try_clone()
+                .ok_or_else(|| Error::middleware(NoCloneError))?;
 
             let result = next.clone().run(duplicate_request, ext).await;
 
@@ -120,7 +118,10 @@ struct NoCloneError;
 
 impl std::fmt::Display for NoCloneError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Request object is not cloneable. Are you passing a streaming body?")
+        write!(
+            f,
+            "Request object is not cloneable. Are you passing a streaming body?"
+        )
     }
 }
 

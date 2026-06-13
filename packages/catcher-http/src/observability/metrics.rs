@@ -1,7 +1,7 @@
 use catcher_core::types::observability::Priority;
 use serde::Serialize;
-use std::sync::{Arc, Weak};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::{Arc, Weak};
 
 /// 轻量级指标收集器（无外部依赖，纯 atomic 计数）
 #[derive(Default)]

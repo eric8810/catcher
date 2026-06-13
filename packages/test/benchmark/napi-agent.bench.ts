@@ -40,6 +40,7 @@ describe('napi — client creation cost', () => {
         idle_timeout_secs: 90,
       },
       dns: {
+        mode: 'catcher',
         cache_size: 512,
         cache_ttl_secs: 300,
         negative_ttl_secs: 60,

@@ -101,6 +101,7 @@ describe('NAPI DNS cache — StaleAwareDnsResolver', () => {
       connect_timeout_ms: 5000,
       response_timeout_ms: 10_000,
       dns: {
+        mode: 'catcher',
         cache_size: 1024,
         cache_ttl_secs: 600,
         negative_ttl_secs: 30,
@@ -119,6 +120,7 @@ describe('NAPI DNS cache — StaleAwareDnsResolver', () => {
       connect_timeout_ms: 5000,
       response_timeout_ms: 10_000,
       dns: {
+        mode: 'catcher',
         cacheSize: 256,
         cacheTtlSecs: 120,
         negativeTtlSecs: 10,
@@ -152,8 +154,8 @@ describe('NAPI DNS cache — StaleAwareDnsResolver', () => {
     expect(elapsed).toBeLessThan(DNS_DELAY_MS)
   })
 
-  it('default DnsConfig enables caching (no explicit dns field)', async () => {
-    // No dns config at all — uses system DNS with default cache
+  it('omitting dns config uses the transport resolver', async () => {
+    // No dns config at all: no DnsConfig is constructed.
     const client = new HttpClient(JSON.stringify({
       base_url: `http://127.0.0.1:${httpServer.port}`,
       connect_timeout_ms: 5000,

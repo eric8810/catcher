@@ -406,6 +406,7 @@ NAPI 版内置 `StaleAwareDnsResolver`，实现 RFC 8767 启发的 stale-while-r
 
 | 参数 | 默认 | 说明 |
 |------|------|------|
+| `mode` | `catcher` | `catcher` 启用 Catcher DNS；`native` 使用协议库原生解析 |
 | `cache_size` | 512 | 缓存条目数上限 |
 | `cache_ttl_secs` | 300 | 正常缓存有效期（秒） |
 | `negative_ttl_secs` | 60 | 否定缓存 TTL（秒） |
@@ -783,9 +784,10 @@ catcher_ws_network_changed(ws_handle);      // FfiResult
   避免每次通断都触发重连风暴。
 - **不调用也能恢复**：`networkChanged()` 是优化而非必需 — 不调用时
   心跳超时/keepalive 探针仍会兜底自愈，只是慢 10-30 秒。
-- **DNS 服务器不会重读**：解析器的 nameserver 列表在创建时确定
-  （系统配置仅读取一次）。`networkChanged()` 清空解析缓存，但若新网络
-  推送了不同的系统 DNS 服务器，需要自定义 `dns.nameservers` 或重建客户端。
+- **DNS 会按模式处理**：配置 `dns` 后默认走 Catcher DNS。
+  `networkChanged()` 会清空缓存并重建 Catcher DNS resolver，重新读取系统 DNS；
+  如果重建失败，旧 resolver 会继续保留并发出错误事件。显式
+  `dns.mode = "native"` 时，才走协议库原生解析。
 - **发送超时**（WS）：半开连接上的发送会阻塞到 TCP 重传超时（分钟级）。
   `send_timeout_ms`（默认 10s，0 = 不限制）保证单帧发送超时后立即判定
   断线进入重连，事件循环不会被卡住。

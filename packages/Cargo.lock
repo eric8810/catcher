@@ -369,6 +369,7 @@ dependencies = [
  "bytes",
  "catcher-core",
  "catcher-dns",
+ "catcher-test-support",
  "http",
  "napi",
  "napi-derive",
@@ -422,6 +423,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "catcher-test-support"
+version = "0.3.12"
+dependencies = [
+ "tokio",
+]
+
+[[package]]
 name = "catcher-uniffi"
 version = "0.3.12"
 dependencies = [
@@ -443,6 +451,7 @@ dependencies = [
  "base64",
  "catcher-core",
  "catcher-dns",
+ "catcher-test-support",
  "flate2",
  "futures-util",
  "http",

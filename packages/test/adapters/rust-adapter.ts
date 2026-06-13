@@ -35,6 +35,7 @@ export function createRustHttpClient(config: RustHttpConfig) {
     || config.dnsHostMapping != null
   const dnsConfig = hasDns
     ? {
+        mode: 'catcher',
         cache_size: config.dnsCacheSize ?? 512,
         cache_ttl_secs: config.dnsCacheTtl ?? 300,
         negative_ttl_secs: config.dnsNegativeTtl ?? 60,

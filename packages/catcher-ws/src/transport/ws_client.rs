@@ -384,7 +384,8 @@ pub(crate) fn build_reqwest_client(
     }
 
     if let Some(ref proxy_config) = config.proxy {
-        let mut proxy = reqwest::Proxy::all(&proxy_config.url)
+        let proxy_url = proxy_config.transport_url();
+        let mut proxy = reqwest::Proxy::all(proxy_url.as_ref())
             .map_err(|e| CatcherError::InvalidConfig(format!("invalid WS proxy URL: {e}")))?;
         if let Some(ref auth) = proxy_config.auth {
             proxy = proxy.basic_auth(&auth.username, &auth.password);
@@ -447,6 +448,7 @@ pub(crate) async fn connect_stream_with_client(
     Ok((stream, latency_ms))
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SendStatus {
     Sent,
     Failed,
@@ -476,25 +478,43 @@ where
 }
 
 /// 重连成功后重放缓存的发送命令（Close/NetworkChanged 已在缓存时被过滤）。
-async fn replay_buffered_commands(
-    stream: &mut WsStream,
-    commands: Vec<WsCommand>,
+async fn replay_buffered_commands<S>(
+    stream: &mut S,
+    commands: &[WsCommand],
     config: &WsClientConfig,
-) {
+) -> SendStatus
+where
+    S: futures_util::Sink<Frame> + Unpin,
+{
     for cmd in commands {
         match cmd {
             WsCommand::Text(t) => {
-                if let Ok(msg) = encode_text_message(&t, config) {
-                    let _ = futures_util::SinkExt::send(stream, msg).await;
+                if let Ok(msg) = encode_text_message(t, config) {
+                    let status = send_frame_with_timeout(stream, msg, config.send_timeout_ms).await;
+                    if status != SendStatus::Sent {
+                        return status;
+                    }
                 }
             }
             WsCommand::Binary(d) => {
-                if let Ok(msg) = encode_binary_message(&d, config) {
-                    let _ = futures_util::SinkExt::send(stream, msg).await;
+                if let Ok(msg) = encode_binary_message(d, config) {
+                    let status = send_frame_with_timeout(stream, msg, config.send_timeout_ms).await;
+                    if status != SendStatus::Sent {
+                        return status;
+                    }
                 }
             }
             WsCommand::Close { .. } | WsCommand::NetworkChanged => {}
         }
+    }
+    SendStatus::Sent
+}
+
+fn replay_disconnect_reason(status: SendStatus) -> Option<&'static str> {
+    match status {
+        SendStatus::Sent => None,
+        SendStatus::Failed => Some("replay send failed"),
+        SendStatus::TimedOut => Some("replay send timeout"),
     }
 }
 
@@ -883,14 +903,22 @@ async fn connection_manager(
             });
             match connect_any_endpoint(config, &reqwest_client).await {
                 Ok((url, mut stream, lat)) => {
-                    replay_buffered_commands(&mut stream, buffered_commands, config).await;
-                    current_url = url;
-                    stream_opt = Some(stream);
-                    first_latency = lat;
-                    if let Some(ref mut mgr) = reconnect_mgr {
-                        mgr.on_connected();
+                    let replay_status =
+                        replay_buffered_commands(&mut stream, &buffered_commands, config).await;
+                    if let Some(reason) = replay_disconnect_reason(replay_status) {
+                        let _ = event_tx.send(WsEvent::Disconnected {
+                            code: 1006,
+                            reason: reason.into(),
+                        });
+                    } else {
+                        current_url = url;
+                        stream_opt = Some(stream);
+                        first_latency = lat;
+                        if let Some(ref mut mgr) = reconnect_mgr {
+                            mgr.on_connected();
+                        }
+                        continue;
                     }
-                    continue;
                 }
                 Err(e) => {
                     // 无退避重连兜底时这是终态：补一个 Error 事件，
@@ -993,7 +1021,16 @@ async fn connection_manager(
                 };
 
                 match connect_result {
-                    Ok((stream, lat)) => {
+                    Ok((mut stream, lat)) => {
+                        let replay_status =
+                            replay_buffered_commands(&mut stream, &buffered_commands, config).await;
+                        if let Some(reason) = replay_disconnect_reason(replay_status) {
+                            let _ = event_tx.send(WsEvent::Disconnected {
+                                code: 1006,
+                                reason: reason.into(),
+                            });
+                            continue;
+                        }
                         stream_opt = Some(stream);
                         reconnect_latency_ms = lat;
                         mgr.on_connected();
@@ -1005,13 +1042,6 @@ async fn connection_manager(
             }
 
             if reconnected {
-                // 重连后回放缓存的命令（Close 已被过滤，不会到达这里）
-                if !buffered_commands.is_empty() {
-                    if let Some(mut stream) = stream_opt.take() {
-                        replay_buffered_commands(&mut stream, buffered_commands, config).await;
-                        stream_opt = Some(stream);
-                    }
-                }
                 // 更新延迟供下一轮 Connected 事件使用
                 first_latency = reconnect_latency_ms;
                 continue; // 回到外层循环 → 新的 select loop
@@ -1099,6 +1129,7 @@ mod tests {
             "protocols": ["graphql-ws"],
             "msgpack": true,
             "dns": {
+                "mode": "catcher",
                 "cache_size": 128,
                 "cache_ttl_secs": 30,
                 "host_mapping": {"example.com": "127.0.0.1"}
@@ -1130,6 +1161,7 @@ mod tests {
         let config = WsClientConfig {
             urls: vec![format!("ws://ws.test:{port}")],
             dns: Some(DnsConfig {
+                mode: DnsMode::Catcher,
                 host_mapping: [("ws.test".to_string(), "127.0.0.1".to_string())]
                     .into_iter()
                     .collect(),
@@ -1207,8 +1239,7 @@ mod tests {
     async fn send_frame_times_out_on_stuck_sink() {
         let mut sink = PendingSink;
         let start = Instant::now();
-        let status =
-            send_frame_with_timeout(&mut sink, Frame::text(b"x".to_vec()), 50).await;
+        let status = send_frame_with_timeout(&mut sink, Frame::text(b"x".to_vec()), 50).await;
         assert!(matches!(status, SendStatus::TimedOut));
         assert!(start.elapsed() < Duration::from_secs(2));
     }
@@ -1217,12 +1248,28 @@ mod tests {
     #[tokio::test]
     async fn send_frame_succeeds_on_ready_sink() {
         let mut sink = futures_util::sink::drain();
-        let status =
-            send_frame_with_timeout(&mut sink, Frame::text(b"a".to_vec()), 1_000).await;
+        let status = send_frame_with_timeout(&mut sink, Frame::text(b"a".to_vec()), 1_000).await;
         assert!(matches!(status, SendStatus::Sent));
 
         let status = send_frame_with_timeout(&mut sink, Frame::text(b"b".to_vec()), 0).await;
         assert!(matches!(status, SendStatus::Sent));
+    }
+
+    /// 重放缓存消息时也必须遵守 send_timeout_ms。
+    #[tokio::test]
+    async fn replay_buffered_commands_times_out_on_stuck_sink() {
+        let mut sink = PendingSink;
+        let config = WsClientConfig {
+            send_timeout_ms: 50,
+            ..Default::default()
+        };
+        let commands = vec![WsCommand::Text("hello".to_string())];
+
+        let start = Instant::now();
+        let status = replay_buffered_commands(&mut sink, &commands, &config).await;
+
+        assert!(matches!(status, SendStatus::TimedOut));
+        assert!(start.elapsed() < Duration::from_secs(2));
     }
 
     /// network_changed() 应立即断开并重连，事件序列：
@@ -1497,7 +1544,10 @@ mod tests {
                 break;
             }
         }
-        assert!(got_connected, "should reconnect even without reconnect config");
+        assert!(
+            got_connected,
+            "should reconnect even without reconnect config"
+        );
 
         let _ = handle.close(1000, "done");
         let _ = server.await;

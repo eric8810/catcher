@@ -250,6 +250,40 @@ use crate::error::CatcherError;
 pub fn build_stale_aware_resolver(config: &DnsConfig) -> Result<Arc<StaleAwareDnsResolver>, CatcherError>
 ```
 
+## 代理与 DNS 的配合
+
+HTTP 和 WebSocket 使用同一套网络配置：`proxy`、`dns`、`tls` 和
+`network_path_id` 的语义必须一致。
+
+当调用方传入 `proxy.url = "socks5://..."` 时，Catcher 内部必须按
+`socks5h://...` 交给 reqwest。原因是：
+
+1. `socks5://` 会让本地先解析目标域名。
+2. Clash fake-ip、VPN 分流、按域名规则转发时，目标域名不能提前变成 IP。
+3. 代理路径中，业务目标域名应交给代理解析；Catcher DNS 仍可用于非代理路径、
+   host mapping、缓存和自定义 nameserver。
+
+因此，以下行为是传输层契约：
+
+| 场景 | 期望行为 |
+|------|----------|
+| `dns` 未配置 | 不注入 Catcher DNS，使用 reqwest 默认解析路径 |
+| `dns: { cache_ttl_secs: 300 }` | 默认仍是 Catcher DNS |
+| `dns.mode = "native"` | 显式使用 reqwest 原生解析路径 |
+| `proxy.url = "socks5://..."` | 内部按 `socks5h://...` 使用，让代理解析目标域名 |
+| `proxy.url = "socks5h://..."` | 原样使用 |
+| 代理和 Catcher DNS 同时配置 | 代理连接目标不能被 Catcher DNS 提前解析成 IP |
+
+该契约必须由自动化测试锁住：
+
+- `catcher-test-support` 提供假的 SOCKS5 代理，记录客户端发来的 CONNECT 目标。
+- `catcher-http/tests/proxy_dns_behavior_test.rs` 验证 HTTP 在启用 Catcher DNS
+  时，`socks5://` 仍把 `example.com` 交给代理；HTTPS 走 HTTP proxy
+  时，CONNECT 目标仍是 `example.com:443`；命中 `no_proxy` 时不连接代理。
+- `catcher-ws/tests/proxy_dns_behavior_test.rs` 验证 WebSocket 同样遵守该行为。
+- `catcher-http/tests/local_proxy_test.rs` 和 `catcher-ws/tests/local_proxy_test.rs`
+  保留为 `#[ignore]`，用于发版前手动连接真实 Clash 或本地代理。
+
 ---
 
 ## 待实现：Per-request Cancel（N-03）

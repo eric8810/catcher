@@ -1,6 +1,6 @@
-use catcher_core::{CatcherError, ErrorCategory};
-use catcher_core::types::resilience::{BackoffKind, RetryConfig};
 use backon::{ConstantBuilder, ExponentialBuilder, Retryable};
+use catcher_core::types::resilience::{BackoffKind, RetryConfig};
+use catcher_core::{CatcherError, ErrorCategory};
 use std::cell::Cell;
 use std::time::Duration;
 

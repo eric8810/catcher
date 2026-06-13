@@ -22,18 +22,14 @@ use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
 use catcher_http::{
-    types::http::{HttpClientConfig, HttpMethod, HttpRequest},
+    observability::NetworkQualityEvaluator,
     sse::client::SseClient,
     sse::SseStream,
-    observability::NetworkQualityEvaluator,
+    types::http::{HttpClientConfig, HttpMethod, HttpRequest},
     HttpTransport,
 };
 
-use catcher_ws::{
-    transport::ws_client::WsTransport,
-    types::ws::WsClientConfig,
-    WsEvent, WsHandle,
-};
+use catcher_ws::{transport::ws_client::WsTransport, types::ws::WsClientConfig, WsEvent, WsHandle};
 
 use catcher_core::types::sse::{SseClientConfig, SseMethod};
 use catcher_core::CatcherError as CoreCatcherError;
@@ -81,9 +77,7 @@ fn runtime() -> &'static tokio::runtime::Runtime {
 
 fn parse_headers_json(headers_json: Option<String>) -> HashMap<String, String> {
     match headers_json {
-        Some(s) if !s.is_empty() => {
-            serde_json::from_str(&s).unwrap_or_default()
-        }
+        Some(s) if !s.is_empty() => serde_json::from_str(&s).unwrap_or_default(),
         _ => HashMap::new(),
     }
 }
@@ -146,10 +140,10 @@ impl HttpClient {
     /// Create from JSON config string.
     #[uniffi::constructor]
     pub fn new(config_json: String) -> Result<Self, CatcherError> {
-        let config: HttpClientConfig = serde_json::from_str(&config_json)
-            .map_err(|e| CatcherError::Config(e.to_string()))?;
-        let inner = Arc::new(HttpTransport::new(config)
-            .map_err(|e| CatcherError::Network(e.to_string()))?);
+        let config: HttpClientConfig =
+            serde_json::from_str(&config_json).map_err(|e| CatcherError::Config(e.to_string()))?;
+        let inner =
+            Arc::new(HttpTransport::new(config).map_err(|e| CatcherError::Network(e.to_string()))?);
         Ok(Self { inner })
     }
 
@@ -165,17 +159,20 @@ impl HttpClient {
         let headers = parse_headers_json(headers_json);
         let timeout = timeout_ms.map(|t| t as u64);
         let handle = block_on_aux_thread(async move {
-            inner.execute(HttpRequest {
-                method: HttpMethod::GET,
-                url,
-                headers,
-                body: None,
-                content_type: None,
-                timeout_ms: timeout,
-                ..Default::default()
-            }).await
+            inner
+                .execute(HttpRequest {
+                    method: HttpMethod::GET,
+                    url,
+                    headers,
+                    body: None,
+                    content_type: None,
+                    timeout_ms: timeout,
+                    ..Default::default()
+                })
+                .await
         });
-        let resp = handle.join()
+        let resp = handle
+            .join()
             .map_err(|_| CatcherError::Network("thread panicked".into()))?
             .map_err(|e| CatcherError::Network(e.to_string()))?;
         Ok(http_response_to_dto(resp))
@@ -195,17 +192,20 @@ impl HttpClient {
         let headers = parse_headers_json(headers_json);
         let timeout = timeout_ms.map(|t| t as u64);
         let handle = block_on_aux_thread(async move {
-            inner.execute(HttpRequest {
-                method: HttpMethod::POST,
-                url,
-                headers,
-                body: Some(body),
-                content_type,
-                timeout_ms: timeout,
-                ..Default::default()
-            }).await
+            inner
+                .execute(HttpRequest {
+                    method: HttpMethod::POST,
+                    url,
+                    headers,
+                    body: Some(body),
+                    content_type,
+                    timeout_ms: timeout,
+                    ..Default::default()
+                })
+                .await
         });
-        let resp = handle.join()
+        let resp = handle
+            .join()
             .map_err(|_| CatcherError::Network("thread panicked".into()))?
             .map_err(|e| CatcherError::Network(e.to_string()))?;
         Ok(http_response_to_dto(resp))
@@ -225,17 +225,20 @@ impl HttpClient {
         let headers = parse_headers_json(headers_json);
         let timeout = timeout_ms.map(|t| t as u64);
         let handle = block_on_aux_thread(async move {
-            inner.execute(HttpRequest {
-                method: HttpMethod::PUT,
-                url,
-                headers,
-                body: Some(body),
-                content_type,
-                timeout_ms: timeout,
-                ..Default::default()
-            }).await
+            inner
+                .execute(HttpRequest {
+                    method: HttpMethod::PUT,
+                    url,
+                    headers,
+                    body: Some(body),
+                    content_type,
+                    timeout_ms: timeout,
+                    ..Default::default()
+                })
+                .await
         });
-        let resp = handle.join()
+        let resp = handle
+            .join()
             .map_err(|_| CatcherError::Network("thread panicked".into()))?
             .map_err(|e| CatcherError::Network(e.to_string()))?;
         Ok(http_response_to_dto(resp))
@@ -253,17 +256,20 @@ impl HttpClient {
         let headers = parse_headers_json(headers_json);
         let timeout = timeout_ms.map(|t| t as u64);
         let handle = block_on_aux_thread(async move {
-            inner.execute(HttpRequest {
-                method: HttpMethod::DELETE,
-                url,
-                headers,
-                body: None,
-                content_type: None,
-                timeout_ms: timeout,
-                ..Default::default()
-            }).await
+            inner
+                .execute(HttpRequest {
+                    method: HttpMethod::DELETE,
+                    url,
+                    headers,
+                    body: None,
+                    content_type: None,
+                    timeout_ms: timeout,
+                    ..Default::default()
+                })
+                .await
         });
-        let resp = handle.join()
+        let resp = handle
+            .join()
             .map_err(|_| CatcherError::Network("thread panicked".into()))?
             .map_err(|e| CatcherError::Network(e.to_string()))?;
         Ok(http_response_to_dto(resp))
@@ -283,17 +289,20 @@ impl HttpClient {
         let headers = parse_headers_json(headers_json);
         let timeout = timeout_ms.map(|t| t as u64);
         let handle = block_on_aux_thread(async move {
-            inner.execute(HttpRequest {
-                method: HttpMethod::PATCH,
-                url,
-                headers,
-                body: Some(body),
-                content_type,
-                timeout_ms: timeout,
-                ..Default::default()
-            }).await
+            inner
+                .execute(HttpRequest {
+                    method: HttpMethod::PATCH,
+                    url,
+                    headers,
+                    body: Some(body),
+                    content_type,
+                    timeout_ms: timeout,
+                    ..Default::default()
+                })
+                .await
         });
-        let resp = handle.join()
+        let resp = handle
+            .join()
             .map_err(|_| CatcherError::Network("thread panicked".into()))?
             .map_err(|e| CatcherError::Network(e.to_string()))?;
         Ok(http_response_to_dto(resp))
@@ -335,14 +344,17 @@ impl HttpClient {
                         events.push(serde_json::json!({"type":"data","data":line}).to_string());
                     }
                     Err(e) => {
-                        events.push(serde_json::json!({"type":"error","data":e.to_string()}).to_string());
+                        events.push(
+                            serde_json::json!({"type":"error","data":e.to_string()}).to_string(),
+                        );
                     }
                 }
             }
             Ok::<_, CatcherError>(events)
         });
 
-        handle.join()
+        handle
+            .join()
             .map_err(|_| CatcherError::Network("thread panicked".into()))?
             .map_err(|e| CatcherError::Network(e.to_string()))
     }
@@ -397,7 +409,9 @@ impl From<WsEvent> for WsEventDto {
         match event {
             WsEvent::Connected { url, latency_ms } => WsEventDto::Connected { url, latency_ms },
             WsEvent::Disconnected { code, reason } => WsEventDto::Disconnected { code, reason },
-            WsEvent::Reconnecting { attempt, delay_ms } => WsEventDto::Reconnecting { attempt, delay_ms },
+            WsEvent::Reconnecting { attempt, delay_ms } => {
+                WsEventDto::Reconnecting { attempt, delay_ms }
+            }
             WsEvent::Message { data, is_binary } => WsEventDto::Message { data, is_binary },
             WsEvent::Error { message } => WsEventDto::Error { message },
             WsEvent::HeartbeatRtt { rtt_ms } => WsEventDto::HeartbeatRtt { rtt_ms },
@@ -431,8 +445,8 @@ impl WsClient {
         config_json: String,
         observer: Box<dyn WsEventObserver>,
     ) -> Result<Self, CatcherError> {
-        let config: WsClientConfig = serde_json::from_str(&config_json)
-            .map_err(|e| CatcherError::Config(e.to_string()))?;
+        let config: WsClientConfig =
+            serde_json::from_str(&config_json).map_err(|e| CatcherError::Config(e.to_string()))?;
 
         let urls = config.urls.clone();
         if urls.is_empty() {
@@ -440,10 +454,9 @@ impl WsClient {
         }
 
         // Multi-endpoint racing, reconnect, heartbeat handled by WsTransport::connect
-        let handle = block_on_aux_thread(async move {
-            WsTransport::connect(&config).await
-        });
-        let (ws_handle, mut rx) = handle.join()
+        let handle = block_on_aux_thread(async move { WsTransport::connect(&config).await });
+        let (ws_handle, mut rx) = handle
+            .join()
             .map_err(|_| CatcherError::Network("connect thread panicked".into()))?
             .map_err(|e| CatcherError::Network(e.to_string()))?;
 
@@ -543,8 +556,8 @@ impl SseClientHandle {
         config_json: String,
         observer: Box<dyn SseEventObserver>,
     ) -> Result<Self, CatcherError> {
-        let config: SseClientConfig = serde_json::from_str(&config_json)
-            .map_err(|e| CatcherError::Config(e.to_string()))?;
+        let config: SseClientConfig =
+            serde_json::from_str(&config_json).map_err(|e| CatcherError::Config(e.to_string()))?;
 
         let handle = block_on_aux_thread(async move {
             let mut client = SseClient::connect(config).await?;
@@ -568,14 +581,17 @@ impl SseClientHandle {
             Ok::<_, CatcherError>(())
         });
 
-        handle.join()
+        handle
+            .join()
             .map_err(|_| CatcherError::Network("SSE connect thread panicked".into()))?
             .map_err(|e| CatcherError::Network(e.to_string()))?;
 
         // Spawn an empty task to keep the struct alive.
         // The real work is done synchronously above in block_on_aux_thread.
         let event_task = runtime().spawn(async {});
-        Ok(Self { _event_task: event_task })
+        Ok(Self {
+            _event_task: event_task,
+        })
     }
 }
 
@@ -588,17 +604,15 @@ impl SseClientHandle {
 pub fn catcher_pack(json_input: String) -> Result<Vec<u8>, CatcherError> {
     let value: serde_json::Value = serde_json::from_str(&json_input)
         .map_err(|e| CatcherError::Config(format!("invalid JSON: {e}")))?;
-    catcher_ws::codec::pack(&value)
-        .map_err(|e| CatcherError::Config(e.to_string()))
+    catcher_ws::codec::pack(&value).map_err(|e| CatcherError::Config(e.to_string()))
 }
 
 /// Unpack msgpack binary to a JSON string
 #[uniffi::export]
 pub fn catcher_unpack(data: Vec<u8>) -> Result<String, CatcherError> {
-    let value: serde_json::Value = catcher_ws::codec::unpack_value(&data)
-        .map_err(|e| CatcherError::Config(e.to_string()))?;
-    serde_json::to_string(&value)
-        .map_err(|e| CatcherError::Config(e.to_string()))
+    let value: serde_json::Value =
+        catcher_ws::codec::unpack_value(&data).map_err(|e| CatcherError::Config(e.to_string()))?;
+    serde_json::to_string(&value).map_err(|e| CatcherError::Config(e.to_string()))
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -606,13 +620,12 @@ pub fn catcher_unpack(data: Vec<u8>) -> Result<String, CatcherError> {
 // ═══════════════════════════════════════════════════════════════
 
 // 使用 tokio::sync::Mutex 以便安全地跨 .await 持锁，消除 take/put 竞态。
-static EVALUATOR: std::sync::OnceLock<Arc<tokio::sync::Mutex<NetworkQualityEvaluator>>> = std::sync::OnceLock::new();
+static EVALUATOR: std::sync::OnceLock<Arc<tokio::sync::Mutex<NetworkQualityEvaluator>>> =
+    std::sync::OnceLock::new();
 
 fn evaluator() -> Arc<tokio::sync::Mutex<NetworkQualityEvaluator>> {
     EVALUATOR
-        .get_or_init(|| {
-            Arc::new(tokio::sync::Mutex::new(NetworkQualityEvaluator::new(50)))
-        })
+        .get_or_init(|| Arc::new(tokio::sync::Mutex::new(NetworkQualityEvaluator::new(50))))
         .clone()
 }
 
@@ -641,7 +654,8 @@ pub fn evaluate_quality(host: String) -> Result<String, CatcherError> {
         }
     });
 
-    handle.join()
+    handle
+        .join()
         .map_err(|_| CatcherError::Network("quality thread panicked".into()))?
 }
 

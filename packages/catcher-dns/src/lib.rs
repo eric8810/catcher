@@ -603,10 +603,24 @@ mod tests {
     }
 
     #[test]
+    fn dns_config_can_use_catcher_mode() {
+        let config: DnsConfig = serde_json::from_str(r#"{"mode":"catcher"}"#).unwrap();
+        assert_eq!(config.mode, DnsMode::Catcher);
+        assert!(config.use_catcher_resolver());
+    }
+
+    #[test]
     fn dns_config_can_use_native_mode() {
         let config: DnsConfig = serde_json::from_str(r#"{"mode":"native"}"#).unwrap();
         assert_eq!(config.mode, DnsMode::Native);
         assert!(!config.use_catcher_resolver());
+    }
+
+    #[test]
+    fn partial_dns_config_keeps_catcher_mode() {
+        let config: DnsConfig = serde_json::from_str(r#"{"cache_ttl_secs":300}"#).unwrap();
+        assert_eq!(config.mode, DnsMode::Catcher);
+        assert!(config.use_catcher_resolver());
     }
 
     #[test]
@@ -782,6 +796,7 @@ mod tests {
     #[test]
     fn resolver_builds_with_nameservers() {
         let config = DnsConfig {
+            mode: DnsMode::Catcher,
             nameservers: vec!["8.8.8.8:53".to_string()],
             ..Default::default()
         };
@@ -793,6 +808,7 @@ mod tests {
     #[test]
     fn resolver_rejects_invalid_nameserver() {
         let config = DnsConfig {
+            mode: DnsMode::Catcher,
             nameservers: vec!["not-an-address".to_string()],
             ..Default::default()
         };

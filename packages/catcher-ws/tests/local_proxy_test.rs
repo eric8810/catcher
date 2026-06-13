@@ -49,3 +49,11 @@ async fn local_socks5h_proxy_connects_websocket() {
         .unwrap_or_else(|_| "socks5h://127.0.0.1:7890".to_string());
     assert_ws_via_proxy(proxy_url).await;
 }
+
+#[tokio::test]
+#[ignore = "requires a local SOCKS proxy, for example CATCHER_TEST_SOCKS5_PROXY=socks5://127.0.0.1:7890"]
+async fn local_socks5_proxy_connects_websocket() {
+    let proxy_url = std::env::var("CATCHER_TEST_SOCKS5_PROXY")
+        .unwrap_or_else(|_| "socks5://127.0.0.1:7890".to_string());
+    assert_ws_via_proxy(proxy_url).await;
+}

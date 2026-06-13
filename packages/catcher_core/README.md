@@ -40,6 +40,7 @@ void main() async {
     retry: RetryConfig(maxAttempts: 3, backoff: 'Fixed'),
     pool: PoolConfig(keepAlive: true, maxIdlePerHost: 10),
     dns: DnsConfig(
+      mode: 'catcher',
       cacheSize: 512,
       cacheTtlSecs: 300,
       staleTtlSecs: 3600,
@@ -73,7 +74,6 @@ void main() async {
     urls: ['wss://echo.example.com'],
     reconnect: WsReconnectConfig(initialDelayMs: 1000, maxDelayMs: 30000),
     heartbeat: WsHeartbeatConfig(intervalMs: 30000, adaptive: true),
-    dns: DnsConfig(cacheTtlSecs: 300, staleOnError: true),
     msgpack: true,
   ));
 
@@ -115,6 +115,7 @@ final unpacked = unpack(packed);                   // Map<String, dynamic>
 final config = HttpClientConfig(
   baseUrl: 'https://api.example.com',
   dns: DnsConfig(
+    mode: 'catcher',
     cacheSize: 512,
     cacheTtlSecs: 300,
     negativeTtlSecs: 60,
@@ -135,7 +136,7 @@ final config = HttpClientConfig(
 |------|-------------|
 | `CatcherHttpClient` | HTTP client wrapper (get, post, put, delete, patch) |
 | `HttpClientConfig` | Base URL, timeouts, pool, retry, circuit breaker, `dns`, `msgpack` |
-| `DnsConfig` | cacheSize, cacheTtlSecs, negativeTtlSecs, staleTtlSecs, staleOnError, nameservers, hostMapping |
+| `DnsConfig` | mode, cacheSize, cacheTtlSecs, negativeTtlSecs, staleTtlSecs, staleOnError, nameservers, hostMapping |
 | `HttpResponse` | status, headers, body bytes, elapsedMs, bodyAsString |
 | `RetryConfig` | maxAttempts, backoff, jitter |
 | `CircuitBreakerConfig` | failureThreshold, resetTimeoutMs |

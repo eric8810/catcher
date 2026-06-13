@@ -22,9 +22,7 @@ static EVALUATOR: std::sync::OnceLock<SharedEvaluator> = std::sync::OnceLock::ne
 
 fn evaluator() -> SharedEvaluator {
     EVALUATOR
-        .get_or_init(|| {
-            Arc::new(tokio::sync::Mutex::new(NetworkQualityEvaluator::new(50)))
-        })
+        .get_or_init(|| Arc::new(tokio::sync::Mutex::new(NetworkQualityEvaluator::new(50))))
         .clone()
 }
 
@@ -136,7 +134,10 @@ pub unsafe extern "C" fn catcher_quality_subscribe(
     let host_str = ffi_string_to_string(host, "https://www.example.com");
     let ud = user_data as usize;
     let sub = crate::observability::network_quality::QualitySubscription::start(
-        host_str, interval_ms as u64, callback, ud,
+        host_str,
+        interval_ms as u64,
+        callback,
+        ud,
     );
     let boxed = Box::new(sub);
     let ptr = Box::into_raw(boxed) as *mut c_void;
@@ -146,7 +147,9 @@ pub unsafe extern "C" fn catcher_quality_subscribe(
 
 #[no_mangle]
 pub unsafe extern "C" fn catcher_quality_unsubscribe(sub_handle: *mut c_void) {
-    if sub_handle.is_null() { return; }
+    if sub_handle.is_null() {
+        return;
+    }
     // 先从订阅表移除，仅当句柄确实在表中时才回收 —
     // 重复 unsubscribe 或传入无效句柄都安全返回，避免 double-free/UAF
     {
@@ -156,6 +159,7 @@ pub unsafe extern "C" fn catcher_quality_unsubscribe(sub_handle: *mut c_void) {
         };
         subs.remove(pos);
     }
-    let sub: Box<crate::observability::network_quality::QualitySubscription> = Box::from_raw(sub_handle as *mut _);
+    let sub: Box<crate::observability::network_quality::QualitySubscription> =
+        Box::from_raw(sub_handle as *mut _);
     sub.unsubscribe();
 }

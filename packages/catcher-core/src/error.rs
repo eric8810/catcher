@@ -238,12 +238,24 @@ mod tests {
             CatcherError::ConnectionTimeout(1000),
             CatcherError::RequestTimeout(5000),
             CatcherError::TlsError("test".into()),
-            CatcherError::DnsError { host: "h".into(), reason: "r".into() },
-            CatcherError::HttpError { status: 500, body: "b".into() },
+            CatcherError::DnsError {
+                host: "h".into(),
+                reason: "r".into(),
+            },
+            CatcherError::HttpError {
+                status: 500,
+                body: "b".into(),
+            },
             CatcherError::WsHandshakeTimeout(3000),
-            CatcherError::WsDisconnected { code: 1000, reason: "normal".into() },
+            CatcherError::WsDisconnected {
+                code: 1000,
+                reason: "normal".into(),
+            },
             CatcherError::WsAllEndpointsFailed { count: 1 },
-            CatcherError::RetryExhausted { attempts: 3, last_error: "e".into() },
+            CatcherError::RetryExhausted {
+                attempts: 3,
+                last_error: "e".into(),
+            },
             CatcherError::CircuitBreakerOpen,
             CatcherError::QueueTimeout(1000),
             CatcherError::EncodeError("e".into()),
@@ -254,7 +266,11 @@ mod tests {
         ];
         for err in &errors {
             let s = err.to_string();
-            assert!(!s.is_empty(), "Display should produce non-empty string for {:?}", err);
+            assert!(
+                !s.is_empty(),
+                "Display should produce non-empty string for {:?}",
+                err
+            );
         }
     }
 }

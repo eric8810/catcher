@@ -1,8 +1,9 @@
 //! WebSocket C ABI — create / send / close / destroy
 #![allow(clippy::missing_safety_doc)]
 
+use std::collections::HashSet;
 use std::ffi::{c_char, c_void, CStr, CString};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock, RwLock};
 
 use crate::transport::ws_client::{WsHandle, WsTransport};
 use crate::types::ws::WsClientConfig;
@@ -10,6 +11,32 @@ use crate::types::ws::WsClientConfig;
 use catcher_core::{EventCallback, FfiResult, FfiString, HandleRegistry};
 
 static WS_REGISTRY: HandleRegistry<WsHandle> = HandleRegistry::new();
+
+fn cancelled_ws_ids() -> &'static RwLock<HashSet<usize>> {
+    static CANCELLED: OnceLock<RwLock<HashSet<usize>>> = OnceLock::new();
+    CANCELLED.get_or_init(|| RwLock::new(HashSet::new()))
+}
+
+fn mark_ws_cancelled(id: usize) {
+    let lock = cancelled_ws_ids();
+    match lock.write() {
+        Ok(mut ids) => {
+            ids.insert(id);
+        }
+        Err(poisoned) => {
+            let mut ids = poisoned.into_inner();
+            ids.insert(id);
+        }
+    }
+}
+
+fn is_ws_cancelled(id: usize) -> bool {
+    let lock = cancelled_ws_ids();
+    match lock.read() {
+        Ok(ids) => ids.contains(&id),
+        Err(poisoned) => poisoned.into_inner().contains(&id),
+    }
+}
 
 /// Global tokio runtime for WS async operations (spawning, etc.)
 fn runtime() -> &'static tokio::runtime::Runtime {
@@ -46,6 +73,25 @@ fn invoke_event_callback(cb: EventCallback, event_name: &str, json: String, user
     );
 }
 
+fn invoke_event_callback_if_active(
+    id: usize,
+    cb: EventCallback,
+    event_name: &str,
+    json: String,
+    user_data: usize,
+) -> bool {
+    let lock = cancelled_ws_ids();
+    let ids = match lock.read() {
+        Ok(ids) => ids,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if ids.contains(&id) {
+        return false;
+    }
+    invoke_event_callback(cb, event_name, json, user_data);
+    true
+}
+
 /// 创建 WS 客户端。返回的句柄是注册表 id 直接编码为指针值（id ≥ 1，
 /// 与 null 不冲突），**不指向任何内存** — destroy 之后用旧句柄调用任何
 /// API 都安全返回 "handle not found"，而不是 use-after-free。
@@ -77,16 +123,23 @@ pub unsafe extern "C" fn catcher_ws_create(
     runtime().spawn(async move {
         match WsTransport::connect(&config).await {
             Ok((handle, mut rx)) => {
+                if is_ws_cancelled(id) {
+                    let _ = handle.close(1000, "destroy");
+                    return;
+                }
                 WS_REGISTRY.insert_with_id(id, Arc::new(handle));
 
                 while let Some(event) = rx.recv().await {
                     let json = event.to_ffi_json();
-                    invoke_event_callback(cb, "ws_event", json, ud);
+                    if !invoke_event_callback_if_active(id, cb, "ws_event", json, ud) {
+                        break;
+                    }
                 }
+                WS_REGISTRY.remove(id);
             }
             Err(e) => {
                 let json = error_json(&e.to_string());
-                invoke_event_callback(cb, "ws_error", json, ud);
+                let _ = invoke_event_callback_if_active(id, cb, "ws_error", json, ud);
             }
         }
     });
@@ -171,7 +224,10 @@ pub unsafe extern "C" fn catcher_ws_destroy(handle: *mut c_void) {
         return;
     }
     let id = handle as usize;
-    WS_REGISTRY.remove(id);
+    mark_ws_cancelled(id);
+    if let Some(h) = WS_REGISTRY.remove(id) {
+        let _ = h.close(1000, "destroy");
+    }
 }
 
 // Note: catcher_free_result is provided by catcher-core (ffi_types.rs).

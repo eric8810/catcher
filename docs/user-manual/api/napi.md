@@ -88,6 +88,7 @@ const client = new HttpClient({
     half_open_max_requests: 5,
   },
   dns: {
+    mode: 'catcher',
     cache_size: 512,
     cache_ttl_secs: 300,
     negative_ttl_secs: 60,
@@ -124,6 +125,7 @@ const client = new HttpClient({
 | `circuit_breaker.half_open_max_requests` | `number` | `5` | HALF_OPEN 最大放行数 |
 | `tls` | `TlsConfig` | — | TLS 配置（14 字段） |
 | `dns` | `DnsConfig` | — | DNS 配置 |
+| `dns.mode` | `'catcher' \| 'native'` | `'catcher'` | `native` 使用协议库原生解析 |
 | `dns.cache_size` | `number` | `512` | DNS 缓存条目数上限 |
 | `dns.cache_ttl_secs` | `number` | `300` | DNS 缓存 TTL（秒） |
 | `dns.negative_ttl_secs` | `number` | `60` | 否定缓存 TTL（秒） |

@@ -32,7 +32,6 @@ const client = new HttpClient({
   response_timeout_ms: 30000,
   retry: { max_attempts: 3, backoff: 'Fixed' },
   circuit_breaker: { failure_threshold: 5, reset_timeout_ms: 30000 },
-  dns: { cache_ttl_secs: 300, stale_on_error: true },
   msgpack: true,
 })
 
@@ -206,10 +205,14 @@ contextBridge.exposeInMainWorld('api', {
 
 ## 四、DNS 缓存
 
-NAPI 版内置 StaleAwareDnsResolver，默认启用。无需额外配置即可获得 DNS 缓存。
+配置 `dns` 后默认接入 Catcher DNS，启用 DNS 缓存、旧缓存兜底、
+自定义 nameserver 和 host mapping。代理场景下，目标域名交给代理解析，
+Catcher DNS 不会提前把目标域名改成 IP。只有显式配置
+`dns.mode = 'native'` 时，才使用底层协议库原生解析。
 
 | 配置 | 说明 | 默认值 |
 |------|------|--------|
+| `dns.mode` | `catcher` 启用 Catcher DNS；`native` 原生解析 | `catcher` |
 | `dns.cache_ttl_secs` | 缓存有效期 | 300 |
 | `dns.stale_ttl_secs` | 过期后仍可用的宽限期 | 3600 |
 | `dns.stale_on_error` | DNS 失败时用旧缓存兜底 | true |

@@ -19,12 +19,15 @@ fn response_to_json(resp: &crate::types::http::HttpResponse) -> String {
         "headers": resp.headers,
         "body_base64": body_b64,
         "elapsed_ms": resp.elapsed_ms,
-    }).to_string()
+    })
+    .to_string()
 }
 
 /// 将 HTTP 执行结果序列化为 FFI JSON。
 /// `CatcherError::HttpError`（4xx/5xx）转为正常 response JSON，调用方可读取 status code。
-fn http_result_to_json(result: Result<crate::types::http::HttpResponse, catcher_core::CatcherError>) -> String {
+fn http_result_to_json(
+    result: Result<crate::types::http::HttpResponse, catcher_core::CatcherError>,
+) -> String {
     match result {
         Ok(resp) => response_to_json(&resp),
         Err(catcher_core::CatcherError::HttpError { status, body }) => {
@@ -35,7 +38,8 @@ fn http_result_to_json(result: Result<crate::types::http::HttpResponse, catcher_
                 "headers": {},
                 "body_base64": body_b64,
                 "elapsed_ms": 0u64,
-            }).to_string()
+            })
+            .to_string()
         }
         Err(e) => error_json(&e.to_string()),
     }
@@ -58,8 +62,11 @@ fn ffi_string_to_string(s: FfiString, default: &str) -> String {
 }
 
 fn read_body_bytes(body: *const u8, body_len: usize) -> Vec<u8> {
-    if body.is_null() || body_len == 0 { Vec::new() }
-    else { unsafe { std::slice::from_raw_parts(body, body_len).to_vec() } }
+    if body.is_null() || body_len == 0 {
+        Vec::new()
+    } else {
+        unsafe { std::slice::from_raw_parts(body, body_len).to_vec() }
+    }
 }
 
 fn error_json(msg: &str) -> String {
@@ -67,24 +74,31 @@ fn error_json(msg: &str) -> String {
 }
 
 fn parse_headers_json(headers_json: *const c_char) -> HashMap<String, String> {
-    if headers_json.is_null() { return HashMap::new(); }
+    if headers_json.is_null() {
+        return HashMap::new();
+    }
     let json_str = unsafe {
         match CStr::from_ptr(headers_json).to_str() {
             Ok(s) => s,
             Err(_) => return HashMap::new(),
         }
     };
-    if json_str.is_empty() { return HashMap::new(); }
+    if json_str.is_empty() {
+        return HashMap::new();
+    }
     serde_json::from_str::<HashMap<String, String>>(json_str).unwrap_or_default()
 }
 
-fn invoke_http_callback(
-    callback: EventCallback, event_name: &str, json: String, user_data: usize,
-) {
+fn invoke_http_callback(callback: EventCallback, event_name: &str, json: String, user_data: usize) {
     let c_event = CString::new(event_name.replace('\0', "")).unwrap_or_default();
     let c_json = CString::new(json.replace('\0', "")).unwrap_or_default();
     let json_len = c_json.as_bytes().len();
-    callback(c_event.into_raw(), c_json.into_raw() as *const u8, json_len, user_data as *mut c_void);
+    callback(
+        c_event.into_raw(),
+        c_json.into_raw() as *const u8,
+        json_len,
+        user_data as *mut c_void,
+    );
 }
 
 // ── Lifecycle ──
@@ -94,7 +108,9 @@ fn invoke_http_callback(
 /// API 都安全失败，而不是 use-after-free。
 #[no_mangle]
 pub unsafe extern "C" fn catcher_http_client_create(config_json: *const c_char) -> *mut c_void {
-    if config_json.is_null() { return std::ptr::null_mut(); }
+    if config_json.is_null() {
+        return std::ptr::null_mut();
+    }
     let json = CStr::from_ptr(config_json);
     let config: HttpClientConfig = match serde_json::from_str(json.to_str().unwrap_or("")) {
         Ok(c) => c,
@@ -110,7 +126,9 @@ pub unsafe extern "C" fn catcher_http_client_create(config_json: *const c_char) 
 
 #[no_mangle]
 pub unsafe extern "C" fn catcher_http_client_destroy(handle: *mut c_void) {
-    if handle.is_null() { return; }
+    if handle.is_null() {
+        return;
+    }
     let id = handle as usize;
     REGISTRY.remove(id);
 }
@@ -119,23 +137,35 @@ pub unsafe extern "C" fn catcher_http_client_destroy(handle: *mut c_void) {
 
 #[no_mangle]
 pub unsafe extern "C" fn catcher_http_get(
-    handle: *mut c_void, url: FfiString,
-    headers_json: *const c_char, timeout_ms: u32,
-    callback: EventCallback, user_data: *mut c_void,
+    handle: *mut c_void,
+    url: FfiString,
+    headers_json: *const c_char,
+    timeout_ms: u32,
+    callback: EventCallback,
+    user_data: *mut c_void,
 ) {
-    if handle.is_null() { return; }
+    if handle.is_null() {
+        return;
+    }
     let id = handle as usize;
     let url_str = ffi_string_to_string(url, "/");
     let per_request_headers = parse_headers_json(headers_json);
-    let per_request_timeout = if timeout_ms > 0 { Some(timeout_ms as u64) } else { None };
+    let per_request_timeout = if timeout_ms > 0 {
+        Some(timeout_ms as u64)
+    } else {
+        None
+    };
     let ud = user_data as usize;
     let transport = REGISTRY.get(id);
     if let Some(t) = transport {
         runtime().spawn(async move {
             let request = HttpRequest {
-                method: HttpMethod::GET, url: url_str,
-                headers: per_request_headers, body: None,
-                content_type: None, timeout_ms: per_request_timeout,
+                method: HttpMethod::GET,
+                url: url_str,
+                headers: per_request_headers,
+                body: None,
+                content_type: None,
+                timeout_ms: per_request_timeout,
                 ..Default::default()
             };
             let result = t.execute(request).await;
@@ -147,27 +177,40 @@ pub unsafe extern "C" fn catcher_http_get(
 
 #[no_mangle]
 pub unsafe extern "C" fn catcher_http_post(
-    handle: *mut c_void, url: FfiString,
-    body: *const u8, body_len: usize,
+    handle: *mut c_void,
+    url: FfiString,
+    body: *const u8,
+    body_len: usize,
     content_type: FfiString,
-    headers_json: *const c_char, timeout_ms: u32,
-    callback: EventCallback, user_data: *mut c_void,
+    headers_json: *const c_char,
+    timeout_ms: u32,
+    callback: EventCallback,
+    user_data: *mut c_void,
 ) {
-    if handle.is_null() { return; }
+    if handle.is_null() {
+        return;
+    }
     let id = handle as usize;
     let url_str = ffi_string_to_string(url, "/");
     let body_data = read_body_bytes(body, body_len);
     let ct_str = ffi_string_to_string(content_type, "application/octet-stream");
     let per_request_headers = parse_headers_json(headers_json);
-    let per_request_timeout = if timeout_ms > 0 { Some(timeout_ms as u64) } else { None };
+    let per_request_timeout = if timeout_ms > 0 {
+        Some(timeout_ms as u64)
+    } else {
+        None
+    };
     let ud = user_data as usize;
     let transport = REGISTRY.get(id);
     if let Some(t) = transport {
         runtime().spawn(async move {
             let request = HttpRequest {
-                method: HttpMethod::POST, url: url_str,
-                headers: per_request_headers, body: Some(body_data),
-                content_type: Some(ct_str), timeout_ms: per_request_timeout,
+                method: HttpMethod::POST,
+                url: url_str,
+                headers: per_request_headers,
+                body: Some(body_data),
+                content_type: Some(ct_str),
+                timeout_ms: per_request_timeout,
                 ..Default::default()
             };
             let result = t.execute(request).await;
@@ -180,33 +223,55 @@ pub unsafe extern "C" fn catcher_http_post(
 #[no_mangle]
 pub unsafe extern "C" fn catcher_http_execute(
     handle: *mut c_void,
-    method: FfiString, url: FfiString,
-    body: *const u8, body_len: usize,
+    method: FfiString,
+    url: FfiString,
+    body: *const u8,
+    body_len: usize,
     content_type: FfiString,
-    headers_json: *const c_char, timeout_ms: u32,
-    callback: EventCallback, user_data: *mut c_void,
+    headers_json: *const c_char,
+    timeout_ms: u32,
+    callback: EventCallback,
+    user_data: *mut c_void,
 ) {
-    if handle.is_null() { return; }
+    if handle.is_null() {
+        return;
+    }
     let id = handle as usize;
     let method_str = ffi_string_to_string(method, "GET");
     let url_str = ffi_string_to_string(url, "/");
     let body_data = if !body.is_null() && body_len > 0 {
         Some(read_body_bytes(body, body_len))
-    } else { None };
+    } else {
+        None
+    };
     let ct_str = {
         let s = ffi_string_to_string(content_type, "");
-        if s.is_empty() { None } else { Some(s) }
+        if s.is_empty() {
+            None
+        } else {
+            Some(s)
+        }
     };
     let per_request_headers = parse_headers_json(headers_json);
-    let per_request_timeout = if timeout_ms > 0 { Some(timeout_ms as u64) } else { None };
+    let per_request_timeout = if timeout_ms > 0 {
+        Some(timeout_ms as u64)
+    } else {
+        None
+    };
     let ud = user_data as usize;
     let http_method = match method_str.to_uppercase().as_str() {
-        "GET" => HttpMethod::GET, "POST" => HttpMethod::POST,
-        "PUT" => HttpMethod::PUT, "DELETE" => HttpMethod::DELETE,
+        "GET" => HttpMethod::GET,
+        "POST" => HttpMethod::POST,
+        "PUT" => HttpMethod::PUT,
+        "DELETE" => HttpMethod::DELETE,
         "PATCH" => HttpMethod::PATCH,
         other => {
-            invoke_http_callback(callback, "http_result",
-                error_json(&format!("Unsupported HTTP method: {other}")), ud);
+            invoke_http_callback(
+                callback,
+                "http_result",
+                error_json(&format!("Unsupported HTTP method: {other}")),
+                ud,
+            );
             return;
         }
     };
@@ -214,9 +279,12 @@ pub unsafe extern "C" fn catcher_http_execute(
     if let Some(t) = transport {
         runtime().spawn(async move {
             let request = HttpRequest {
-                method: http_method, url: url_str,
-                headers: per_request_headers, body: body_data,
-                content_type: ct_str, timeout_ms: per_request_timeout,
+                method: http_method,
+                url: url_str,
+                headers: per_request_headers,
+                body: body_data,
+                content_type: ct_str,
+                timeout_ms: per_request_timeout,
                 ..Default::default()
             };
             let result = t.execute(request).await;
@@ -235,33 +303,55 @@ pub unsafe extern "C" fn catcher_http_execute(
 #[no_mangle]
 pub unsafe extern "C" fn catcher_http_execute_with_id(
     handle: *mut c_void,
-    method: FfiString, url: FfiString,
-    body: *const u8, body_len: usize,
+    method: FfiString,
+    url: FfiString,
+    body: *const u8,
+    body_len: usize,
     content_type: FfiString,
-    headers_json: *const c_char, timeout_ms: u32,
-    callback: EventCallback, user_data: *mut c_void,
+    headers_json: *const c_char,
+    timeout_ms: u32,
+    callback: EventCallback,
+    user_data: *mut c_void,
 ) -> u64 {
-    if handle.is_null() { return 0; }
+    if handle.is_null() {
+        return 0;
+    }
     let id = handle as usize;
     let method_str = ffi_string_to_string(method, "GET");
     let url_str = ffi_string_to_string(url, "/");
     let body_data = if !body.is_null() && body_len > 0 {
         Some(read_body_bytes(body, body_len))
-    } else { None };
+    } else {
+        None
+    };
     let ct_str = {
         let s = ffi_string_to_string(content_type, "");
-        if s.is_empty() { None } else { Some(s) }
+        if s.is_empty() {
+            None
+        } else {
+            Some(s)
+        }
     };
     let per_request_headers = parse_headers_json(headers_json);
-    let per_request_timeout = if timeout_ms > 0 { Some(timeout_ms as u64) } else { None };
+    let per_request_timeout = if timeout_ms > 0 {
+        Some(timeout_ms as u64)
+    } else {
+        None
+    };
     let ud = user_data as usize;
     let http_method = match method_str.to_uppercase().as_str() {
-        "GET" => HttpMethod::GET, "POST" => HttpMethod::POST,
-        "PUT" => HttpMethod::PUT, "DELETE" => HttpMethod::DELETE,
+        "GET" => HttpMethod::GET,
+        "POST" => HttpMethod::POST,
+        "PUT" => HttpMethod::PUT,
+        "DELETE" => HttpMethod::DELETE,
         "PATCH" => HttpMethod::PATCH,
         other => {
-            invoke_http_callback(callback, "http_result",
-                error_json(&format!("Unsupported HTTP method: {other}")), ud);
+            invoke_http_callback(
+                callback,
+                "http_result",
+                error_json(&format!("Unsupported HTTP method: {other}")),
+                ud,
+            );
             return 0;
         }
     };
@@ -270,12 +360,17 @@ pub unsafe extern "C" fn catcher_http_execute_with_id(
         let (request_id, per_request_token) = t.allocate_pending_request();
         runtime().spawn(async move {
             let request = HttpRequest {
-                method: http_method, url: url_str,
-                headers: per_request_headers, body: body_data,
-                content_type: ct_str, timeout_ms: per_request_timeout,
+                method: http_method,
+                url: url_str,
+                headers: per_request_headers,
+                body: body_data,
+                content_type: ct_str,
+                timeout_ms: per_request_timeout,
                 ..Default::default()
             };
-            let (_rid, result) = t.execute_with_token(request_id, per_request_token, request).await;
+            let (_rid, result) = t
+                .execute_with_token(request_id, per_request_token, request)
+                .await;
             let json = match result {
                 Ok(resp) => {
                     use base64::Engine;
@@ -286,23 +381,27 @@ pub unsafe extern "C" fn catcher_http_execute_with_id(
                         "body_base64": body_b64,
                         "elapsed_ms": resp.elapsed_ms,
                         "request_id": request_id,
-                    }).to_string()
+                    })
+                    .to_string()
                 }
                 Err(catcher_core::CatcherError::HttpError { status, body }) => {
                     use base64::Engine;
-                    let body_b64 = base64::engine::general_purpose::STANDARD.encode(body.as_bytes());
+                    let body_b64 =
+                        base64::engine::general_purpose::STANDARD.encode(body.as_bytes());
                     serde_json::json!({
                         "status": status,
                         "headers": {},
                         "body_base64": body_b64,
                         "elapsed_ms": 0u64,
                         "request_id": request_id,
-                    }).to_string()
+                    })
+                    .to_string()
                 }
                 Err(e) => {
                     let msg = e.to_string();
                     if msg.contains("cancelled") {
-                        serde_json::json!({"type": "cancelled", "request_id": request_id}).to_string()
+                        serde_json::json!({"type": "cancelled", "request_id": request_id})
+                            .to_string()
                     } else {
                         serde_json::json!({"error": msg, "request_id": request_id}).to_string()
                     }
@@ -311,26 +410,36 @@ pub unsafe extern "C" fn catcher_http_execute_with_id(
             invoke_http_callback(callback, "http_result", json, ud);
         });
         request_id
-    } else { 0 }
+    } else {
+        0
+    }
 }
 
 /// Cancel a single in-flight request (N-03). Returns 0 on success, -1 if not found.
 #[no_mangle]
-pub unsafe extern "C" fn catcher_http_cancel_request(
-    handle: *mut c_void, request_id: u64,
-) -> i32 {
-    if handle.is_null() { return -1; }
+pub unsafe extern "C" fn catcher_http_cancel_request(handle: *mut c_void, request_id: u64) -> i32 {
+    if handle.is_null() {
+        return -1;
+    }
     let id = handle as usize;
     if let Some(transport) = REGISTRY.get(id) {
-        if transport.cancel_request(request_id) { 0 } else { -1 }
-    } else { -1 }
+        if transport.cancel_request(request_id) {
+            0
+        } else {
+            -1
+        }
+    } else {
+        -1
+    }
 }
 
 // ── Runtime control (unchanged) ──
 
 #[no_mangle]
 pub unsafe extern "C" fn catcher_http_circuit_breaker_state(handle: *mut c_void) -> *mut c_char {
-    if handle.is_null() { return std::ptr::null_mut(); }
+    if handle.is_null() {
+        return std::ptr::null_mut();
+    }
     let id = handle as usize;
     let state = REGISTRY.get(id).and_then(|t| t.circuit_breaker_state());
     let json = match state {
@@ -342,7 +451,9 @@ pub unsafe extern "C" fn catcher_http_circuit_breaker_state(handle: *mut c_void)
 
 #[no_mangle]
 pub unsafe extern "C" fn catcher_http_metrics(handle: *mut c_void) -> *mut c_char {
-    if handle.is_null() { return std::ptr::null_mut(); }
+    if handle.is_null() {
+        return std::ptr::null_mut();
+    }
     let id = handle as usize;
     let snapshot = REGISTRY.get(id).map(|t| t.metrics());
     let json = match snapshot {
@@ -357,7 +468,9 @@ pub unsafe extern "C" fn catcher_http_metrics(handle: *mut c_void) -> *mut c_cha
 /// 返回 0 成功，1 句柄无效，2 重建失败。
 #[no_mangle]
 pub unsafe extern "C" fn catcher_http_network_changed(handle: *mut c_void) -> i32 {
-    if handle.is_null() { return 1; }
+    if handle.is_null() {
+        return 1;
+    }
     let id = handle as usize;
     match REGISTRY.get(id) {
         Some(transport) => match transport.network_changed() {
@@ -370,7 +483,9 @@ pub unsafe extern "C" fn catcher_http_network_changed(handle: *mut c_void) -> i3
 
 #[no_mangle]
 pub unsafe extern "C" fn catcher_http_client_cancel_all(handle: *mut c_void) {
-    if handle.is_null() { return; }
+    if handle.is_null() {
+        return;
+    }
     let id = handle as usize;
     if let Some(transport) = REGISTRY.get(id) {
         transport.cancel_all();
@@ -379,55 +494,83 @@ pub unsafe extern "C" fn catcher_http_client_cancel_all(handle: *mut c_void) {
 
 #[no_mangle]
 pub unsafe extern "C" fn catcher_http_adaptive_timeout_config(
-    handle: *mut c_void, enabled: i32,
-    min_timeout_ms: u32, max_timeout_ms: u32,
-    multiplier_scaled: u32, window_size: u32,
+    handle: *mut c_void,
+    enabled: i32,
+    min_timeout_ms: u32,
+    max_timeout_ms: u32,
+    multiplier_scaled: u32,
+    window_size: u32,
 ) {
-    if handle.is_null() { return; }
+    if handle.is_null() {
+        return;
+    }
     let id = handle as usize;
     if let Some(transport) = REGISTRY.get(id) {
         if enabled != 0 {
             transport.set_adaptive_timeout(
-                min_timeout_ms as u64, max_timeout_ms as u64,
-                multiplier_scaled as f64 / 1000.0, window_size as usize,
+                min_timeout_ms as u64,
+                max_timeout_ms as u64,
+                multiplier_scaled as f64 / 1000.0,
+                window_size as usize,
             );
         } else {
             transport.disable_adaptive_timeout();
         }
     }
-
 }
 // N-02: Streaming download C ABI
 #[no_mangle]
 pub unsafe extern "C" fn catcher_http_execute_stream(
     handle: *mut c_void,
-    method: FfiString, url: FfiString,
-    body: *const u8, body_len: usize,
+    method: FfiString,
+    url: FfiString,
+    body: *const u8,
+    body_len: usize,
     content_type: FfiString,
-    headers_json: *const c_char, timeout_ms: u32,
-    callback: EventCallback, user_data: *mut c_void,
+    headers_json: *const c_char,
+    timeout_ms: u32,
+    callback: EventCallback,
+    user_data: *mut c_void,
 ) -> u64 {
-    if handle.is_null() { return 0; }
+    if handle.is_null() {
+        return 0;
+    }
     let id = handle as usize;
     let method_str = ffi_string_to_string(method, "GET");
     let url_str = ffi_string_to_string(url, "/");
     let body_data = if !body.is_null() && body_len > 0 {
         Some(read_body_bytes(body, body_len))
-    } else { None };
+    } else {
+        None
+    };
     let ct_str = {
         let s = ffi_string_to_string(content_type, "");
-        if s.is_empty() { None } else { Some(s) }
+        if s.is_empty() {
+            None
+        } else {
+            Some(s)
+        }
     };
     let per_request_headers = parse_headers_json(headers_json);
-    let per_request_timeout = if timeout_ms > 0 { Some(timeout_ms as u64) } else { None };
+    let per_request_timeout = if timeout_ms > 0 {
+        Some(timeout_ms as u64)
+    } else {
+        None
+    };
     let ud = user_data as usize;
     let http_method = match method_str.to_uppercase().as_str() {
-        "GET" => HttpMethod::GET, "POST" => HttpMethod::POST,
-        "PUT" => HttpMethod::PUT, "DELETE" => HttpMethod::DELETE,
+        "GET" => HttpMethod::GET,
+        "POST" => HttpMethod::POST,
+        "PUT" => HttpMethod::PUT,
+        "DELETE" => HttpMethod::DELETE,
         "PATCH" => HttpMethod::PATCH,
         other => {
-            invoke_http_callback(callback, "stream_error",
-                serde_json::json!({"error": format!("Unsupported method: {other}")}).to_string(), ud);
+            invoke_http_callback(
+                callback,
+                "stream_error",
+                serde_json::json!({"error": format!("Unsupported method: {other}")}).to_string(),
+                ud,
+            );
             return 0;
         }
     };
@@ -465,7 +608,9 @@ pub unsafe extern "C" fn catcher_http_execute_stream(
             }).await;
         });
         request_id
-    } else { 0 }
+    } else {
+        0
+    }
 }
 
 // ── Multipart upload (B-02) ──────────────────────────────────
@@ -477,9 +622,9 @@ pub unsafe extern "C" fn catcher_http_execute_stream(
 #[repr(C)]
 pub struct FfiMultipartPart {
     pub name: *const c_char,
-    pub value_or_filename: *const c_char,  // text value OR filename
-    pub content_type: *const c_char,        // null for text parts
-    pub data: *const u8,                     // null for text parts
+    pub value_or_filename: *const c_char, // text value OR filename
+    pub content_type: *const c_char,      // null for text parts
+    pub data: *const u8,                  // null for text parts
     pub data_len: usize,
 }
 
@@ -491,7 +636,7 @@ pub struct FfiMultipartPart {
 #[no_mangle]
 pub unsafe extern "C" fn catcher_http_multipart(
     handle: *mut c_void,
-    method: *const c_char,       // "POST" or "PUT"
+    method: *const c_char, // "POST" or "PUT"
     url: FfiString,
     parts: *const FfiMultipartPart,
     parts_count: usize,
@@ -500,7 +645,9 @@ pub unsafe extern "C" fn catcher_http_multipart(
     callback: Option<EventCallback>,
     user_data: usize,
 ) {
-    if handle.is_null() { return; }
+    if handle.is_null() {
+        return;
+    }
     let callback = match callback {
         Some(cb) => cb,
         None => return,
@@ -519,29 +666,56 @@ pub unsafe extern "C" fn catcher_http_multipart(
 
     let url_str = ffi_string_to_string(url, "");
     let per_request_headers = parse_headers_json(headers_json);
-    let per_request_timeout = if timeout_ms > 0 { Some(timeout_ms) } else { None };
+    let per_request_timeout = if timeout_ms > 0 {
+        Some(timeout_ms)
+    } else {
+        None
+    };
 
     // Build multipart form from FFI parts array
     let mut form = crate::transport::multipart::MultipartForm::new();
     if !parts.is_null() && parts_count > 0 {
         let parts_slice = std::slice::from_raw_parts(parts, parts_count);
         for part in parts_slice {
-            let name = if part.name.is_null() { continue; }
-            else { CStr::from_ptr(part.name).to_str().unwrap_or("").to_string() };
-            if name.is_empty() { continue; }
+            let name = if part.name.is_null() {
+                continue;
+            } else {
+                CStr::from_ptr(part.name).to_str().unwrap_or("").to_string()
+            };
+            if name.is_empty() {
+                continue;
+            }
 
             if part.data.is_null() || part.data_len == 0 {
                 // Text field
-                let value = if part.value_or_filename.is_null() { String::new() }
-                else { CStr::from_ptr(part.value_or_filename).to_str().unwrap_or("").to_string() };
+                let value = if part.value_or_filename.is_null() {
+                    String::new()
+                } else {
+                    CStr::from_ptr(part.value_or_filename)
+                        .to_str()
+                        .unwrap_or("")
+                        .to_string()
+                };
                 form = form.text(name, value);
             } else {
                 // Binary/file field
                 let data = std::slice::from_raw_parts(part.data, part.data_len).to_vec();
-                let filename = if part.value_or_filename.is_null() { "file".to_string() }
-                else { CStr::from_ptr(part.value_or_filename).to_str().unwrap_or("file").to_string() };
-                let ct = if part.content_type.is_null() { "application/octet-stream".to_string() }
-                else { CStr::from_ptr(part.content_type).to_str().unwrap_or("application/octet-stream").to_string() };
+                let filename = if part.value_or_filename.is_null() {
+                    "file".to_string()
+                } else {
+                    CStr::from_ptr(part.value_or_filename)
+                        .to_str()
+                        .unwrap_or("file")
+                        .to_string()
+                };
+                let ct = if part.content_type.is_null() {
+                    "application/octet-stream".to_string()
+                } else {
+                    CStr::from_ptr(part.content_type)
+                        .to_str()
+                        .unwrap_or("application/octet-stream")
+                        .to_string()
+                };
                 form = form.file(name, filename, ct, data);
             }
         }

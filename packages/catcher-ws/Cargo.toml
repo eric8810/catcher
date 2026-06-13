@@ -29,5 +29,6 @@ yawc = { version = "0.3.3", default-features = false, features = ["reqwest"] }
 reqwest = { version = "0.13", default-features = false, features = ["socks"] }
 
 [dev-dependencies]
+catcher-test-support = { path = "../catcher-test-support" }
 sha1 = "0.10"
 tokio-tungstenite = { version = "0.29", default-features = false, features = ["handshake"] }

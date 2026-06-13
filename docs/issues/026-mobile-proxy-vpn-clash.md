@@ -27,10 +27,10 @@
 
 本次 Catcher 侧修复后：
 
-- 不配置 `dns` 时，HTTP / WS 都走 reqwest 默认解析路径，不再默认强行接入 Catcher DNS。
-- 显式配置 `dns.mode = "catcher"` 时，才启用 Catcher DNS 缓存、host mapping 和自定义 nameserver。
+- 配置 `dns` 后默认启用 Catcher DNS 缓存、host mapping 和自定义 nameserver。
+- 显式配置 `dns.mode = "native"` 时，才使用 reqwest 原生解析路径。
 - 读取系统 DNS 失败时，不再静默退回 Hickory 默认 DNS；只有显式打开 `fallback_to_default_nameservers` 才允许退回。
-- HTTP 启用 `reqwest/socks`，`socks5://` 和 `socks5h://` 与类型声明一致。
+- HTTP 启用 `reqwest/socks`。Catcher 会把 `socks5://` 按 `socks5h://` 处理，避免本地提前 DNS。
 - WebSocket 改用 yawc 的 reqwest 建连入口，和 HTTP 一样接入 proxy / TLS / DNS 配置。
 - Dart FFI、NAPI TS、公共 TS 类型已暴露 `dns.mode`、`proxy`、`tls`、`network_path_id` 等字段。
 
@@ -126,7 +126,9 @@ if let Some(ref proxy_config) = config.proxy {
 - 调用方不传 `proxy`，Catcher HTTP 不会主动知道 Clash、本地代理或 App 内代理设置。
 - 一旦调用 `proxy()`，reqwest 的自动系统代理逻辑也不会再接管。
 
-修复后，`packages/catcher-http/Cargo.toml` 已启用 `reqwest/socks`，因此显式传入 `socks5://` 或 `socks5h://` 时底层能力和类型声明一致。
+修复后，`packages/catcher-http/Cargo.toml` 已启用 `reqwest/socks`。显式传入
+`socks5://` 或 `socks5h://` 都会让代理解析目标域名，避免 Clash fake-ip
+场景下本地先解析出 `198.18.x.x` 一类地址。
 
 修复前的位置：`packages/catcher-http/Cargo.toml`
 
@@ -217,7 +219,7 @@ let (sys_config, sys_opts) = hickory_resolver::system_conf::read_system_conf()
 修复后：
 
 - `config.dns == None` 时，HTTP / WS 不注入 Catcher resolver，使用 reqwest 默认解析路径。
-- `dns.mode = "catcher"` 时，才使用 Catcher DNS 缓存、host mapping、自定义 nameserver。
+- `dns.mode = "catcher"` 或省略 `dns.mode` 时，使用 Catcher DNS 缓存、host mapping、自定义 nameserver。
 - `dns.mode = "native"` 保留为显式原生解析意图。
 - `fallback_to_default_nameservers` 默认是 `false`，不会静默退回 Hickory 默认 DNS。
 
@@ -373,7 +375,9 @@ new HttpClient({
 })
 ```
 
-这里显式配置了 DNS 缓存，但没有传代理。
+这里传了 DNS 缓存配置，但没有传代理。修复后，这种没有 `mode` 的部分
+DNS 配置仍然会启用 Catcher DNS；如果后续同时传代理，目标域名会交给代理解析，
+不会被 Catcher DNS 提前改成 IP。
 
 ### WebSocket 没有传代理
 
@@ -400,6 +404,8 @@ new WsClient({
 ```
 
 NAPI 接入也没有代理设置。桌面端如果遇到系统代理或企业代理，也会遇到同类问题。
+这类 `dns: { cache_ttl_secs: 300 }` 会继续启用 Catcher DNS；如需完全走协议库
+原生解析，才显式写 `dns: { mode: "native" }`。
 
 ### WebSocket 重连边界不能被破坏
 
@@ -453,15 +459,14 @@ Catcher 统一网络配置
 
 1. 定义统一网络配置结构。✅ 已实现
    - 表达当前连接方式：直连、HTTP 代理、HTTPS 代理、SOCKS5、SOCKS5 远端 DNS。
-   - 表达 DNS 策略：默认原生解析、Catcher DNS、自定义 nameserver、host mapping。
+   - 表达 DNS 策略：Catcher DNS、显式原生解析、自定义 nameserver、host mapping。
    - 表达 TLS 策略：是否校验证书、自定义 CA、客户端 PEM 证书、TLS 版本。
    - 表达网络路径版本：VPN / Wi-Fi / 蜂窝 / 代理切换时递增，用来触发连接池和 DNS 缓存重建。
 
 2. HTTP 传输层完整支持代理。✅ 已实现
    - `catcher-http` 启用 `reqwest/socks`。
    - 支持 `http://`、`https://`、`socks5://`、`socks5h://`。
-   - `socks5://` 使用本地 DNS。
-   - `socks5h://` 使用代理远端 DNS。
+   - `socks5://` 和 `socks5h://` 都交给代理解析目标域名。
    - 代理 URL 错误、DNS、TLS、WS 握手等会进入明确错误分类；更细现场日志留到真机验证补充。
 
 3. WebSocket 传输层完整支持代理。✅ 已实现
@@ -479,11 +484,12 @@ Catcher 统一网络配置
    - WSS 经过调试代理或企业代理时，可以按配置通过验证。
 
 5. DNS 逻辑按连接方式选择。✅ 已实现
-   - 默认：不配置 `dns` 时使用 reqwest 原生解析。
-   - 显式 Catcher DNS：`dns.mode = "catcher"` 时使用 Catcher DNS 缓存和旧缓存兜底。
+   - 不配置 `dns` 时使用 reqwest 原生解析。
+   - 配置 `dns` 后默认使用 Catcher DNS 缓存和旧缓存兜底。
+   - 显式 `dns.mode = "native"` 时使用 reqwest 原生解析。
    - VPN：默认重新读取系统 DNS，并在网络路径变化后重建 resolver。
    - HTTP proxy：目标域名交给代理隧道，不提前改写成目标 IP。
-   - SOCKS5：按 `socks5://` 或 `socks5h://` 决定本地解析还是代理解析。
+   - SOCKS5：统一交给代理解析，避免 fake-ip 和按域名分流失效。
    - 自定义 nameserver 和 host mapping 仍然保留。
 
 6. 网络路径变化时重建关键对象。✅ Catcher 配置已支持，外部接入负责触发
@@ -504,10 +510,10 @@ Catcher 统一网络配置
 
 | 场景 | Catcher 应该怎么走 |
 |---|---|
-| 普通网络 | 直连，默认使用 reqwest 原生解析 |
+| 普通网络 | 不传 `dns` 时原生解析；传 `dns` 时默认 Catcher DNS |
 | Clash HTTP 代理 | HTTP 和 WSS 都先连本地代理，再由代理访问目标 |
 | Clash SOCKS5 | HTTP 和 WSS 都走 SOCKS5 |
-| Clash fake-ip / 远端 DNS | 使用 `socks5h://` 或代理 DNS，不提前本地解析目标 |
+| Clash fake-ip / 远端 DNS | `socks5://` 和 `socks5h://` 都不提前本地解析目标 |
 | VPN 模式 | 按当前 VPN 网络的 DNS 和路由重建连接 |
 | 代理证书 | HTTP 和 WSS 都按同一份 TLS 配置校验证书；WS pinning 后续补齐 |
 | VPN / 代理切换 | 旧连接池、旧 WS、旧 DNS resolver 全部重建 |
@@ -532,7 +538,7 @@ Catcher 统一网络配置
 
 额外需要覆盖：
 
-- `socks5://` 本地 DNS
+- `socks5://` 按代理 DNS 处理
 - `socks5h://` 远端 DNS
 - HTTP proxy `CONNECT`
 - 代理返回 407
@@ -549,8 +555,8 @@ Catcher 统一网络配置
 - [x] `catcher-ws` 通过 reqwest 支持 SOCKS5。
 - [x] HTTP 和 WS 都支持 `socks5h://` 远端 DNS。
 - [x] HTTP 和 WS 都暴露 `network_path_id`，外部可在网络变化后重建连接和 DNS resolver。
-- [ ] `catcher-http` 的 `socks5://` 有真实代理集成测试。
-- [ ] `catcher-ws` 的 HTTP proxy / SOCKS5 有真实代理集成测试。
+- [x] `catcher-http` 的 `socks5://` 有真实代理集成测试。
+- [x] `catcher-ws` 的 HTTP proxy / SOCKS5 有真实代理集成测试。
 - [ ] iOS / Android 真机分别通过 Clash VPN 模式测试。
 - [ ] iOS / Android 真机分别通过本地 HTTP 代理测试。
 - [ ] WSS 经过调试代理时，可以通过配置自定义 CA 或关闭证书校验完成测试。

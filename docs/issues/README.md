@@ -63,6 +63,7 @@
 | # | Issue | 优先级 | 状态 | 文件 |
 |---|-------|:------:|:----:|------|
 | M-01 | Clash / VPN / 本地代理下请求失败 | 🔴 P0 | Catcher 已实现，待验证 | [026-mobile-proxy-vpn-clash.md](./026-mobile-proxy-vpn-clash.md) |
+| M-02 | 代理 / VPN / 本地网络兼容范围 | 🔴 P0 | 已调研，待补验证项 | [027-proxy-vpn-network-compatibility-research.md](./027-proxy-vpn-network-compatibility-research.md) |
 
 
 ## 间题之间的关联

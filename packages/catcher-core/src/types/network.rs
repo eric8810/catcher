@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 
 use super::default_true;
 
@@ -94,4 +95,58 @@ pub struct ProxyConfig {
     pub auth: Option<ProxyAuth>,
     #[serde(alias = "noProxy", default)]
     pub no_proxy: Vec<String>,
+}
+
+impl ProxyConfig {
+    /// 返回协议库实际使用的代理地址。
+    ///
+    /// `socks5://` 会让 reqwest 在本地先解析目标域名。Clash fake-ip、VPN
+    /// 分流和远端 DNS 场景下，这会把域名提前变成 IP，代理无法再按域名处理。
+    /// 因此 Catcher 将 `socks5://` 统一按 `socks5h://` 处理，让代理解析目标域名。
+    pub fn transport_url(&self) -> Cow<'_, str> {
+        let Some((scheme, rest)) = self.url.split_once("://") else {
+            return Cow::Borrowed(self.url.as_str());
+        };
+        if scheme.eq_ignore_ascii_case("socks5") {
+            Cow::Owned(format!("socks5h://{rest}"))
+        } else {
+            Cow::Borrowed(self.url.as_str())
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ProxyConfig;
+
+    fn proxy_url(url: &str) -> String {
+        ProxyConfig {
+            url: url.to_string(),
+            auth: None,
+            no_proxy: Vec::new(),
+        }
+        .transport_url()
+        .into_owned()
+    }
+
+    #[test]
+    fn socks5_proxy_uses_remote_dns() {
+        assert_eq!(
+            proxy_url("socks5://127.0.0.1:7890"),
+            "socks5h://127.0.0.1:7890"
+        );
+        assert_eq!(
+            proxy_url("SOCKS5://127.0.0.1:7890"),
+            "socks5h://127.0.0.1:7890"
+        );
+    }
+
+    #[test]
+    fn other_proxy_schemes_are_unchanged() {
+        assert_eq!(
+            proxy_url("socks5h://127.0.0.1:7890"),
+            "socks5h://127.0.0.1:7890"
+        );
+        assert_eq!(proxy_url("http://127.0.0.1:7890"), "http://127.0.0.1:7890");
+    }
 }

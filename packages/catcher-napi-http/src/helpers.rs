@@ -1,5 +1,5 @@
-use napi::threadsafe_function::{ErrorStrategy, ThreadsafeFunction};
 use catcher_http::types::http::{HttpMethod, StreamEvent};
+use napi::threadsafe_function::{ErrorStrategy, ThreadsafeFunction};
 
 pub(crate) type Tsfn = ThreadsafeFunction<String, ErrorStrategy::CalleeHandled>;
 

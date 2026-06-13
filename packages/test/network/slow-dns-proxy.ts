@@ -8,7 +8,7 @@
  * Usage:
  *   const proxy = createSlowDnsProxy(200)  // 200ms delay
  *   proxy.start()  // returns { port } once listening
- *   // Configure catcher: dns: { nameservers: [`127.0.0.1:${port}`], cache_ttl_secs: 300 }
+ *   // Configure catcher: dns: { mode: 'catcher', nameservers: [`127.0.0.1:${port}`], cache_ttl_secs: 300 }
  *   proxy.stop()
  */
 import dgram from 'node:dgram'

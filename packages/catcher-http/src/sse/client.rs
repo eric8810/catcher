@@ -79,7 +79,16 @@ impl SseClient {
                 // Mark as Connecting before each connection attempt
                 *ready_state_bg.lock().unwrap() = SseReadyState::Connecting;
 
-                match connect_once(&client, &config_clone, &lines_tx, &last_event_id_bg, &ready_state_bg, &reconnect_delay_bg).await {
+                match connect_once(
+                    &client,
+                    &config_clone,
+                    &lines_tx,
+                    &last_event_id_bg,
+                    &ready_state_bg,
+                    &reconnect_delay_bg,
+                )
+                .await
+                {
                     Ok(()) => {
                         // Stream ended normally — check if we should reconnect
                         if cancel_rx.try_recv().is_ok() {
@@ -183,7 +192,6 @@ async fn connect_once(
     ready_state: &Arc<Mutex<SseReadyState>>,
     reconnect_delay: &Arc<Mutex<Option<u64>>>,
 ) -> Result<(), CatcherError> {
-
     let method = match config.method {
         catcher_core::types::sse::SseMethod::GET => reqwest::Method::GET,
         catcher_core::types::sse::SseMethod::POST => reqwest::Method::POST,
@@ -247,9 +255,7 @@ async fn connect_once(
         buffer.push_str(&String::from_utf8_lossy(&bytes));
 
         while let Some(newline_pos) = buffer.find('\n') {
-            let line = buffer[..newline_pos]
-                .trim_end_matches('\r')
-                .to_string();
+            let line = buffer[..newline_pos].trim_end_matches('\r').to_string();
             buffer.drain(..newline_pos + 1);
 
             match route_line(&line) {
@@ -334,9 +340,9 @@ mod tests {
     async fn rc1_basic_consumption() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(200).set_body_string(
-                "data: hello\n\ndata: world\n\n",
-            ))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_string("data: hello\n\ndata: world\n\n"),
+            )
             .mount(&server)
             .await;
 
@@ -359,18 +365,14 @@ mod tests {
 
         // First response: sends id + data then closes
         Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(200).set_body_string(
-                "id: abc123\ndata: first\n\n",
-            ))
+            .respond_with(ResponseTemplate::new(200).set_body_string("id: abc123\ndata: first\n\n"))
             .up_to_n_times(1)
             .mount(&server)
             .await;
 
         // Second response: after reconnect with Last-Event-ID
         Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(200).set_body_string(
-                "data: second\n\n",
-            ))
+            .respond_with(ResponseTemplate::new(200).set_body_string("data: second\n\n"))
             .mount(&server)
             .await;
 
@@ -393,9 +395,7 @@ mod tests {
     async fn rc3_close_stops() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(200).set_body_string(
-                "data: ongoing\n",
-            ))
+            .respond_with(ResponseTemplate::new(200).set_body_string("data: ongoing\n"))
             .mount(&server)
             .await;
 
@@ -426,15 +426,13 @@ mod tests {
         let mut client = SseClient::connect(config).await.unwrap();
 
         // Should get no lines, and eventually the channel closes
-        let next = tokio::time::timeout(
-            std::time::Duration::from_secs(2),
-            client.next_line(),
-        ).await;
+        let next =
+            tokio::time::timeout(std::time::Duration::from_secs(2), client.next_line()).await;
         // Either None (channel closed) or timeout — both acceptable
         match next {
             Ok(Some(_)) => panic!("Expected no data after 204"),
             Ok(None) => {} // Channel closed — good
-            Err(_) => {} // Timeout — acceptable, 204 handling closes the loop
+            Err(_) => {}   // Timeout — acceptable, 204 handling closes the loop
         }
 
         client.close();
@@ -445,9 +443,7 @@ mod tests {
     async fn rc5_ready_state_transitions() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(200).set_body_string(
-                "data: hi\n\n",
-            ))
+            .respond_with(ResponseTemplate::new(200).set_body_string("data: hi\n\n"))
             .mount(&server)
             .await;
 
@@ -472,9 +468,7 @@ mod tests {
     async fn rc6_stream_trait_consumption() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(200).set_body_string(
-                "data: a\ndata: b\n\n",
-            ))
+            .respond_with(ResponseTemplate::new(200).set_body_string("data: a\ndata: b\n\n"))
             .mount(&server)
             .await;
 

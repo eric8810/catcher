@@ -1,7 +1,7 @@
 use std::time::Instant;
 
-use catcher_core::CatcherError;
 use catcher_core::types::observability::*;
+use catcher_core::CatcherError;
 
 /// 网络质量评估器：HTTP HEAD RTT + 滑动窗口 + 综合评分
 pub struct NetworkQualityEvaluator {
@@ -143,7 +143,7 @@ fn classify_quality(snapshot: &RttSnapshot) -> NetworkQualityLevel {
 /// 质量订阅 — N-04 实时推送
 pub struct QualitySubscription {
     cancel_tx: tokio::sync::watch::Sender<bool>,
-    _task: tokio::task::JoinHandle<()>,
+    task: tokio::task::JoinHandle<()>,
 }
 
 impl QualitySubscription {
@@ -206,12 +206,13 @@ impl QualitySubscription {
             }
         });
 
-        Self { cancel_tx, _task: task }
+        Self { cancel_tx, task }
     }
 
     /// 取消订阅，停止后台 task
     pub fn unsubscribe(self) {
         let _ = self.cancel_tx.send(true);
+        self.task.abort();
     }
 }
 
@@ -264,7 +265,10 @@ mod tests {
         // degrading: level > previous_level
         // stable: level == previous_level
         use std::cmp::Ordering;
-        fn compute_trend(level: NetworkQualityLevel, prev: Option<NetworkQualityLevel>) -> &'static str {
+        fn compute_trend(
+            level: NetworkQualityLevel,
+            prev: Option<NetworkQualityLevel>,
+        ) -> &'static str {
             match prev {
                 None => "unknown",
                 Some(p) => match level.cmp(&p) {
@@ -275,56 +279,78 @@ mod tests {
             }
         }
         // Bad > Poor > Fair > Good > Excellent
-        assert_eq!(compute_trend(NetworkQualityLevel::Excellent, None), "unknown");
-        assert_eq!(compute_trend(NetworkQualityLevel::Good, Some(NetworkQualityLevel::Excellent)), "degrading");
-        assert_eq!(compute_trend(NetworkQualityLevel::Poor, Some(NetworkQualityLevel::Bad)), "improving");
-        assert_eq!(compute_trend(NetworkQualityLevel::Good, Some(NetworkQualityLevel::Good)), "stable");
-        assert_eq!(compute_trend(NetworkQualityLevel::Fair, Some(NetworkQualityLevel::Poor)), "improving");
+        assert_eq!(
+            compute_trend(NetworkQualityLevel::Excellent, None),
+            "unknown"
+        );
+        assert_eq!(
+            compute_trend(
+                NetworkQualityLevel::Good,
+                Some(NetworkQualityLevel::Excellent)
+            ),
+            "degrading"
+        );
+        assert_eq!(
+            compute_trend(NetworkQualityLevel::Poor, Some(NetworkQualityLevel::Bad)),
+            "improving"
+        );
+        assert_eq!(
+            compute_trend(NetworkQualityLevel::Good, Some(NetworkQualityLevel::Good)),
+            "stable"
+        );
+        assert_eq!(
+            compute_trend(NetworkQualityLevel::Fair, Some(NetworkQualityLevel::Poor)),
+            "improving"
+        );
     }
 
     #[test]
     fn ns04_classify_quality_levels() {
         let mut eval = NetworkQualityEvaluator::new(10);
         // Excellent: avg_rtt < 80
-        eval.record_rtt(30); eval.record_rtt(40); eval.record_rtt(50);
+        eval.record_rtt(30);
+        eval.record_rtt(40);
+        eval.record_rtt(50);
         assert_eq!(eval.evaluate().level, NetworkQualityLevel::Excellent);
 
         let mut eval = NetworkQualityEvaluator::new(10);
         // Good: avg_rtt < 200
-        eval.record_rtt(100); eval.record_rtt(150);
+        eval.record_rtt(100);
+        eval.record_rtt(150);
         assert_eq!(eval.evaluate().level, NetworkQualityLevel::Good);
 
         let mut eval = NetworkQualityEvaluator::new(10);
         // Bad: avg_rtt >= 1000
-        eval.record_rtt(1200); eval.record_rtt(1500);
+        eval.record_rtt(1200);
+        eval.record_rtt(1500);
         assert_eq!(eval.evaluate().level, NetworkQualityLevel::Bad);
     }
 
     #[tokio::test]
     async fn ns04_subscription_starts_and_unsubscribes() {
         extern "C" fn noop_callback(
-            _et: *const std::ffi::c_char, _ed: *const u8, _el: usize, _ud: *mut std::ffi::c_void,
-        ) {}
-        let sub = QualitySubscription::start(
-            "http://127.0.0.1:1".to_string(),
-            500,
-            noop_callback,
-            0,
-        );
+            _et: *const std::ffi::c_char,
+            _ed: *const u8,
+            _el: usize,
+            _ud: *mut std::ffi::c_void,
+        ) {
+        }
+        let sub =
+            QualitySubscription::start("http://127.0.0.1:1".to_string(), 500, noop_callback, 0);
         sub.unsubscribe();
     }
 
     #[tokio::test]
     async fn ns04_subscription_measurement_failure_no_crash() {
         extern "C" fn noop_callback(
-            _et: *const std::ffi::c_char, _ed: *const u8, _el: usize, _ud: *mut std::ffi::c_void,
-        ) {}
-        let sub = QualitySubscription::start(
-            "http://127.0.0.1:1".to_string(),
-            100,
-            noop_callback,
-            0,
-        );
+            _et: *const std::ffi::c_char,
+            _ed: *const u8,
+            _el: usize,
+            _ud: *mut std::ffi::c_void,
+        ) {
+        }
+        let sub =
+            QualitySubscription::start("http://127.0.0.1:1".to_string(), 100, noop_callback, 0);
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
         sub.unsubscribe();
     }
@@ -343,10 +369,16 @@ mod tests {
     #[tokio::test]
     async fn ns04_multiple_subscribers_independent() {
         extern "C" fn noop_callback(
-            _et: *const std::ffi::c_char, _ed: *const u8, _el: usize, _ud: *mut std::ffi::c_void,
-        ) {}
-        let sub1 = QualitySubscription::start("http://127.0.0.1:1".to_string(), 500, noop_callback, 0);
-        let sub2 = QualitySubscription::start("http://127.0.0.1:1".to_string(), 500, noop_callback, 0);
+            _et: *const std::ffi::c_char,
+            _ed: *const u8,
+            _el: usize,
+            _ud: *mut std::ffi::c_void,
+        ) {
+        }
+        let sub1 =
+            QualitySubscription::start("http://127.0.0.1:1".to_string(), 500, noop_callback, 0);
+        let sub2 =
+            QualitySubscription::start("http://127.0.0.1:1".to_string(), 500, noop_callback, 0);
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         sub1.unsubscribe();
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;

@@ -48,7 +48,10 @@ mod tests {
 
     #[test]
     fn test_03_comment_silent() {
-        assert!(matches!(route_line(": this is a comment"), RouteAction::Silent));
+        assert!(matches!(
+            route_line(": this is a comment"),
+            RouteAction::Silent
+        ));
     }
 
     #[test]
@@ -60,17 +63,23 @@ mod tests {
 
     #[test]
     fn test_05_id_standard() {
-        assert!(matches!(route_line("id: msg_001"), RouteAction::SetLastEventId(id) if id == "msg_001"));
+        assert!(
+            matches!(route_line("id: msg_001"), RouteAction::SetLastEventId(id) if id == "msg_001")
+        );
     }
 
     #[test]
     fn test_06_id_no_space() {
-        assert!(matches!(route_line("id:msg_002"), RouteAction::SetLastEventId(id) if id == "msg_002"));
+        assert!(
+            matches!(route_line("id:msg_002"), RouteAction::SetLastEventId(id) if id == "msg_002")
+        );
     }
 
     #[test]
     fn test_07_id_multi_space() {
-        assert!(matches!(route_line("id:  multi  space"), RouteAction::SetLastEventId(id) if id == "multi  space"));
+        assert!(
+            matches!(route_line("id:  multi  space"), RouteAction::SetLastEventId(id) if id == "multi  space")
+        );
     }
 
     #[test]
@@ -87,12 +96,18 @@ mod tests {
 
     #[test]
     fn test_10_retry_standard() {
-        assert!(matches!(route_line("retry: 5000"), RouteAction::SetRetry(5000)));
+        assert!(matches!(
+            route_line("retry: 5000"),
+            RouteAction::SetRetry(5000)
+        ));
     }
 
     #[test]
     fn test_11_retry_no_space() {
-        assert!(matches!(route_line("retry:1000"), RouteAction::SetRetry(1000)));
+        assert!(matches!(
+            route_line("retry:1000"),
+            RouteAction::SetRetry(1000)
+        ));
     }
 
     #[test]
@@ -120,7 +135,9 @@ mod tests {
 
     #[test]
     fn test_16_data_json() {
-        assert!(matches!(route_line(r#"data: {"type":"start"}"#), RouteAction::Yield(l) if l == r#"data: {"type":"start"}"#));
+        assert!(
+            matches!(route_line(r#"data: {"type":"start"}"#), RouteAction::Yield(l) if l == r#"data: {"type":"start"}"#)
+        );
     }
 
     #[test]
@@ -135,7 +152,9 @@ mod tests {
 
     #[test]
     fn test_19_event() {
-        assert!(matches!(route_line("event: message_start"), RouteAction::Yield(l) if l == "event: message_start"));
+        assert!(
+            matches!(route_line("event: message_start"), RouteAction::Yield(l) if l == "event: message_start")
+        );
     }
 
     #[test]
@@ -145,7 +164,9 @@ mod tests {
 
     #[test]
     fn test_21_custom_prefix() {
-        assert!(matches!(route_line("custom: value"), RouteAction::Yield(l) if l == "custom: value"));
+        assert!(
+            matches!(route_line("custom: value"), RouteAction::Yield(l) if l == "custom: value")
+        );
     }
 
     #[test]
@@ -155,7 +176,9 @@ mod tests {
 
     #[test]
     fn test_23_uppercase_id() {
-        assert!(matches!(route_line("ID: uppercase"), RouteAction::Yield(l) if l == "ID: uppercase"));
+        assert!(
+            matches!(route_line("ID: uppercase"), RouteAction::Yield(l) if l == "ID: uppercase")
+        );
     }
 
     #[test]

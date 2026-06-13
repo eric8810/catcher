@@ -47,7 +47,8 @@ fn build_sse_event_json(event_type: &str, data: &str) -> String {
     serde_json::json!({
         "type": event_type,
         "data": data,
-    }).to_string()
+    })
+    .to_string()
 }
 
 fn invoke_sse_callback(callback: EventCallback, json: String, user_data: usize) {
@@ -191,42 +192,42 @@ pub unsafe extern "C" fn catcher_sse_connect(
         });
         rt.block_on(async move {
             match SseClient::connect(config).await {
-            Ok(client) => {
-                // Send open event
-                let open_json = build_sse_event_json("open", "");
-                invoke_sse_callback(callback_ptr, open_json, ud);
+                Ok(client) => {
+                    // Send open event
+                    let open_json = build_sse_event_json("open", "");
+                    invoke_sse_callback(callback_ptr, open_json, ud);
 
-                // Store client for later operations (close, ready_state, etc.)
-                let client_arc = Arc::new(TokioMutex::new(client));
-                let id = SSE_REGISTRY.insert(client_arc.clone());
+                    // Store client for later operations (close, ready_state, etc.)
+                    let client_arc = Arc::new(TokioMutex::new(client));
+                    let id = SSE_REGISTRY.insert(client_arc.clone());
 
-                // Spawn background task to forward SSE lines to callback
-                sse_runtime().spawn(async move {
-                    loop {
-                        let mut c = client_arc.lock().await;
-                        let line_result = c.next_line().await;
-                        drop(c); // release lock before invoking callback
-                        match line_result {
-                            Some(Ok(line)) => {
-                                let json = build_sse_event_json("data", &line);
-                                invoke_sse_callback(callback_ptr, json, ud);
-                            }
-                            Some(Err(e)) => {
-                                let err_json = build_sse_event_json("error", &e.to_string());
-                                invoke_sse_callback(callback_ptr, err_json, ud);
-                            }
-                            None => {
-                                let done_json = build_sse_event_json("close", "");
-                                invoke_sse_callback(callback_ptr, done_json, ud);
-                                break;
+                    // Spawn background task to forward SSE lines to callback
+                    sse_runtime().spawn(async move {
+                        loop {
+                            let mut c = client_arc.lock().await;
+                            let line_result = c.next_line().await;
+                            drop(c); // release lock before invoking callback
+                            match line_result {
+                                Some(Ok(line)) => {
+                                    let json = build_sse_event_json("data", &line);
+                                    invoke_sse_callback(callback_ptr, json, ud);
+                                }
+                                Some(Err(e)) => {
+                                    let err_json = build_sse_event_json("error", &e.to_string());
+                                    invoke_sse_callback(callback_ptr, err_json, ud);
+                                }
+                                None => {
+                                    let done_json = build_sse_event_json("close", "");
+                                    invoke_sse_callback(callback_ptr, done_json, ud);
+                                    break;
+                                }
                             }
                         }
-                    }
-                });
+                    });
 
-                id
-            }
-            Err(_) => 0usize,
+                    id
+                }
+                Err(_) => 0usize,
             }
         })
     });
@@ -245,7 +246,8 @@ pub unsafe extern "C" fn catcher_sse_ready_state(sse_handle: *mut c_void) -> i32
         return -1;
     }
     let id = sse_handle as usize;
-    SSE_REGISTRY.get(id)
+    SSE_REGISTRY
+        .get(id)
         .map(|client| match client.blocking_lock().ready_state() {
             SseReadyState::Connecting => 0,
             SseReadyState::Open => 1,
@@ -262,7 +264,8 @@ pub unsafe extern "C" fn catcher_sse_last_event_id(sse_handle: *mut c_void) -> *
         return std::ptr::null_mut();
     }
     let id = sse_handle as usize;
-    SSE_REGISTRY.get(id)
+    SSE_REGISTRY
+        .get(id)
         .map(|client| {
             let last_id = client.blocking_lock().last_event_id();
             CString::new(last_id).unwrap_or_default().into_raw()
