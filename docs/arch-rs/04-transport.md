@@ -252,8 +252,9 @@ pub fn build_stale_aware_resolver(config: &DnsConfig) -> Result<Arc<StaleAwareDn
 
 ## 代理与 DNS 的配合
 
-HTTP 和 WebSocket 使用同一套网络配置：`proxy`、`dns`、`tls` 和
-`network_path_id` 的语义必须一致。
+HTTP 和 WebSocket 使用同一套网络配置：`proxy`、`dns`、`tls`
+的语义必须一致。网络环境切换后的主动恢复由 `networkChanged()` API 承担
+（清 DNS 缓存、热重建连接池、重置熔断器），见 `docs/user-manual/resilience.md`。
 
 当调用方传入 `proxy.url = "socks5://..."` 时，Catcher 内部必须按
 `socks5h://...` 交给 reqwest。原因是：
@@ -283,6 +284,14 @@ HTTP 和 WebSocket 使用同一套网络配置：`proxy`、`dns`、`tls` 和
 - `catcher-ws/tests/proxy_dns_behavior_test.rs` 验证 WebSocket 同样遵守该行为。
 - `catcher-http/tests/local_proxy_test.rs` 和 `catcher-ws/tests/local_proxy_test.rs`
   保留为 `#[ignore]`，用于发版前手动连接真实 Clash 或本地代理。
+
+> ⚠️ **对 reqwest 内部行为的隐式依赖（issue #031）**：上述「代理路径目标域名不被本地
+> 解析」的保证，建立在 reqwest「走代理时不调用自定义 `dns_resolver`」这一**实现细节**之上，
+> 而非其稳定 API 的明文承诺。代码中没有、也无法（resolver 仍需服务 no_proxy/直连 host）
+> 显式禁用代理路径上的本地解析。`proxy_dns_behavior_test` 是唯一的回归护栏，随
+> `cargo test --workspace`（catcher-http 默认启用 `hickory-dns`，catcher-ws 始终启用
+> `reqwest-resolver`）在 CI 运行。**升级 reqwest 版本时，必须确认这两个测试通过**，否则
+> 目标域名可能悄悄退回本地解析、以 IP 泄漏给代理，破坏 Clash 域名分流。
 
 ---
 

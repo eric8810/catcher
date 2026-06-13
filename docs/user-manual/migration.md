@@ -4,6 +4,30 @@
 
 ---
 
+## 版本升级：0.3.x → 0.3.13
+
+0.3.13 引入主动网络切换恢复与移动端代理/VPN 兼容，并对齐了几处默认行为。**大多数项目无需改代码**，但以下默认行为有调整，升级前请逐条确认。完整说明见根目录 [`CHANGELOG.md`](../../CHANGELOG.md)。
+
+| 变更 | 影响 | 如需保持旧行为 |
+|------|------|----------------|
+| **DNS 改为按需启用** | 不配置 `dns` 时使用协议库原生解析（此前总是启用 Catcher DNS 缓存） | 显式传入 `dns`（`mode` 默认 `catcher`），即可恢复缓存 / host mapping / 自定义 nameserver |
+| **不再静默回退公共 DNS** | 读取系统 DNS 配置失败时返回错误，而非静默用 `8.8.8.8` 等公共 nameserver | 设置 `dns.fallback_to_default_nameservers = true`（默认 `false`） |
+| **`socks5://` 按 `socks5h://` 处理** | 代理下目标域名交给代理远端解析（修复 Clash/VPN 分流） | 无 —— 有意移除本地解析 socks5 的路径 |
+| **`tls_sni_override` 原生路径报错** | 在 catcher-http / catcher-ws（Rust/原生）设置该字段会返回 `InvalidConfig` | 移除该字段；若确需自定义 SNI，使用纯 TS 的 Node Agent（`servername`） |
+| **WS 单连接多 IP 握手故障转移移除** | 多 IP 主机不再在握手层逐 IP 重试，改由 reqwest 连接层处理 | 用多端点竞速 `urls: ['a', 'b']` 获取端点级故障转移 |
+| **WS FFI `destroy` 语义** | 销毁现在会取消事件循环并关闭连接（修复 use-after-free） | 无需处理（行为更安全） |
+
+### 新能力（增量，无需迁移）
+
+- **`networkChanged()`**：HTTP / WS / DNS 均新增。从 OS 网络回调中调用即可主动恢复连接。详见 [resilience.md](./resilience.md) 第七节。注意它只影响**之后发起的新请求**；若要连同在途请求一并恢复，调用后再 `cancelAll()`。
+- **统一代理 / TLS 配置**：HTTP 与 WS 共享 `ProxyConfig` / `TlsConfig`，WS 新增 `proxy` / `tls` / `sendTimeoutMs`。
+
+### 已移除字段
+
+- **`networkPathId` / `network_path_id`**：从未随正式版本发布，0.3.13 中移除。网络切换恢复请改用 `networkChanged()`。传入该字段会被静默忽略，不会报错。
+
+---
+
 ## 一、axios → @eric8810/catcher-http
 
 ### 为什么迁移

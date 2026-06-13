@@ -132,12 +132,15 @@ pub struct TlsConfig {
     pub client_key_path: Option<String>,
     pub client_identity_pfx: Option<Vec<u8>>,
     pub client_identity_password: Option<String>,
-    pub tls_sni_override: Option<String>,
+    pub tls_sni_override: Option<String>,     // ⚠️ 原生 transport 不支持：设置会返回 InvalidConfig（仅 TS Node Agent 支持）
     pub min_tls_version: Option<TlsVersion>,  // Tls1_0 | Tls1_1 | Tls1_2 | Tls1_3
     pub max_tls_version: Option<TlsVersion>,
     pub pin_sha256: Option<Vec<String>>,
 }
 ```
+
+> **0.3.13 起**：`tls_sni_override` 在 Rust 原生 transport（catcher-http / catcher-ws）会返回 `InvalidConfig`
+> 错误（reqwest 无法覆写 SNI 主机名），不再静默忽略。如确需自定义 SNI，请使用纯 TS 的 Node Agent 路径。
 
 ### DnsConfig
 
