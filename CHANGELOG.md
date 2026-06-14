@@ -6,7 +6,8 @@ All notable changes to this project will be documented in this file. See [releas
 
 > 网络韧性大版本：主动网络切换恢复、移动端代理/VPN 兼容（含远端 DNS）、以及一组配置行为的对齐。
 > **升级前请阅读「⚠️ 行为变更」** —— 多数变更对默认配置无影响，但 DNS、代理、TLS 几处默认行为有调整。
-> 升级指南见 [`docs/user-manual/migration.md`](./docs/user-manual/migration.md) 的「版本升级：0.3.x → 0.3.13」一节。
+> 📄 完整发版说明（含 API 差距、升级清单）见 [`docs/releases/0.3.13.md`](./docs/releases/0.3.13.md)；
+> 简明迁移表见 [`docs/user-manual/migration.md`](./docs/user-manual/migration.md) 的「版本升级：0.3.x → 0.3.13」一节。
 
 ### ✨ Features
 
