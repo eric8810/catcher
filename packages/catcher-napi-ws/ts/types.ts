@@ -81,10 +81,31 @@ export interface ProxyAuth {
   password: string
 }
 
-/** 代理配置 — 对应 Rust ProxyConfig */
-export interface ProxyConfig {
+/**
+ * 代理配置 — 对应 Rust ProxyConfig（判别联合，按 `mode` 区分）。
+ *
+ * - Manual（默认，省略 `mode` 或 `mode: 'manual'`）：必须提供 `url`。
+ * - System（`mode: 'system'`）：自动从 OS 读取系统代理（需构建时启用 `system-proxy`
+ *   feature），`url` 可省略。注意：System 模式仅在调用 `networkChanged()` 后才会
+ *   探测并应用系统代理，首次构建时走直连。
+ */
+export type ProxyConfig = ManualProxyConfig | SystemProxyConfig
+
+/** 手动代理（默认）。`url` 必填。 */
+export interface ManualProxyConfig {
+  mode?: 'manual'
   /** 代理 URL。Catcher 会把 socks5:// 按 socks5h:// 处理，避免代理场景提前本地解析域名。 */
   url: string
+  auth?: ProxyAuth
+  /** 不走代理的 hostname 列表 */
+  no_proxy?: string[]
+}
+
+/** 系统代理：自动从 OS 检测（需构建时启用 `system-proxy` feature）。 */
+export interface SystemProxyConfig {
+  mode: 'system'
+  /** 忽略；系统代理由 `detect_system_proxy()` 在 `networkChanged()` 时解析。 */
+  url?: string
   auth?: ProxyAuth
   /** 不走代理的 hostname 列表 */
   no_proxy?: string[]
