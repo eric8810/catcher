@@ -12,7 +12,9 @@
 //! - **Linux**: 不读取 GNOME gsettings，仅读取环境变量和 /etc/sysconfig/proxy。
 //! - **PAC/WPAD**: 不支持，需要 JS 引擎执行 PAC 脚本。
 
-use catcher_core::types::network::{ProxyConfig, ProxyMode};
+#[cfg(feature = "system-proxy")]
+use catcher_core::types::network::ProxyMode;
+use catcher_core::types::network::ProxyConfig;
 
 /// 从操作系统读取系统代理配置。
 ///

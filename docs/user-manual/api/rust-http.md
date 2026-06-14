@@ -139,7 +139,7 @@ pub struct TlsConfig {
 }
 ```
 
-> **0.3.13 起**：`tls_sni_override` 在 Rust 原生 transport（catcher-http / catcher-ws）会返回 `InvalidConfig`
+> **0.3.15 起**：`tls_sni_override` 在 Rust 原生 transport（catcher-http / catcher-ws）会返回 `InvalidConfig`
 > 错误（reqwest 无法覆写 SNI 主机名），不再静默忽略。如确需自定义 SNI，请使用纯 TS 的 Node Agent 路径。
 
 ### DnsConfig

@@ -1,6 +1,6 @@
 [package]
 name = "catcher-ws"
-version = "0.3.13"
+version = "0.3.15"
 edition = "2021"
 description = "WebSocket client for catcher — resilient reconnect, heartbeat, multi-endpoint racing"
 license = "MIT"
@@ -12,8 +12,8 @@ rustls-tls = ["yawc/rustls-ring", "reqwest/rustls"]
 system-proxy = ["catcher-dns/system-proxy"]
 
 [dependencies]
-catcher-core = { path = "../catcher-core", version = "0.3.13" }
-catcher-dns = { path = "../catcher-dns", version = "0.3.13", features = ["reqwest-resolver"] }
+catcher-core = { path = "../catcher-core", version = "0.3.15" }
+catcher-dns = { path = "../catcher-dns", version = "0.3.15", features = ["reqwest-resolver"] }
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "net", "io-util", "macros"] }
 futures-util = "0.3"
 backon = "1"

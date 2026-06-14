@@ -4,9 +4,35 @@
 
 ---
 
-## 版本升级：0.3.x → 0.3.13
+## 版本升级：0.3.13 → 0.3.15
 
-0.3.13 引入主动网络切换恢复与移动端代理/VPN 兼容，并对齐了几处默认行为。**大多数项目无需改代码**，但以下默认行为有调整，升级前请逐条确认。完整说明见根目录 [`CHANGELOG.md`](../../CHANGELOG.md)。
+0.3.15 新增系统代理自动检测（`proxy.mode = "system"`），`ProxyConfig.url` 从 `String` 变为 `Option<String>`。**大多数项目无需改代码**，但请确认以下变更。完整说明见 [`CHANGELOG.md`](../../CHANGELOG.md) 和 [`docs/plan/2026-06-13-system-proxy-detection.md`](../plan/2026-06-13-system-proxy-detection.md)。
+
+| 变更 | 0.3.13 旧行为 | 0.3.15 新行为 | 如何迁移 |
+|------|-------------|-------------|---------|
+| `ProxyConfig.url` 类型 | `String`（必填） | `Option<String>`（Manual 必填，System 忽略） | `url: "..."` → `url: Some("...".into())`；JSON 配置无变化 |
+| `ProxyConfig.mode` 字段 | 无 | `Manual`（默认）/ `System` | 旧 JSON 自动默认 `Manual`，无需改动 |
+| 系统代理 | 不支持，调用方须手动检测 | `proxy: { mode: 'system' }` 自动检测 | 参见下方「System 代理模式」 |
+
+### System 代理模式
+
+```typescript
+// 0.3.13：调用方自行检测代理
+const client = new HttpClient({
+  proxy: { url: process.env.HTTPS_PROXY }  // 手动
+})
+
+// 0.3.15：catcher 自动检测
+const client = new HttpClient({
+  proxy: { mode: 'system' }
+})
+```
+
+`networkChanged()` 时会自动重新检测系统代理，地址变化后重建连接池。详见 [`proxy.rs`](../../packages/catcher-dns/src/proxy.rs) 注释了解平台支持情况。
+
+---
+
+## 版本升级：0.3.12 → 0.3.13
 
 | 变更 | 影响 | 如需保持旧行为 |
 |------|------|----------------|
@@ -24,7 +50,7 @@
 
 ### 已移除字段
 
-- **`networkPathId` / `network_path_id`**：从未随正式版本发布，0.3.13 中移除。网络切换恢复请改用 `networkChanged()`。传入该字段会被静默忽略，不会报错。
+- **`networkPathId` / `network_path_id`**：从未随正式版本发布，0.3.15 中移除。网络切换恢复请改用 `networkChanged()`。传入该字段会被静默忽略，不会报错。
 
 ---
 

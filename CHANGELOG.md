@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file. See [release-please](https://github.com/googleapis/release-please) for automated management.
 
+## 0.3.15 (2026-06-13)
+
+> 系统代理自动检测：`proxy.mode = "system"`，跳过 0.3.14。
+> **升级前请阅读「⚠️ 行为变更」** — `ProxyConfig.url` 从 `String` 变为 `Option<String>`。
+> 📄 完整设计文档见 [`docs/plan/2026-06-13-system-proxy-detection.md`](./docs/plan/2026-06-13-system-proxy-detection.md)。
+
+### ✨ Features
+
+- **系统代理自动检测 `proxy.mode = "system"`**：调用方无需手动传入代理 URL，catcher 自动从 OS 读取系统代理配置。支持 macOS (SystemConfiguration)、Windows (WinINET 注册表 + WinHTTP)、Linux (环境变量 + /etc/sysconfig/proxy)。
+  - `ProxyMode` enum：`Manual`（默认，向后兼容）/ `System`（自动检测）
+  - `ProxyConfig.mode` 字段新增，`url` 改为 `Option<String>`
+  - 共享实现位于 `catcher-dns/src/proxy.rs`，通过 `proxy-cfg` crate 检测
+  - `networkChanged()` 时自动重新检测系统代理，变化后重建 reqwest client
+- **HTTP/WS 统一支持 System 代理模式**：`build_middleware_client()` 和 `build_reqwest_client()` 在 `mode=System && url=None` 时安全跳过代理（退化直连），`networkChanged()` 后重检并应用新代理。
+
+### ⚠️ Behavior Changes
+
+- **`ProxyConfig.url`: `String` → `Option<String>`**：预 1.0 版本的 breaking change。旧 JSON `{"url":"..."}` 仍然可反序列化（`#[serde(default)]` 保证 `mode` 默认 `Manual`）。`transport_url()` 在 `url=None` 时会 panic — 调用方须确保 System 模式在 `detect_system_proxy()` 后 url 已被填充。
+
+### 🔄 Internal
+
+- `detect_system_proxy()` 移至 `catcher-dns` 共享，消除 `catcher-http` / `catcher-ws` 代码重复。
+- WS `networkChanged()` 非 System 模式下消除多余 config clone。
+
 ## 0.3.13 (2026-06-13)
 
 > 网络韧性大版本：主动网络切换恢复、移动端代理/VPN 兼容（含远端 DNS）、以及一组配置行为的对齐。
