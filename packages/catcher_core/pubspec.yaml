@@ -1,5 +1,5 @@
 name: catcher_core
-version: 0.3.13
+version: 0.4.0
 description: Resilient HTTP/WebSocket client backed by Rust core for Flutter
 repository: https://github.com/eric8810/catcher
 issue_tracker: https://github.com/eric8810/catcher/issues
