@@ -173,8 +173,6 @@ export interface HttpClientConfig {
   bearer_token?: string
   /** 启用 msgpack 编解码 — body 自动 JSON↔msgpack 转码. 默认 false */
   msgpack?: boolean
-  /** 网络路径版本。VPN / 代理 / DNS 变化后传入新值并重建 client。 */
-  network_path_id?: string
 }
 
 /** SSE 客户端配置 — 对应 Rust SseClientConfig */

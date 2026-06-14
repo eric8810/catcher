@@ -11,6 +11,18 @@ pub fn build_tls_config(
     mut builder: ClientBuilder,
     config: &TlsConfig,
 ) -> Result<ClientBuilder, CatcherError> {
+    // SNI 主机名覆写：reqwest 0.13 的 `tls_sni()` 只接受布尔开关（是否发送 SNI），
+    // 无法覆写 SNI 主机名（ServerName 由 URL host 在连接时决定）。与其静默忽略让调用方
+    // 误以为生效，不如显式报错。纯 TS 路径（catcher-http-ts 的 Node Agent）通过
+    // `servername` 支持该能力，原生 transport 暂不对齐。详见 docs/issues/028。
+    if config.tls_sni_override.is_some() {
+        return Err(CatcherError::InvalidConfig(
+            "tls.tls_sni_override is not supported on the native transport: reqwest cannot \
+             override the SNI hostname. Omit the field, or use the TS agent path which supports it."
+                .into(),
+        ));
+    }
+
     // If pin_sha256 is set, build a full rustls::ClientConfig with pinning verifier
     #[cfg(feature = "rustls-tls")]
     if config
@@ -98,12 +110,6 @@ pub fn build_tls_config(
         });
     }
 
-    // TLS SNI override
-    // NOTE: reqwest 0.12 tls_sni() takes a bool (enable/disable SNI), not a hostname.
-    if let Some(ref _sni) = config.tls_sni_override {
-        builder = builder.tls_sni(true);
-    }
-
     Ok(builder)
 }
 
@@ -164,11 +170,7 @@ fn build_tls_with_pinning(
         .with_custom_certificate_verifier(pinning_verifier)
         .with_no_client_auth();
 
-    // SNI
-    let mut tls_config = tls_config;
-    if config.tls_sni_override.is_some() {
-        tls_config.enable_sni = true;
-    }
+    // 注：tls_sni_override 已在 build_tls_config 入口统一拒绝，此处无需处理。
 
     // Inject into reqwest
     let builder = builder.use_preconfigured_tls(tls_config);
@@ -221,14 +223,15 @@ mod tests {
     }
 
     #[test]
-    fn tls5_sni_override() {
+    fn tls5_sni_override_is_rejected() {
+        // reqwest 无法覆写 SNI 主机名，原生 transport 显式拒绝而非静默忽略（issue #028）。
         let config = TlsConfig {
             tls_sni_override: Some("custom-sni.example.com".to_string()),
             ..Default::default()
         };
         let builder = reqwest::Client::builder();
         let result = build_tls_config(builder, &config);
-        assert!(result.is_ok());
+        assert!(matches!(result, Err(CatcherError::InvalidConfig(_))));
     }
 
     #[test]

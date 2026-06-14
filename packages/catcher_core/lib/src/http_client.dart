@@ -1106,7 +1106,6 @@ class HttpClientConfig {
   final ProxyAuth? auth;
   final String? bearerToken;
   final bool msgpack;
-  final String? networkPathId;
 
   const HttpClientConfig({
     required this.baseUrl,
@@ -1124,7 +1123,6 @@ class HttpClientConfig {
     this.auth,
     this.bearerToken,
     this.msgpack = false,
-    this.networkPathId,
   });
 
   Map<String, dynamic> toJson() => {
@@ -1143,7 +1141,6 @@ class HttpClientConfig {
         if (auth != null) 'auth': auth!.toJson(),
         if (bearerToken != null) 'bearer_token': bearerToken,
         'msgpack': msgpack,
-        if (networkPathId != null) 'network_path_id': networkPathId,
       };
 }
 

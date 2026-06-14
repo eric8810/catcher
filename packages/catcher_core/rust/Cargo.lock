@@ -164,7 +164,7 @@ checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
 
 [[package]]
 name = "catcher-core"
-version = "0.3.11"
+version = "0.3.13"
 dependencies = [
  "serde",
  "serde_json",
@@ -173,20 +173,21 @@ dependencies = [
 
 [[package]]
 name = "catcher-dns"
-version = "0.3.11"
+version = "0.3.13"
 dependencies = [
  "catcher-core",
  "hickory-proto",
  "hickory-resolver",
  "moka",
  "parking_lot",
+ "reqwest",
  "serde",
  "tokio",
 ]
 
 [[package]]
 name = "catcher-http"
-version = "0.3.11"
+version = "0.3.13"
 dependencies = [
  "async-trait",
  "backon",
@@ -214,7 +215,7 @@ dependencies = [
 
 [[package]]
 name = "catcher-ws"
-version = "0.3.11"
+version = "0.3.13"
 dependencies = [
  "backon",
  "base64",
@@ -223,6 +224,7 @@ dependencies = [
  "flate2",
  "futures-util",
  "http",
+ "reqwest",
  "rmp-serde",
  "rmpv",
  "serde",
@@ -235,7 +237,7 @@ dependencies = [
 
 [[package]]
 name = "catcher_core_ffi"
-version = "0.3.12"
+version = "0.3.13"
 dependencies = [
  "catcher-http",
  "catcher-ws",
@@ -1503,7 +1505,6 @@ dependencies = [
  "futures-core",
  "futures-util",
  "h2",
- "hickory-resolver",
  "http",
  "http-body",
  "http-body-util",
@@ -1513,7 +1514,6 @@ dependencies = [
  "js-sys",
  "log",
  "mime",
- "once_cell",
  "percent-encoding",
  "pin-project-lite",
  "quinn",
@@ -2743,6 +2743,7 @@ dependencies = [
  "nom",
  "pin-project",
  "rand 0.8.6",
+ "reqwest",
  "sha1",
  "thiserror",
  "tokio",

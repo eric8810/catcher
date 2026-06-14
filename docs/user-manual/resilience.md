@@ -723,9 +723,21 @@ Android `ConnectivityManager`、Flutter `connectivity_plus`、浏览器
 **HTTP 客户端**（`HttpTransport::network_changed()` / `client.networkChanged()`）：
 
 1. 清空 DNS 缓存
-2. 重建连接池 — 丢弃所有可能半开的 keep-alive 连接
+2. 重建连接池 — 丢弃所有可能半开的 keep-alive 连接，**后续新请求**走全新连接
 3. 重置熔断器 — 切换期间的失败不应让新网络背锅
-4. 飞行中的请求不受影响（其重试会自动建立新连接）
+
+> ⚠️ **在途请求不会被自动恢复**：连接池热替换只影响调用之后发起的新请求。
+> 调用 `networkChanged()` 时**正在进行中**的请求（尤其流式下载、慢响应）仍持有
+> 旧连接，会继续阻塞在已半开的 socket 上，直到其自身 `responseTimeoutMs` 超时
+> （除非配置了可重试的 `retry`）。若希望网络切换时连同在途请求一并恢复，请在
+> `networkChanged()` 之后调用 `cancelAll()` —— 在途请求会立即失败，由上层决定是否重发：
+>
+> ```typescript
+> onNetworkChange(() => {
+>   httpClient.networkChanged()
+>   httpClient.cancelAll()   // 主动中断在途请求，使其立即失败而非干等超时
+> })
+> ```
 
 ### 7.3 各平台用法
 

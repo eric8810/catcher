@@ -205,10 +205,14 @@ contextBridge.exposeInMainWorld('api', {
 
 ## 四、DNS 缓存
 
-配置 `dns` 后默认接入 Catcher DNS，启用 DNS 缓存、旧缓存兜底、
+> **0.3.13 起，DNS 按需启用（opt-in）**：**不传 `dns` 配置时使用协议库原生解析**（不再隐式启用 Catcher DNS）。
+> 一旦传入 `dns` 配置，`mode` 默认即 `catcher`。若想在传了 `dns` 的同时仍走原生解析，显式设置 `dns.mode = 'native'`。
+
+传入 `dns` 配置后默认接入 Catcher DNS，启用 DNS 缓存、旧缓存兜底、
 自定义 nameserver 和 host mapping。代理场景下，目标域名交给代理解析，
-Catcher DNS 不会提前把目标域名改成 IP。只有显式配置
-`dns.mode = 'native'` 时，才使用底层协议库原生解析。
+Catcher DNS 不会提前把目标域名改成 IP。
+读取系统 DNS 配置失败时默认返回错误而非静默回退到公共 nameserver；
+如需回退，设置 `dns.fallbackToDefaultNameservers = true`。
 
 | 配置 | 说明 | 默认值 |
 |------|------|--------|

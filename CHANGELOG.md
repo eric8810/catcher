@@ -2,6 +2,52 @@
 
 All notable changes to this project will be documented in this file. See [release-please](https://github.com/googleapis/release-please) for automated management.
 
+## 0.3.13 (2026-06-13)
+
+> 网络韧性大版本：主动网络切换恢复、移动端代理/VPN 兼容（含远端 DNS）、以及一组配置行为的对齐。
+> **升级前请阅读「⚠️ 行为变更」** —— 多数变更对默认配置无影响，但 DNS、代理、TLS 几处默认行为有调整。
+> 📄 完整发版说明（含 API 差距、升级清单）见 [`docs/releases/0.3.13.md`](./docs/releases/0.3.13.md)；
+> 简明迁移表见 [`docs/user-manual/migration.md`](./docs/user-manual/migration.md) 的「版本升级：0.3.x → 0.3.13」一节。
+
+### ✨ Features
+
+- **主动网络切换恢复 `networkChanged()`**：网络环境切换（WiFi↔蜂窝、VPN 连接/断开/换节点）后，旧连接会静默变成半开连接。宿主 App 从 OS 拿到网络变化信号后调用 `networkChanged()`，立即完成恢复，不再等被动超时（WS 心跳 10–30s / TCP keepalive 20s / DNS 缓存最长 300s）。
+  - **HTTP**（`HttpTransport::network_changed()` / `client.networkChanged()`）：清空 DNS 缓存并重建解析器、热替换底层客户端丢弃整个旧连接池、重置熔断器。
+  - **WebSocket**（`WsHandle::network_changed()` / `ws.networkChanged()`）：立即丢弃半开连接（不发 Close 帧）、清 DNS、重置退避并立即重连、多端点重新竞速。
+  - **catcher-dns**：新增 `DnsResolver::clear_cache()`，并在网络切换时重建 resolver 以读取新网络（如 VPN 下发）的 nameserver。
+  - 全平台绑定：C ABI（`catcher_ws_network_changed` / `catcher_http_network_changed`）、napi、UniFFI（Kotlin/Swift）、Dart。
+- **移动端显式代理 / VPN 兼容**：HTTP 与 WebSocket 现在共享 `catcher-core` 的 `ProxyConfig` / `TlsConfig`，一致支持 HTTP 代理、SOCKS5/SOCKS5h、HTTP CONNECT，以及 `no_proxy` 旁路。启用 `reqwest/socks` feature。
+- **WebSocket 迁移到 reqwest 传输层**：使 WS 获得与 HTTP 一致的代理 / TLS / DNS 能力；新增 `WsClientConfig.proxy`、`WsClientConfig.tls`、`WsClientConfig.send_timeout_ms`（默认 10000ms，防半开发送阻塞事件循环）。
+
+### ⚠️ Behavior Changes（升级敏感，请逐条确认）
+
+- **DNS 改为按需启用（opt-in）**：此前 HTTP/WS **总是**构建 Catcher DNS 解析器（即使未配置 `dns`）。现在 **不配置 `dns` 即使用协议库原生解析**；仅当提供 `dns` 配置（`mode` 默认 `catcher`）或显式 `dns.mode = "catcher"` 时才启用 Catcher DNS（缓存 / 旧缓存兜底 / host mapping / 自定义 nameserver）。**影响**：此前依赖隐式 DNS 缓存的调用方，升级后若未显式配置 `dns` 将失去缓存。
+- **不再静默回退到公共 DNS**：此前读取系统 DNS 配置失败时会静默回退到 hickory 默认（公共）nameserver（如 `8.8.8.8`）。现在会返回 `DnsError`，除非显式设置新增字段 `fallback_to_default_nameservers = true`（默认 `false`）。**影响**：移动端/受限网络下不再意外把 DNS 查询发往公共服务器。
+- **`socks5://` 自动按 `socks5h://` 处理**：代理路径下目标域名交给代理远端解析，避免本地提前解析成 IP 破坏 Clash fake-ip / VPN 分流。**影响**：无法再通过 `socks5://` 强制本地解析（这是有意的修复）。
+- **`tls_sni_override` 在原生 transport 改为显式报错**：此前在 Rust（catcher-http / catcher-ws）路径被**静默忽略**（reqwest 无法覆写 SNI 主机名）。现在设置该字段会在构建客户端时返回 `InvalidConfig`，不再假装生效。纯 TS 的 Node Agent 路径（`@eric8810/catcher-http` 的 `servername`）仍支持。
+- **WebSocket 单连接多 IP 握手故障转移已移除**：随 WS 迁移到 reqwest，按 A 记录逐个 IP 重试握手的逻辑（`connect_with_resolved_addrs`）被移除，改由 reqwest 的连接层（happy-eyeballs）处理。**影响**：多 IP 主机在握手层的逐 IP 重试能力减弱（多端点竞速 `urls: [...]` 不受影响）。
+- **WebSocket FFI 销毁语义修正**：`catcher_ws_destroy` 现在会取消事件循环并关闭连接，而非仅从注册表移除句柄。修复了销毁后事件循环仍运行、仍回调宿主 `user_data` 的 use-after-free 风险。
+
+### 🐛 Bug Fixes
+
+- **FFI 句柄 use-after-free**：句柄中直接编码 registry id，消除回收复用导致的 use-after-free。
+- **网络切换期间的失败不再惩罚新网络**：在途请求启动时快照「网络代际」，切换后失败不计入熔断器（network-generation gating）。
+- **DNS 缓存清空后不被旧网络结果回填**：`clear_cache()` 后，后台 stale 刷新与前台解析都按代际拒绝写入旧结果。
+- **network-quality 取消订阅泄漏**：`unsubscribe()` 现在会 `abort()` 后台任务，而非仅发送取消信号。
+- **WS 重连命令重放遵守 `send_timeout_ms`**：重放缓冲命令时不会因半开 sink 卡死事件循环。
+
+### 🔄 Internal / 无公开 API 影响
+
+- 本周期内曾引入又移除了 `network_path_id` / `networkPathId` 配置字段（先加于代理 PR、后移除）——**对外 API 净零变化**，因为它从未随正式版本发布。其职责由 `networkChanged()` 承担。
+- 共享类型 `ProxyConfig` / `ProxyAuth` / `TlsConfig` / `TlsVersion` 上移至 `catcher-core` 并在 `catcher-http` / `catcher-ws` 重导出：Rust 调用方经 `catcher_http::types::http::*` 的导入路径**保持源码兼容**。
+- 配置 JSON 反序列化未启用 `deny_unknown_fields`：传入未知/已移除字段会被静默忽略，故绑定层 JSON 调用方不会因字段移除而中断。
+
+### 📝 Documentation
+
+- 新增 issues #028–#031（已修复）与 #032（feature gap：WS 尚未实现 `pin_sha256` 证书固定）。
+- `docs/user-manual/resilience.md` 第七节：`networkChanged()` 各平台用法、防抖建议，以及「在途请求不会被自动恢复，需配合 `cancelAll()`」说明。
+- `docs/arch-rs/04-transport.md`：代理 × DNS 契约，及「代理路径目标域名不本地解析」对 reqwest 内部行为的依赖（升级 reqwest 必须重跑 `proxy_dns_behavior_test`）。
+
 ## 0.3.12 (2026-06-08)
 
 ### 🐛 Bug Fixes

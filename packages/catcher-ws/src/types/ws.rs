@@ -233,10 +233,6 @@ pub struct WsClientConfig {
     /// DNS 配置
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dns: Option<DnsConfig>,
-
-    /// 网络路径版本。外部平台在 VPN / 代理 / DNS 变化时应传入新的值并重建 client。
-    #[serde(alias = "networkPathId", skip_serializing_if = "Option::is_none")]
-    pub network_path_id: Option<String>,
 }
 
 fn default_send_timeout() -> u64 {
@@ -275,7 +271,6 @@ impl Default for WsClientConfig {
             race_count: default_race_count(),
             msgpack: false,
             dns: None,
-            network_path_id: None,
         }
     }
 }

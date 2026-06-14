@@ -64,6 +64,49 @@ fn invoke_sse_callback(callback: EventCallback, json: String, user_data: usize) 
     );
 }
 
+/// 已销毁的 SSE 句柄 id 集合。后台转发循环在 destroy 后仍可能回调，标记取消后回调前
+/// 检查可避免在 destroy 后触发宿主 `user_data`（use-after-free）。与 WS/HTTP 对齐。
+/// 详见 issue #034。id 由 HandleRegistry 单调分配、不复用，集合只增是安全的。
+fn cancelled_sse_ids() -> &'static std::sync::RwLock<std::collections::HashSet<usize>> {
+    static CANCELLED: std::sync::OnceLock<std::sync::RwLock<std::collections::HashSet<usize>>> =
+        std::sync::OnceLock::new();
+    CANCELLED.get_or_init(|| std::sync::RwLock::new(std::collections::HashSet::new()))
+}
+
+fn mark_sse_cancelled(id: usize) {
+    let lock = cancelled_sse_ids();
+    match lock.write() {
+        Ok(mut ids) => {
+            ids.insert(id);
+        }
+        Err(poisoned) => {
+            poisoned.into_inner().insert(id);
+        }
+    }
+}
+
+fn is_sse_cancelled(id: usize) -> bool {
+    let lock = cancelled_sse_ids();
+    match lock.read() {
+        Ok(ids) => ids.contains(&id),
+        Err(poisoned) => poisoned.into_inner().contains(&id),
+    }
+}
+
+/// 仅当句柄未被 destroy 时回调；返回 false 表示已取消（调用方应停止转发循环）。
+fn invoke_sse_callback_if_active(
+    id: usize,
+    callback: EventCallback,
+    json: String,
+    user_data: usize,
+) -> bool {
+    if is_sse_cancelled(id) {
+        return false;
+    }
+    invoke_sse_callback(callback, json, user_data);
+    true
+}
+
 fn parse_headers_json(headers_json: *const c_char) -> HashMap<String, String> {
     if headers_json.is_null() {
         return HashMap::new();
@@ -204,21 +247,35 @@ pub unsafe extern "C" fn catcher_sse_connect(
                     // Spawn background task to forward SSE lines to callback
                     sse_runtime().spawn(async move {
                         loop {
+                            // destroy 后停止转发，避免回调已释放的 user_data（issue #034）。
+                            if is_sse_cancelled(id) {
+                                break;
+                            }
                             let mut c = client_arc.lock().await;
                             let line_result = c.next_line().await;
                             drop(c); // release lock before invoking callback
                             match line_result {
                                 Some(Ok(line)) => {
                                     let json = build_sse_event_json("data", &line);
-                                    invoke_sse_callback(callback_ptr, json, ud);
+                                    if !invoke_sse_callback_if_active(id, callback_ptr, json, ud) {
+                                        break;
+                                    }
                                 }
                                 Some(Err(e)) => {
                                     let err_json = build_sse_event_json("error", &e.to_string());
-                                    invoke_sse_callback(callback_ptr, err_json, ud);
+                                    if !invoke_sse_callback_if_active(id, callback_ptr, err_json, ud)
+                                    {
+                                        break;
+                                    }
                                 }
                                 None => {
                                     let done_json = build_sse_event_json("close", "");
-                                    invoke_sse_callback(callback_ptr, done_json, ud);
+                                    let _ = invoke_sse_callback_if_active(
+                                        id,
+                                        callback_ptr,
+                                        done_json,
+                                        ud,
+                                    );
                                     break;
                                 }
                             }
@@ -292,5 +349,10 @@ pub unsafe extern "C" fn catcher_sse_destroy(sse_handle: *mut c_void) {
         return;
     }
     let id = sse_handle as usize;
+    // 标记取消并关闭，阻止后台转发循环在 destroy 后再回调宿主 user_data（issue #034）。
+    mark_sse_cancelled(id);
+    if let Some(client) = SSE_REGISTRY.get(id) {
+        client.blocking_lock().close();
+    }
     SSE_REGISTRY.remove(id);
 }

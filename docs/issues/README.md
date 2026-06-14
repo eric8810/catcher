@@ -66,6 +66,32 @@
 | M-02 | 代理 / VPN / 本地网络兼容范围 | 🔴 P0 | 已调研，待补验证项 | [027-proxy-vpn-network-compatibility-research.md](./027-proxy-vpn-network-compatibility-research.md) |
 
 
+## PR #13~#15 架构 Review 发现（2026-06-13）
+
+> 来源：对 PR #13（`networkChanged()`）、#14（显式代理）、#15（代理 DNS 行为）的严格架构 review。主线功能在 master 上工作正常且有测试兜底；以下为残留的小 bug 与隐性脆弱点。
+
+| # | Issue | 严重 | 状态 | 修复方案 | 文件 |
+|---|-------|:---:|:----:|:------:|------|
+| 28 | `tlsSniOverride` 在 Rust 路径静默失效，与 TS 路径行为不一致 | 🟡 Med | ✅ Fixed | 原生路径显式报错 | [028-tls-sni-override-noop-rust-path.md](./028-tls-sni-override-noop-rust-path.md) |
+| 29 | `networkPathId` 死字段，从未被读取 | 🟢 Low | ✅ Fixed | 移除字段（Rust + 全绑定） | [029-network-path-id-dead-field.md](./029-network-path-id-dead-field.md) |
+| 30 | `networkChanged()` 不恢复在途请求，注释言过其实 | 🟡 Med | ✅ Fixed | 修注释 + 文档化 `+cancelAll()` | [030-network-changed-inflight-requests.md](./030-network-changed-inflight-requests.md) |
+| 31 | 代理远端 DNS 正确性依赖 reqwest 未文档化行为，仅测试兜底 | 🟢 Low-Med | ✅ Fixed | 代码注释 + CI/arch 文档加固 | [031-proxy-dns-relies-on-reqwest-internal-behavior.md](./031-proxy-dns-relies-on-reqwest-internal-behavior.md) |
+| 33 | `q05_subscribe_multiple` 时序 flake + CI 缺 `--no-fail-fast` 掩盖整套件 | 🟡 Med | ✅ Fixed | 改按生命周期断言 + CI 加 `--no-fail-fast` | [033-quality-test-flake-and-ci-fail-fast.md](./033-quality-test-flake-and-ci-fail-fast.md) |
+| 34 | FFI 回调测试 UAF（整套并行 SIGSEGV）+ HTTP/SSE destroy 不抑制在途回调 | 🟡 Med | ✅ Fixed | 测试回调状态 `Box::leak`；HTTP/SSE destroy 加 `cancelled_ids` 与 WS 对齐 | [034-ffi-callback-uaf-test-and-destroy-asymmetry.md](./034-ffi-callback-uaf-test-and-destroy-asymmetry.md) |
+
+**结论**：#28~#31、#33、#34 已全部修复（2026-06-13）。均为局部改动，无连接层重构。验证：`cargo clippy --workspace` 通过、相关单测与 `proxy_dns_behavior_test` 全绿、`quality_test` 5/5 稳定、`http_test` 并行 5/5 无 SIGSEGV、`catcher-ffi` 全套件绿、`pnpm typecheck` 通过；Dart 改动为机械字段移除（本机无 dart 工具链，未跑 analyze）。#34 产品侧已将 HTTP/SSE destroy 与 WS 对齐（destroy 后不再回调 user_data）。
+
+> 排查记录：`connect_stream_uses_dns_host_mapping` 在本机 macOS 沙箱失败，经查 host_mapping 解析正确（连接到达正确 IP:端口），且在 Linux CI 绿色构建（`849187d`）上通过 → 环境特异性，非产品 bug。该测试此前在 CI 未被验证，根因正是 #33 的 fail-fast 截断。
+
+### 由本轮 review 衍生的能力缺口（feature gap，非 bug）
+
+| # | 能力缺口 | 优先级 | 状态 | 方案 | 文件 |
+|---|---------|:------:|:----:|------|------|
+| 32 | WS 尚未实现 `pin_sha256` 证书固定（HTTP 已支持） | 🟡 P1–P2 | 未实现 | A:类型/文档标注（小）· B:抽取共享 pinning（中） | [032-ws-pin-sha256-not-supported.md](./032-ws-pin-sha256-not-supported.md) |
+
+> #32 是 WS 端的能力尚未实现（fail-closed 显式报错，无安全降级），性质与上方 bug 不同，单列。
+
+
 ## 间题之间的关联
 
 ```

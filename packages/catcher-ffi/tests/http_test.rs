@@ -7,7 +7,7 @@
 //!   cargo test -p catcher-ffi --test http_test
 
 use std::ffi::{c_char, c_void, CStr, CString};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 use catcher_core::ffi_types::FfiString;
 use catcher_http::ffi::http_ffi as http;
@@ -298,10 +298,15 @@ extern "C" fn capture_to_result(
     *result.lock().unwrap() = Some(json);
 }
 
-fn make_result_cell() -> (Arc<Mutex<Option<String>>>, *mut c_void) {
-    let cell = Arc::new(Mutex::new(None::<String>));
-    let ptr = Arc::as_ptr(&cell) as *mut c_void;
-    (cell, ptr)
+// 故意泄漏 user_data 指向的内存：回调可能在测试函数返回后才由后台全局 runtime 触发
+// （in-flight / 被取消的请求，且 destroy 不会同步停止回调）。若用 Arc 并在测试结束时
+// drop，user_data 指针会悬空 → use-after-free（多测试并行时表现为 SIGSEGV）。测试进程
+// 生命周期内泄漏一个小 Mutex 可忽略，且与「宿主须在回调存活期间保持 user_data 有效」的
+// FFI 契约一致。详见 docs/issues/034。
+fn make_result_cell() -> (&'static Mutex<Option<String>>, *mut c_void) {
+    let leaked: &'static Mutex<Option<String>> = Box::leak(Box::new(Mutex::new(None::<String>)));
+    let ptr = leaked as *const Mutex<Option<String>> as *mut c_void;
+    (leaked, ptr)
 }
 
 #[tokio::test]
@@ -631,11 +636,13 @@ extern "C" fn capture_stream_events(
     events.lock().unwrap().push((et, data));
 }
 
+// 同 make_result_cell：泄漏以保证后台 runtime 的延迟回调始终写入有效内存。
 #[allow(clippy::type_complexity)]
-fn make_events_cell() -> (Arc<Mutex<Vec<(String, String)>>>, *mut c_void) {
-    let cell = Arc::new(Mutex::new(Vec::<(String, String)>::new()));
-    let ptr = Arc::as_ptr(&cell) as *mut c_void;
-    (cell, ptr)
+fn make_events_cell() -> (&'static Mutex<Vec<(String, String)>>, *mut c_void) {
+    let leaked: &'static Mutex<Vec<(String, String)>> =
+        Box::leak(Box::new(Mutex::new(Vec::<(String, String)>::new())));
+    let ptr = leaked as *const Mutex<Vec<(String, String)>> as *mut c_void;
+    (leaked, ptr)
 }
 
 #[tokio::test]
