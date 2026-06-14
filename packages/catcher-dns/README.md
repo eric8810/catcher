@@ -19,7 +19,7 @@ Shared DNS resolver for the [catcher](https://github.com/eric8810/catcher) toolk
 
 ```toml
 [dependencies]
-catcher-dns = "0.3.11"
+catcher-dns = "0.3.13"
 ```
 
 ```rust

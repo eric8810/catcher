@@ -1,3 +1,27 @@
+## 0.3.13
+
+### Features
+
+- `networkChanged()` on HTTP and WebSocket clients for proactive recovery after
+  network switches (WiFi ↔ cellular, VPN connect/disconnect): clears DNS cache,
+  rebuilds the connection pool, resets the circuit breaker, and reconnects WS.
+- WebSocket now supports explicit `proxy` and `tls` config; HTTP and WS share the
+  same `ProxyConfig` / `TlsConfig`, with SOCKS5/SOCKS5h and HTTP CONNECT support.
+
+### Behavior Changes
+
+- DNS is now opt-in: without a `dns` config the platform's native resolver is used
+  (previously the Catcher resolver was always built). Pass `dns` to re-enable
+  caching / host mapping / custom nameservers.
+- `socks5://` proxies are normalized to `socks5h://` so the target domain is
+  resolved remotely at the proxy (fixes Clash / VPN domain routing).
+- `tls_sni_override` is rejected on the native transport (was silently ignored).
+
+### Bug Fixes
+
+- FFI lifecycle: destroying a client now stops in-flight requests/SSE and no longer
+  invokes the host callback afterwards (prevents use-after-free).
+
 ## 0.3.12
 
 ### Packaging
