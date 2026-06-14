@@ -1102,6 +1102,26 @@ async fn connection_manager(
 mod tests {
     use super::*;
 
+    /// 清除系统代理环境变量，避免 reqwest 的 auto_sys_proxy（默认开启）把本地
+    /// 连接请求路由到系统代理（如 Clash）。代理会旁路自定义 DNS resolver（见
+    /// ws_client.rs 中 issue #031 说明），导致 host_mapping 里的假域名（如
+    /// `ws.test`）无法解析、握手超时。
+    ///
+    /// 仅用于连接本地测试 server 的场景：本进程所有测试均直连 127.0.0.1，
+    /// 移除代理不影响其正确性；显式代理测试（`ProxyConfig.url`）不读环境变量。
+    fn clear_proxy_env_for_local_tests() {
+        // SAFETY: 仅修改测试进程的环境变量；本模块测试均连接本地地址，
+        // 移除系统代理对所有并行测试无害。
+        unsafe {
+            std::env::remove_var("http_proxy");
+            std::env::remove_var("https_proxy");
+            std::env::remove_var("all_proxy");
+            std::env::remove_var("HTTP_PROXY");
+            std::env::remove_var("HTTPS_PROXY");
+            std::env::remove_var("ALL_PROXY");
+        }
+    }
+
     /// 验证 build_request 成功构建带 headers 和 protocols 的请求
     #[test]
     fn build_request_with_headers_and_protocols() {
@@ -1194,6 +1214,9 @@ mod tests {
     /// 验证显式配置 DNS 时，WS 连接使用 host_mapping。
     #[tokio::test]
     async fn connect_stream_uses_dns_host_mapping() {
+        // 假域名 ws.test 须由 host_mapping 解析为 127.0.0.1；若 reqwest 走了
+        // 系统代理，resolver 会被旁路，请求发往代理导致握手超时。
+        clear_proxy_env_for_local_tests();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         let server = tokio::spawn(async move {
