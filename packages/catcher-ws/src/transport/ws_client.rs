@@ -393,17 +393,24 @@ pub(crate) fn build_reqwest_client(
     }
 
     if let Some(ref proxy_config) = config.proxy {
-        let proxy_url = proxy_config.transport_url();
-        let mut proxy = reqwest::Proxy::all(proxy_url.as_ref())
-            .map_err(|e| CatcherError::InvalidConfig(format!("invalid WS proxy URL: {e}")))?;
-        if let Some(ref auth) = proxy_config.auth {
-            proxy = proxy.basic_auth(&auth.username, &auth.password);
+        // System 模式且尚未解析（url=None）时跳过
+        if proxy_config.mode == catcher_core::types::network::ProxyMode::System
+            && proxy_config.url.is_none()
+        {
+            // 跳过 — 无系统代理可用，直连
+        } else {
+            let proxy_url = proxy_config.transport_url();
+            let mut proxy = reqwest::Proxy::all(proxy_url.as_ref())
+                .map_err(|e| CatcherError::InvalidConfig(format!("invalid WS proxy URL: {e}")))?;
+            if let Some(ref auth) = proxy_config.auth {
+                proxy = proxy.basic_auth(&auth.username, &auth.password);
+            }
+            if !proxy_config.no_proxy.is_empty() {
+                let no_proxy = reqwest::NoProxy::from_string(&proxy_config.no_proxy.join(","));
+                proxy = proxy.no_proxy(no_proxy);
+            }
+            builder = builder.proxy(proxy);
         }
-        if !proxy_config.no_proxy.is_empty() {
-            let no_proxy = reqwest::NoProxy::from_string(&proxy_config.no_proxy.join(","));
-            proxy = proxy.no_proxy(no_proxy);
-        }
-        builder = builder.proxy(proxy);
     }
 
     let headers = build_handshake_headers(config)?;
@@ -895,7 +902,34 @@ async fn connection_manager(
 
             // 重建 reqwest client：丢弃旧连接池，并重新应用 proxy/TLS/DNS 配置。
             // 显式启用 Catcher DNS 时，也会随新 client 重建 resolver。
-            match build_reqwest_client(config) {
+            // System 代理模式：重新检测 OS 代理。
+            let effective_config;
+            let owned_config;
+            if config
+                .proxy
+                .as_ref()
+                .is_some_and(|p| p.mode == catcher_core::types::network::ProxyMode::System)
+            {
+                let mut c = config.clone();
+                let user_no_proxy = c
+                    .proxy
+                    .as_ref()
+                    .map(|p| p.no_proxy.clone())
+                    .unwrap_or_default();
+                c.proxy = catcher_dns::proxy::detect_system_proxy();
+                if let Some(ref mut p) = c.proxy {
+                    for entry in user_no_proxy {
+                        if !p.no_proxy.contains(&entry) {
+                            p.no_proxy.push(entry);
+                        }
+                    }
+                }
+                owned_config = c;
+                effective_config = &owned_config;
+            } else {
+                effective_config = config;
+            };
+            match build_reqwest_client(effective_config) {
                 Ok(client) => reqwest_client = client,
                 Err(e) => {
                     let _ = event_tx.send(WsEvent::Error {
@@ -1630,7 +1664,7 @@ mod tests {
 
         let config: WsClientConfig = serde_json::from_str(json).unwrap();
         assert_eq!(
-            config.proxy.as_ref().map(|proxy| proxy.url.as_str()),
+            config.proxy.as_ref().and_then(|proxy| proxy.url.as_deref()),
             Some("socks5h://127.0.0.1:7890")
         );
         assert!(!config.tls.reject_unauthorized);

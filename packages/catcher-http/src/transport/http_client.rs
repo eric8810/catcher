@@ -15,6 +15,7 @@ use crate::transport::retry_middleware::MetricsRetryMiddleware;
 use crate::transport::tls::build_tls_config;
 use crate::types::http::*;
 use catcher_core::types::resilience::CbState;
+use catcher_core::types::network::ProxyMode;
 use catcher_core::CatcherError;
 
 /// HTTP 传输层 — 真实收发 HTTP 请求，带重试中间件 + 熔断器 + 取消 + 自适应超时
@@ -158,8 +159,36 @@ impl HttpTransport {
             cb.reset();
         }
 
+        // System 代理模式：重新检测 OS 代理
+        let config = if self
+            .config
+            .proxy
+            .as_ref()
+            .is_some_and(|p| p.mode == ProxyMode::System)
+        {
+            let mut new_config = (*self.config).clone();
+            // 保留用户显式传入的 no_proxy，与 OS 检测结果合并
+            let user_no_proxy = new_config
+                .proxy
+                .as_ref()
+                .map(|p| p.no_proxy.clone())
+                .unwrap_or_default();
+            new_config.proxy = catcher_dns::proxy::detect_system_proxy();
+            if let Some(ref mut p) = new_config.proxy {
+                // 合并：OS whitelist + 用户额外配置的去重
+                for entry in user_no_proxy {
+                    if !p.no_proxy.contains(&entry) {
+                        p.no_proxy.push(entry);
+                    }
+                }
+            }
+            Arc::new(new_config)
+        } else {
+            self.config.clone()
+        };
+
         let new_client = build_middleware_client(
-            &self.config,
+            &config,
             &self.metrics,
             #[cfg(feature = "hickory-dns")]
             self.dns_resolver.as_ref(),
@@ -219,19 +248,25 @@ fn build_middleware_client(
 
     // G4: Proxy configuration
     if let Some(ref proxy_config) = config.proxy {
-        let proxy_url = proxy_config.transport_url();
-        let mut proxy = reqwest::Proxy::all(proxy_url.as_ref())
-            .map_err(|e| CatcherError::InvalidConfig(format!("invalid proxy URL: {e}")))?;
-        if let Some(ref auth) = proxy_config.auth {
-            proxy = proxy.basic_auth(&auth.username, &auth.password);
+        // System 模式且尚未解析（url=None）时跳过：networkChanged() 会重新检测后再重建。
+        // 首次构建时若无系统代理，退化直连。
+        if proxy_config.mode == ProxyMode::System && proxy_config.url.is_none() {
+            // 跳过 — 无系统代理可用，直连
+        } else {
+            let proxy_url = proxy_config.transport_url();
+            let mut proxy = reqwest::Proxy::all(proxy_url.as_ref())
+                .map_err(|e| CatcherError::InvalidConfig(format!("invalid proxy URL: {e}")))?;
+            if let Some(ref auth) = proxy_config.auth {
+                proxy = proxy.basic_auth(&auth.username, &auth.password);
+            }
+            // G4: noProxy — exclude matching hostnames from proxying
+            if !proxy_config.no_proxy.is_empty() {
+                let no_proxy_str = proxy_config.no_proxy.join(",");
+                let no_proxy = reqwest::NoProxy::from_string(&no_proxy_str);
+                proxy = proxy.no_proxy(no_proxy);
+            }
+            reqwest_builder = reqwest_builder.proxy(proxy);
         }
-        // G4: noProxy — exclude matching hostnames from proxying
-        if !proxy_config.no_proxy.is_empty() {
-            let no_proxy_str = proxy_config.no_proxy.join(",");
-            let no_proxy = reqwest::NoProxy::from_string(&no_proxy_str);
-            proxy = proxy.no_proxy(no_proxy);
-        }
-        reqwest_builder = reqwest_builder.proxy(proxy);
     }
 
     // G6: Redirect policy

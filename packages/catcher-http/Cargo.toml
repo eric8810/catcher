@@ -12,6 +12,7 @@ rustls-tls = ["reqwest/rustls", "dep:rustls", "dep:rustls-pki-types", "dep:sha2"
 native-tls = ["reqwest/native-tls"]
 hickory-dns = ["catcher-dns/hickory-dns", "catcher-dns/reqwest-resolver"]
 napi = ["dep:napi", "dep:napi-derive"]
+system-proxy = ["catcher-dns/system-proxy"]
 
 [dependencies]
 catcher-core = { path = "../catcher-core", version = "0.3.13" }

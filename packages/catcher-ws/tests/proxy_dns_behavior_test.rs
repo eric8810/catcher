@@ -10,17 +10,19 @@ use tokio::time::timeout;
 
 fn proxy_config(url: String) -> ProxyConfig {
     ProxyConfig {
-        url,
+        url: Some(url),
         auth: None,
         no_proxy: Vec::new(),
+        ..Default::default()
     }
 }
 
 fn proxy_config_with_no_proxy(url: String, no_proxy: Vec<String>) -> ProxyConfig {
     ProxyConfig {
-        url,
+        url: Some(url),
         auth: None,
         no_proxy,
+        ..Default::default()
     }
 }
 
