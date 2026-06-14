@@ -1,3 +1,19 @@
+## 0.3.16
+
+### Bug Fixes
+
+- **napi `system-proxy` feature not enabled**: 0.3.15 introduced system proxy
+  auto-detection (`proxy.mode = "system"`), but both napi bindings
+  (`catcher-napi-http`, `catcher-napi-ws`) did not enable the `system-proxy` cargo
+  feature on their dependency, so `detect_system_proxy()` compiled to a no-op stub
+  and `proxy.mode = "system"` silently did nothing in the published npm packages.
+  The feature is now enabled on both napi crates.
+- **napi TypeScript types synced**: `ProxyConfig` is now modeled as a discriminated
+  union in the published TS types — `ManualProxyConfig` (default) requires `url`,
+  `SystemProxyConfig` (`mode: 'system'`) may omit it. This tightens the types so
+  url-less manual configs (which would panic in `transport_url()`) no longer
+  type-check. The Dart package is unaffected (no napi binding).
+
 ## 0.3.15
 
 ### Features
