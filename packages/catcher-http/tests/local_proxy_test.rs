@@ -9,9 +9,10 @@ fn target_url() -> String {
 async fn assert_http_via_proxy(proxy_url: String) {
     let transport = HttpTransport::new(HttpClientConfig {
         proxy: Some(ProxyConfig {
-            url: proxy_url,
+            url: Some(proxy_url),
             auth: None,
             no_proxy: Vec::new(),
+            ..Default::default()
         }),
         connect_timeout_ms: 10_000,
         response_timeout_ms: 20_000,

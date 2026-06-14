@@ -9,6 +9,7 @@ repository = "https://github.com/eric8810/catcher"
 [features]
 default = ["rustls-tls"]
 rustls-tls = ["yawc/rustls-ring", "reqwest/rustls"]
+system-proxy = ["catcher-dns/system-proxy"]
 
 [dependencies]
 catcher-core = { path = "../catcher-core", version = "0.3.13" }

@@ -1,11 +1,9 @@
 //! catcher-dns — catcher 的共享 DNS 解析能力。
 //!
 //! 这个 crate 放置 HTTP 和 WebSocket 都会用到的 DNS 配置、缓存、
-//! host mapping 和旧缓存兜底逻辑，避免业务协议包互相依赖。
-//!
-//! 启用默认 `hickory-dns` feature 时，解析器使用 hickory-resolver，
-//! 并提供缓存、过期缓存兜底和后台刷新。关闭该 feature 时，解析器只
-//! 使用系统 DNS 和 `host_mapping`，不提供缓存和过期缓存兜底。
+//! host mapping 和旧缓存兜底逻辑，以及系统代理检测，避免业务协议包互相依赖。
+
+pub mod proxy;
 
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};

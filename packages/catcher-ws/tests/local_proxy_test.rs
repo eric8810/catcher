@@ -10,9 +10,10 @@ async fn assert_ws_via_proxy(proxy_url: String) {
     let config = WsClientConfig {
         urls: vec![target_url()],
         proxy: Some(ProxyConfig {
-            url: proxy_url,
+            url: Some(proxy_url),
             auth: None,
             no_proxy: Vec::new(),
+            ..Default::default()
         }),
         handshake_timeout_ms: 20_000,
         ..Default::default()

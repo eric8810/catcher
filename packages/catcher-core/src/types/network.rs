@@ -90,11 +90,26 @@ pub struct ProxyAuth {
     pub password: String,
 }
 
+/// 代理模式。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum ProxyMode {
+    /// 手动指定代理（现有行为）。
+    #[default]
+    Manual,
+    /// 自动从 OS 系统代理检测。
+    System,
+}
+
 /// 代理配置。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ProxyConfig {
+    /// 代理模式。默认 Manual 以保持向后兼容。
+    #[serde(default)]
+    pub mode: ProxyMode,
     /// 代理地址，例如 `http://host:port`、`https://host:port`、`socks5://host:port`、`socks5h://host:port`。
-    pub url: String,
+    /// Manual 模式必填，System 模式忽略。
+    pub url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auth: Option<ProxyAuth>,
     #[serde(alias = "noProxy", default)]
@@ -107,25 +122,35 @@ impl ProxyConfig {
     /// `socks5://` 会让 reqwest 在本地先解析目标域名。Clash fake-ip、VPN
     /// 分流和远端 DNS 场景下，这会把域名提前变成 IP，代理无法再按域名处理。
     /// 因此 Catcher 将 `socks5://` 统一按 `socks5h://` 处理，让代理解析目标域名。
+    ///
+    /// # Panics
+    ///
+    /// 当 `url` 为 `None` 时 panic。调用方应在调用前确保 proxy 已解析
+    /// （System 模式在 `detect_system_proxy()` 后 url 一定为 Some）。
     pub fn transport_url(&self) -> Cow<'_, str> {
-        let Some((scheme, rest)) = self.url.split_once("://") else {
-            return Cow::Borrowed(self.url.as_str());
+        let url = self
+            .url
+            .as_deref()
+            .expect("transport_url: url is None; System proxy must be resolved via detect_system_proxy() before building the client");
+        let Some((scheme, rest)) = url.split_once("://") else {
+            return Cow::Borrowed(url);
         };
         if scheme.eq_ignore_ascii_case("socks5") {
             Cow::Owned(format!("socks5h://{rest}"))
         } else {
-            Cow::Borrowed(self.url.as_str())
+            Cow::Borrowed(url)
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::ProxyConfig;
+    use super::{ProxyConfig, ProxyMode};
 
     fn proxy_url(url: &str) -> String {
         ProxyConfig {
-            url: url.to_string(),
+            mode: ProxyMode::Manual,
+            url: Some(url.to_string()),
             auth: None,
             no_proxy: Vec::new(),
         }
@@ -152,5 +177,26 @@ mod tests {
             "socks5h://127.0.0.1:7890"
         );
         assert_eq!(proxy_url("http://127.0.0.1:7890"), "http://127.0.0.1:7890");
+    }
+
+    #[test]
+    fn system_mode_defaults_to_manual() {
+        let config: ProxyConfig = serde_json::from_str(r#"{"url":"http://proxy:8080"}"#).unwrap();
+        assert_eq!(config.mode, ProxyMode::Manual);
+        assert_eq!(config.url.as_deref(), Some("http://proxy:8080"));
+    }
+
+    #[test]
+    fn system_mode_json_roundtrip() {
+        let config = ProxyConfig {
+            mode: ProxyMode::System,
+            url: None,
+            auth: None,
+            no_proxy: vec!["localhost".into()],
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        let parsed: ProxyConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.mode, ProxyMode::System);
+        assert!(parsed.url.is_none());
     }
 }
