@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file. See [release-please](https://github.com/googleapis/release-please) for automated management.
 
+## 0.3.16 (2026-06-14)
+
+> 修复 napi 绑定：0.3.15 的 `proxy.mode = "system"` 在发布的 npm 包中静默失效——两个 napi 绑定都漏启用了 `system-proxy` cargo feature，导致 `detect_system_proxy()` 编译为空操作 stub。同时同步了 napi TypeScript 类型（#19）。
+
+### 🐛 Bug Fixes
+
+- **napi `system-proxy` feature 未启用**：0.3.15 (#18) 引入了系统代理自动检测，但 `catcher-napi-http` / `catcher-napi-ws` 都未在依赖上启用 `system-proxy` cargo feature，导致 `detect_system_proxy()` 编译为 no-op stub——`proxy.mode = "system"` 在发布的 npm 包中静默不生效。现已为两个 napi crate 的依赖启用该 feature。
+- **napi TypeScript 类型同步**：发布到 npm 的 `dist/types.d.ts` 仍是 0.3.15 之前的旧类型（`url` 必填、无 `mode` 字段）。现将 `ProxyConfig` 建模为判别联合（discriminated union）：
+  - `ManualProxyConfig`（默认，省略 `mode` 或 `mode: 'manual'`）：`url` 必填。
+  - `SystemProxyConfig`（`mode: 'system'`）：`url` 可省略，自动从 OS 检测。
+  - 收紧了类型——`{ mode: 'manual' }` 或 `{ no_proxy: [...] }`（省略 `url`）不再通过类型检查（此前会进入 `transport_url()` 的 `url: None` panic）。
+
 ## 0.3.15 (2026-06-13)
 
 > 系统代理自动检测：`proxy.mode = "system"`，跳过 0.3.14。

@@ -1,6 +1,6 @@
 [package]
 name = "catcher-napi-http"
-version = "0.3.15"
+version = "0.3.16"
 edition = "2021"
 description = "catcher HTTP napi-rs Node.js native bindings"
 license = "MIT"
@@ -9,8 +9,8 @@ license = "MIT"
 crate-type = ["cdylib"]
 
 [dependencies]
-catcher-core = { path = "../catcher-core", version = "0.3.15" }
-catcher-http = { path = "../catcher-http", version = "0.3.15" }
+catcher-core = { path = "../catcher-core", version = "0.3.16" }
+catcher-http = { path = "../catcher-http", version = "0.3.16", features = ["system-proxy"] }
 napi = { version = "2", default-features = false, features = ["napi4", "tokio_rt", "serde-json"] }
 napi-derive = "2"
 serde = { version = "1", features = ["derive"] }

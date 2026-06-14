@@ -1,6 +1,6 @@
 {
   "name": "@eric8810/catcher-napi-ws",
-  "version": "0.3.15",
+  "version": "0.3.16",
   "description": "catcher WebSocket native addon for Node.js via napi-rs",
   "main": "dist/client.js",
   "types": "dist/client.d.ts",

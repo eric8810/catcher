@@ -24,7 +24,7 @@ Shared core types and errors for the [catcher](https://github.com/eric8810/catch
 
 ```toml
 [dependencies]
-catcher-core = "0.3.15"
+catcher-core = "0.3.16"
 ```
 
 ```rust
