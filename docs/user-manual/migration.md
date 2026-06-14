@@ -50,7 +50,7 @@ const client = new HttpClient({
 
 ### 已移除字段
 
-- **`networkPathId` / `network_path_id`**：从未随正式版本发布，0.3.15 中移除。网络切换恢复请改用 `networkChanged()`。传入该字段会被静默忽略，不会报错。
+- **`networkPathId` / `network_path_id`**：从未随正式版本发布，0.3.13 中移除。网络切换恢复请改用 `networkChanged()`。传入该字段会被静默忽略，不会报错。
 
 ---
 

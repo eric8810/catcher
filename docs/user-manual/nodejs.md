@@ -205,7 +205,7 @@ contextBridge.exposeInMainWorld('api', {
 
 ## 四、DNS 缓存
 
-> **0.3.15 起，DNS 按需启用（opt-in）**：**不传 `dns` 配置时使用协议库原生解析**（不再隐式启用 Catcher DNS）。
+> **0.3.13 起，DNS 按需启用（opt-in）**：**不传 `dns` 配置时使用协议库原生解析**（不再隐式启用 Catcher DNS）。
 > 一旦传入 `dns` 配置，`mode` 默认即 `catcher`。若想在传了 `dns` 的同时仍走原生解析，显式设置 `dns.mode = 'native'`。
 
 传入 `dns` 配置后默认接入 Catcher DNS，启用 DNS 缓存、旧缓存兜底、

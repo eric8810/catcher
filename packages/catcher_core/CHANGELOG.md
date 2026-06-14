@@ -2,11 +2,20 @@
 
 ### Features
 
-- `networkChanged()` on HTTP and WebSocket clients for proactive recovery after
-  network switches (WiFi ↔ cellular, VPN connect/disconnect): clears DNS cache,
-  rebuilds the connection pool, resets the circuit breaker, and reconnects WS.
-- WebSocket now supports explicit `proxy` and `tls` config; HTTP and WS share the
-  same `ProxyConfig` / `TlsConfig`, with SOCKS5/SOCKS5h and HTTP CONNECT support.
+- **`ProxyMode` enum** (`Manual` / `System`): caller can set `proxy.mode = "system"` to
+  let catcher auto-detect the system proxy from the OS instead of passing a URL manually.
+- **System proxy auto-detection** via `proxy-cfg`: macOS (SystemConfiguration), Windows
+  (WinINET registry + WinHTTP), Linux (env vars + /etc/sysconfig/proxy).
+- **`networkChanged()` re-detects system proxy**: when the network environment changes,
+  system proxy is re-read and the reqwest client is rebuilt if the proxy address changed.
+
+### ⚠️
+
+- **`ProxyConfig.url`: `String` → `Option<String>`**: a pre-1.0 breaking change. JSON
+  deserialization is backward-compatible (`#[serde(default)]` ensures `mode` defaults
+  to `Manual` when absent).
+
+## 0.3.13
 
 ### Behavior Changes
 
