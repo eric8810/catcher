@@ -20,7 +20,6 @@ impl EndpointRacer {
     pub async fn race(
         &self,
         config: &WsClientConfig,
-        client: &reqwest::Client,
     ) -> Result<(String, WsStream, u64), CatcherError> {
         let urls: Vec<String> = self
             .urls
@@ -38,7 +37,7 @@ impl EndpointRacer {
         // 单端点 — 直接连接
         if urls.len() == 1 {
             let url = urls.into_iter().next().unwrap();
-            let (stream, lat) = connect_stream_with_client(&url, config, client).await?;
+            let (stream, lat) = connect_stream_with_client(&url, config).await?;
             return Ok((url, stream, lat));
         }
 
@@ -50,9 +49,8 @@ impl EndpointRacer {
 
         for url in urls {
             let config_c = config.clone();
-            let client_c = client.clone();
             handles.push(tokio::spawn(async move {
-                let (stream, lat) = connect_stream_with_client(&url, &config_c, &client_c).await?;
+                let (stream, lat) = connect_stream_with_client(&url, &config_c).await?;
                 Ok((url, stream, lat))
             }));
         }

@@ -33,8 +33,22 @@ class CatcherWsClient {
   late final CatcherFreeResultDart _freeResultFn;
   late final CatcherFreeEventDataDart _freeEventDataFn;
 
-  final StreamController<WsEvent> _eventController =
-      StreamController<WsEvent>.broadcast();
+  final List<WsEvent> _pendingEvents = <WsEvent>[];
+  late final StreamController<WsEvent> _eventController =
+      StreamController<WsEvent>.broadcast(
+    onListen: () {
+      if (_pendingEvents.isEmpty || _disposed) {
+        return;
+      }
+      final pending = List<WsEvent>.of(_pendingEvents);
+      _pendingEvents.clear();
+      for (final event in pending) {
+        if (!_eventController.isClosed) {
+          _eventController.add(event);
+        }
+      }
+    },
+  );
 
   NativeCallable<EventCallbackNative>? _nativeCallback;
   bool _disposed = false;
@@ -183,9 +197,14 @@ class CatcherWsClient {
   // ── Internal ──
 
   void _emitEvent(WsEvent event) {
-    if (!_disposed && !_eventController.isClosed) {
-      _eventController.add(event);
+    if (_disposed || _eventController.isClosed) {
+      return;
     }
+    if (!_eventController.hasListener) {
+      _pendingEvents.add(event);
+      return;
+    }
+    _eventController.add(event);
   }
 
   void _ensureHandle() {
