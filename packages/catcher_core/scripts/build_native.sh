@@ -7,7 +7,7 @@ PACKAGES_DIR="$REPO_ROOT/packages"
 
 ANDROID_API="${ANDROID_API:-24}"
 ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-${ANDROID_NDK:-}}}"
-IPHONEOS_DEPLOYMENT_TARGET="15.0"
+IPHONEOS_DEPLOYMENT_TARGET="${IPHONEOS_DEPLOYMENT_TARGET:-15.0}"
 MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-10.15}"
 
 build_catcher_ffi() {
@@ -37,6 +37,8 @@ create_framework() {
   local source="$1"
   local framework_dir="$2"
   local bundle_id="$3"
+  local minimum_os_key="$4"
+  local minimum_os_version="$5"
 
   rm -rf "$framework_dir"
   mkdir -p "$framework_dir"
@@ -63,8 +65,8 @@ create_framework() {
   <string>1.0</string>
   <key>CFBundleVersion</key>
   <string>1</string>
-  <key>MinimumOSVersion</key>
-  <string>15.0</string>
+  <key>${minimum_os_key}</key>
+  <string>${minimum_os_version}</string>
 </dict>
 </plist>
 PLIST
@@ -138,12 +140,16 @@ build_apple() {
   create_framework \
     "$PACKAGES_DIR/target/aarch64-apple-ios/release/libcatcher_ffi.dylib" \
     "$tmp_dir/ios-device/catcher_ffi.framework" \
-    "com.eric8810.catcher.ffi.ios"
+    "com.eric8810.catcher.ffi.ios" \
+    "MinimumOSVersion" \
+    "$IPHONEOS_DEPLOYMENT_TARGET"
 
   create_framework \
     "$tmp_dir/libcatcher_ffi_ios_sim.dylib" \
     "$tmp_dir/ios-simulator/catcher_ffi.framework" \
-    "com.eric8810.catcher.ffi.ios-simulator"
+    "com.eric8810.catcher.ffi.ios-simulator" \
+    "MinimumOSVersion" \
+    "$IPHONEOS_DEPLOYMENT_TARGET"
 
   rm -rf "$PACKAGE_DIR/ios/Frameworks/catcher_ffi.xcframework"
   mkdir -p "$PACKAGE_DIR/ios/Frameworks"
@@ -160,7 +166,9 @@ build_apple() {
   create_framework \
     "$tmp_dir/libcatcher_ffi_macos.dylib" \
     "$tmp_dir/macos/catcher_ffi.framework" \
-    "com.eric8810.catcher.ffi.macos"
+    "com.eric8810.catcher.ffi.macos" \
+    "LSMinimumSystemVersion" \
+    "$MACOSX_DEPLOYMENT_TARGET"
 
   rm -rf "$PACKAGE_DIR/macos/Frameworks/catcher_ffi.xcframework"
   mkdir -p "$PACKAGE_DIR/macos/Frameworks"

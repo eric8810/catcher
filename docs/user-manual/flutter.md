@@ -229,7 +229,7 @@ packages/catcher_core/android/src/main/jniLibs/x86_64/libcatcher_ffi.so
 ```bash
 cd /path/to/catcher
 
-export IPHONEOS_DEPLOYMENT_TARGET="${IPHONEOS_DEPLOYMENT_TARGET:-13.0}"
+export IPHONEOS_DEPLOYMENT_TARGET="${IPHONEOS_DEPLOYMENT_TARGET:-15.0}"
 
 rustup target add \
   aarch64-apple-ios \
@@ -278,6 +278,8 @@ make_framework() {
   <string>1.0</string>
   <key>CFBundleVersion</key>
   <string>1</string>
+  <key>MinimumOSVersion</key>
+  <string>${IPHONEOS_DEPLOYMENT_TARGET}</string>
 </dict>
 </plist>
 PLIST
@@ -328,6 +330,8 @@ lipo -info packages/catcher_core/ios/Frameworks/catcher_ffi.xcframework/ios-arm6
 
 # XCFramework metadata
 plutil -p packages/catcher_core/ios/Frameworks/catcher_ffi.xcframework/Info.plist
+plutil -extract MinimumOSVersion raw packages/catcher_core/ios/Frameworks/catcher_ffi.xcframework/ios-arm64/catcher_ffi.framework/Info.plist
+plutil -extract MinimumOSVersion raw packages/catcher_core/ios/Frameworks/catcher_ffi.xcframework/ios-arm64_x86_64-simulator/catcher_ffi.framework/Info.plist
 
 # Core FFI symbols
 "$TOOLCHAIN/llvm-nm" -gD packages/catcher_core/android/src/main/jniLibs/arm64-v8a/libcatcher_ffi.so \
