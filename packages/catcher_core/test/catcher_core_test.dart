@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:test/test.dart';
 import 'package:catcher_core/catcher_core.dart';
 

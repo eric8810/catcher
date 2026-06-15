@@ -43,7 +43,7 @@
 | [`api/ts-web.md`](./api/ts-web.md) | `@eric8810/catcher-web` — createWebClient, createWebSocketClient, SSE |
 | [`api/dart.md`](./api/dart.md) | `catcher_core` (pub.dev) — CatcherHttpClient, CatcherWsClient, codec, quality |
 | [`api/rust-http.md`](./api/rust-http.md) | `catcher-http` crate — HttpTransport, CircuitBreaker, PriorityRequestQueue, SseClient |
-| [`api/rust-ws.md`](./api/rust-ws.md) | `catcher-ws` crate — WsTransport, EndpointRacer, HeartbeatManager, codec |
+| [`api/rust-ws.md`](./api/rust-ws.md) | `catcher-ws` crate — WsTransport, HeartbeatManager, ReconnectManager, codec |
 | [`api/napi.md`](./api/napi.md) | `@eric8810/catcher-napi-http` / `catcher-napi-ws` — JSON config schema |
 
 ---

@@ -26,4 +26,4 @@ pub use ws::{
     build_ws_config, decode_application_compression_frame, encode_application_compression_frame,
     ApplicationCompressionFrame, APPLICATION_COMPRESSION_MAGIC,
 };
-pub use ws::{EndpointRacer, HeartbeatManager, ReconnectManager};
+pub use ws::{HeartbeatManager, ReconnectManager};

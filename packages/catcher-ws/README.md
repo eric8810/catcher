@@ -28,7 +28,7 @@ Resilient WebSocket client for the [catcher](https://github.com/eric8810/catcher
 
 ```toml
 [dependencies]
-catcher-ws = "0.3.16"
+catcher-ws = "0.3.17"
 ```
 
 ### Basic WebSocket connection
@@ -146,7 +146,6 @@ let config = WsClientConfig {
 | `WsTransport`, `WsHandle` | Async WebSocket client & handle |
 | `WsEvent`, `WsState` | Event types |
 | `WsClientConfig`, `DnsConfig`, `ReconnectConfig`, `HeartbeatConfig` | Configuration |
-| `EndpointRacer` | Multi-endpoint racing |
 | `ReconnectManager`, `HeartbeatManager` | Internal managers |
 | `pack`, `unpack`, `unpack_value` | Msgpack codec |
 

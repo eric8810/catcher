@@ -15,7 +15,7 @@ tokio = { version = "1", features = ["full"] }
 ```
 catcher-ws
 ├── transport  → WsTransport, WsHandle
-├── ws         → EndpointRacer, HeartbeatManager, ReconnectManager, build_ws_options
+├── ws         → HeartbeatManager, ReconnectManager, build_ws_config
 ├── codec      → pack, unpack, unpack_value
 ├── ffi        → C ABI (内部使用)
 └── types      → 类型定义
@@ -30,10 +30,9 @@ use catcher_ws::{
     WsHandle,
 
     // 韧性管理器
-    EndpointRacer,
     HeartbeatManager,
     ReconnectManager,
-    build_ws_options,
+    build_ws_config,
 
     // 编解码
     pack,
@@ -210,20 +209,24 @@ handle.close(1000, "normal").await?;
 
 ---
 
-## EndpointRacer
+## 多端点竞速
+
+多端点竞速由 `WsTransport::connect()` 根据 `WsClientConfig.urls` 和 `race_count` 内部执行。`EndpointRacer` 是 crate 内部实现细节，不再作为 public API 暴露。
 
 ```rust
-pub struct EndpointRacer { /* private */ }
+let config = WsClientConfig {
+    urls: vec![
+        "wss://cn.example.com".into(),
+        "wss://sg.example.com".into(),
+    ],
+    race_count: 2,
+    ..Default::default()
+};
 
-impl EndpointRacer {
-    pub fn new(config: WsClientConfig, race_count: usize) -> Self;
-
-    /// 竞速连接，返回第一个成功的连接
-    pub async fn race(&self) -> Result<(WsHandle, String), CatcherError>;
-}
+let (handle, events) = WsTransport::connect(&config).await?;
 ```
 
-并发连接所有端点，使用第一个成功的结果，关闭其余连接。
+并发连接配置的端点，使用第一个成功的结果，关闭其余连接。
 
 ---
 
