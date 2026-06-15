@@ -568,8 +568,8 @@ Cookie 会被注入到 WebSocket 握手的 HTTP 请求头中。
 | **包名** | `@eric8810/catcher-ws` | `catcher-ws` | `catcher_core` |
 | **入口** | `createResilientWS()` | `WsTransport::connect()` | `CatcherWsClient()` |
 | **配置类型** | `ResilientWSOptions` | `WsClientConfig` | `WsClientConfig` |
-| **多端点竞速** | `url: string[]` + `raceCount` | `EndpointRacer::race()` | `urls: List<String>` + `raceCount` |
-| **独立竞速函数** | `raceEndpoints()` | `EndpointRacer` | — |
+| **多端点竞速** | `url: string[]` + `raceCount` | `WsClientConfig.urls` + `race_count`（`WsTransport::connect()` 内部处理） | `urls: List<String>` + `raceCount` |
+| **独立竞速函数** | `raceEndpoints()` | —（`EndpointRacer` 为内部实现细节） | — |
 | **重连策略** | `createReconnectStrategy()` | `ReconnectManager` | 内建（`WsReconnectConfig`） |
 | **压缩** | `perMessageDeflate` | `per_message_deflate` | `perMessageDeflate` |
 | **应用层压缩** | — | `application_compression` | `applicationCompression` |

@@ -20,7 +20,7 @@ Resilient HTTP/WebSocket client for **Flutter** — powered by a **Rust core** v
 
 ```yaml
 dependencies:
-  catcher_core: ^0.3.16
+  catcher_core: ^0.3.17
 ```
 
 > **Note:** The pub.dev package includes the native Rust libraries for supported platforms. If you build from a source checkout or need custom targets, see the [Flutter manual build guide](../../docs/user-manual/flutter.md#手动构建-android--ios-native-二进制).

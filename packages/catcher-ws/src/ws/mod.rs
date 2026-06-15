@@ -10,5 +10,5 @@ pub use application_compression::{
 };
 pub use compression::build_ws_config;
 pub use heartbeat::HeartbeatManager;
-pub use multi_endpoint::EndpointRacer;
+pub(crate) use multi_endpoint::EndpointRacer;
 pub use reconnect::ReconnectManager;

@@ -164,7 +164,7 @@ checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
 
 [[package]]
 name = "catcher-core"
-version = "0.3.13"
+version = "0.3.17"
 dependencies = [
  "serde",
  "serde_json",
@@ -173,7 +173,7 @@ dependencies = [
 
 [[package]]
 name = "catcher-dns"
-version = "0.3.13"
+version = "0.3.17"
 dependencies = [
  "catcher-core",
  "hickory-proto",
@@ -187,7 +187,7 @@ dependencies = [
 
 [[package]]
 name = "catcher-http"
-version = "0.3.13"
+version = "0.3.17"
 dependencies = [
  "async-trait",
  "backon",
@@ -215,7 +215,7 @@ dependencies = [
 
 [[package]]
 name = "catcher-ws"
-version = "0.3.13"
+version = "0.3.17"
 dependencies = [
  "backon",
  "base64",
@@ -237,7 +237,7 @@ dependencies = [
 
 [[package]]
 name = "catcher_core_ffi"
-version = "0.3.13"
+version = "0.3.17"
 dependencies = [
  "catcher-http",
  "catcher-ws",

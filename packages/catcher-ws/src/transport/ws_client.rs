@@ -3,7 +3,11 @@
 //! 使用 yawc 建立连接，通过 mpsc channel 推送 WsEvent。
 //! 集成：headers/protocols 握手、多端点竞速、自动重连、心跳采样、压缩配置。
 
-use std::time::{Duration, Instant};
+use std::{
+    pin::Pin,
+    task::{Context, Poll},
+    time::{Duration, Instant},
+};
 
 use futures_util::{SinkExt, StreamExt};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
@@ -11,7 +15,9 @@ use tokio::sync::mpsc;
 use url::Url;
 use yawc::{Frame, OpCode};
 
-use crate::types::ws::*;
+use crate::types::ws::{
+    ApplicationCompressionAlgorithm, TlsConfig, TlsVersion, WsClientConfig, WsEvent,
+};
 use crate::ws::{
     build_ws_config, decode_application_compression_frame, encode_application_compression_frame,
     EndpointRacer, HeartbeatManager, ReconnectManager, APPLICATION_COMPRESSION_MAGIC,
@@ -21,8 +27,57 @@ use catcher_dns::reqwest_resolver::build_reqwest_resolver;
 
 // ── 类型别名 ──
 
-/// 底层 WebSocket 流类型
-pub(crate) type WsStream = yawc::HttpWebSocket;
+/// 底层 WebSocket 流类型。
+///
+/// Native 路径用于 Flutter 的简单直连场景；Reqwest 路径用于
+/// DNS / proxy / TLS 等高级网络配置，保持与 Electron/桌面行为一致。
+pub(crate) enum WsStream {
+    Native(Box<yawc::TcpWebSocket>),
+    Reqwest(Box<yawc::HttpWebSocket>),
+}
+
+impl futures_util::Stream for WsStream {
+    type Item = Frame;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match self.get_mut() {
+            WsStream::Native(stream) => Pin::new(stream).poll_next(cx),
+            WsStream::Reqwest(stream) => Pin::new(stream).poll_next(cx),
+        }
+    }
+}
+
+impl futures_util::Sink<Frame> for WsStream {
+    type Error = yawc::WebSocketError;
+
+    fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        match self.get_mut() {
+            WsStream::Native(stream) => Pin::new(stream).poll_ready(cx),
+            WsStream::Reqwest(stream) => Pin::new(stream).poll_ready(cx),
+        }
+    }
+
+    fn start_send(self: Pin<&mut Self>, item: Frame) -> Result<(), Self::Error> {
+        match self.get_mut() {
+            WsStream::Native(stream) => Pin::new(stream).start_send(item),
+            WsStream::Reqwest(stream) => Pin::new(stream).start_send(item),
+        }
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        match self.get_mut() {
+            WsStream::Native(stream) => Pin::new(stream).poll_flush(cx),
+            WsStream::Reqwest(stream) => Pin::new(stream).poll_flush(cx),
+        }
+    }
+
+    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        match self.get_mut() {
+            WsStream::Native(stream) => Pin::new(stream).poll_close(cx),
+            WsStream::Reqwest(stream) => Pin::new(stream).poll_close(cx),
+        }
+    }
+}
 
 // ── 命令（WsHandle → 内部任务）──
 
@@ -197,6 +252,7 @@ fn parse_ws_url(url: &str) -> Result<Url, CatcherError> {
 /// 构建 WebSocket 握手请求头。
 fn build_handshake_headers(config: &WsClientConfig) -> Result<HeaderMap, CatcherError> {
     let mut headers = HeaderMap::new();
+
     for (k, v) in &config.headers {
         let name = HeaderName::from_bytes(k.as_bytes())
             .map_err(|e| CatcherError::Internal(format!("invalid header name '{k}': {e}")))?;
@@ -241,7 +297,6 @@ fn build_handshake_headers(config: &WsClientConfig) -> Result<HeaderMap, Catcher
 }
 
 /// 构建带 headers 和 protocols 的 yawc RequestBuilder。
-#[cfg(test)]
 fn build_request_builder(
     config: &WsClientConfig,
 ) -> Result<yawc::HttpRequestBuilder, CatcherError> {
@@ -428,7 +483,7 @@ async fn connect_with_reqwest(
     config: &WsClientConfig,
     ws_config: yawc::Options,
     client: &reqwest::Client,
-) -> Result<WsStream, CatcherError> {
+) -> Result<yawc::HttpWebSocket, CatcherError> {
     let attempt = yawc::WebSocket::reqwest(url, client.clone(), ws_config);
     if config.handshake_timeout_ms > 0 {
         match tokio::time::timeout(Duration::from_millis(config.handshake_timeout_ms), attempt)
@@ -447,21 +502,175 @@ async fn connect_with_reqwest(
     .map_err(|e| CatcherError::Internal(format!("ws handshake failed: {e}")))
 }
 
+async fn connect_with_yawc(
+    url: Url,
+    config: &WsClientConfig,
+    ws_config: yawc::Options,
+) -> Result<yawc::TcpWebSocket, CatcherError> {
+    let request = build_request_builder(config)?;
+    let attempt = yawc::WebSocket::connect(url)
+        .with_options(ws_config)
+        .with_request(request);
+
+    if config.handshake_timeout_ms > 0 {
+        match tokio::time::timeout(Duration::from_millis(config.handshake_timeout_ms), attempt)
+            .await
+        {
+            Ok(result) => result,
+            Err(_) => {
+                return Err(CatcherError::WsHandshakeTimeout(
+                    config.handshake_timeout_ms,
+                ))
+            }
+        }
+    } else {
+        attempt.await
+    }
+    .map_err(|e| CatcherError::Internal(format!("ws handshake failed: {e}")))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WsBackend {
+    Native,
+    Reqwest,
+}
+
+#[derive(Clone)]
+pub(crate) struct WsConnectContext {
+    backend: WsBackend,
+    reqwest_client: Option<reqwest::Client>,
+}
+
+fn has_advanced_tls(config: &TlsConfig) -> bool {
+    !config.reject_unauthorized
+        || config.ca_cert_pem.is_some()
+        || config.ca_cert_path.is_some()
+        || config.client_cert_pem.is_some()
+        || config.client_cert_path.is_some()
+        || config.client_key_pem.is_some()
+        || config.client_key_path.is_some()
+        || config.client_identity_pfx.is_some()
+        || config.client_identity_password.is_some()
+        || config.tls_sni_override.is_some()
+        || config.min_tls_version.is_some()
+        || config.max_tls_version.is_some()
+        || config
+            .pin_sha256
+            .as_ref()
+            .is_some_and(|pins| !pins.is_empty())
+}
+
+fn needs_reqwest_backend(config: &WsClientConfig) -> bool {
+    has_advanced_tls(&config.tls)
+        || config.proxy.is_some()
+        || config
+            .dns
+            .as_ref()
+            .is_some_and(|dns| dns.use_catcher_resolver())
+}
+
+fn build_connect_context(config: &WsClientConfig) -> Result<WsConnectContext, CatcherError> {
+    if needs_reqwest_backend(config) {
+        Ok(WsConnectContext {
+            backend: WsBackend::Reqwest,
+            reqwest_client: Some(build_reqwest_client(config)?),
+        })
+    } else {
+        Ok(WsConnectContext {
+            backend: WsBackend::Native,
+            reqwest_client: None,
+        })
+    }
+}
+
+fn build_reqwest_client_for_network_change(
+    config: &WsClientConfig,
+) -> Result<reqwest::Client, CatcherError> {
+    let effective_config;
+    let owned_config;
+    if config
+        .proxy
+        .as_ref()
+        .is_some_and(|p| p.mode == catcher_core::types::network::ProxyMode::System)
+    {
+        let mut c = config.clone();
+        let user_no_proxy = c
+            .proxy
+            .as_ref()
+            .map(|p| p.no_proxy.clone())
+            .unwrap_or_default();
+        c.proxy = catcher_dns::proxy::detect_system_proxy();
+        if let Some(ref mut p) = c.proxy {
+            for entry in user_no_proxy {
+                if !p.no_proxy.contains(&entry) {
+                    p.no_proxy.push(entry);
+                }
+            }
+        }
+        owned_config = c;
+        effective_config = &owned_config;
+    } else {
+        effective_config = config;
+    };
+    build_reqwest_client(effective_config)
+}
+
+fn rebuild_reqwest_client_after_network_change(
+    connect_ctx: &mut WsConnectContext,
+    config: &WsClientConfig,
+    event_tx: &mpsc::UnboundedSender<WsEvent>,
+) {
+    if !matches!(connect_ctx.backend, WsBackend::Reqwest) {
+        return;
+    }
+
+    match build_reqwest_client_for_network_change(config) {
+        Ok(client) => connect_ctx.reqwest_client = Some(client),
+        Err(e) => {
+            let _ = event_tx.send(WsEvent::Error {
+                message: format!("network changed client rebuild failed: {e}"),
+            });
+        }
+    }
+}
+
 /// 底层 WebSocket 连接 — 处理 headers/protocols/handshake_timeout/deflate。
 /// 返回 (stream, latency_ms)。
-pub(crate) async fn connect_stream_with_client(
+pub(crate) async fn connect_stream_with_context(
     url: &str,
     config: &WsClientConfig,
-    client: &reqwest::Client,
+    connect_ctx: &WsConnectContext,
 ) -> Result<(WsStream, u64), CatcherError> {
     let url = parse_ws_url(url)?;
     let ws_config = build_ws_config(config);
 
     let start = Instant::now();
-    let stream = connect_with_reqwest(url, config, ws_config, client).await?;
+    let stream = match connect_ctx.backend {
+        WsBackend::Native => {
+            WsStream::Native(Box::new(connect_with_yawc(url, config, ws_config).await?))
+        }
+        WsBackend::Reqwest => {
+            let client = connect_ctx.reqwest_client.as_ref().ok_or_else(|| {
+                CatcherError::Internal("missing reqwest client for WS reqwest backend".into())
+            })?;
+            WsStream::Reqwest(Box::new(
+                connect_with_reqwest(url, config, ws_config, client).await?,
+            ))
+        }
+    };
 
     let latency_ms = start.elapsed().as_millis() as u64;
     Ok((stream, latency_ms))
+}
+
+/// 底层 WebSocket 连接 — 根据配置自动选择 native 或 reqwest backend。
+#[cfg(test)]
+async fn connect_stream_with_client(
+    url: &str,
+    config: &WsClientConfig,
+) -> Result<(WsStream, u64), CatcherError> {
+    let connect_ctx = build_connect_context(config)?;
+    connect_stream_with_context(url, config, &connect_ctx).await
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -538,21 +747,21 @@ fn replay_disconnect_reason(status: SendStatus) -> Option<&'static str> {
 /// 网络环境变化后调用 — 新网络下最优端点可能与之前不同。
 async fn connect_any_endpoint(
     config: &WsClientConfig,
-    client: &reqwest::Client,
+    connect_ctx: &WsConnectContext,
 ) -> Result<(String, WsStream, u64), CatcherError> {
     if config.urls.len() > 1 || config.race_count > 1 {
         // race_count 只限制初始连接的竞速宽度（EndpointRacer 内部 take(race_count)）。
         // 网络变化后旧的最优端点可能已不可达，必须让每个端点都有机会。
         let race_count = (config.urls.len() as u32).max(config.race_count);
         let racer = EndpointRacer::new(config.urls.clone(), race_count);
-        racer.race(config, client).await
+        racer.race(config, connect_ctx).await
     } else {
         let url = config
             .urls
             .first()
             .cloned()
             .ok_or_else(|| CatcherError::InvalidConfig("no WS URLs configured".into()))?;
-        let (stream, lat) = connect_stream_with_client(&url, config, client).await?;
+        let (stream, lat) = connect_stream_with_context(&url, config, connect_ctx).await?;
         Ok((url, stream, lat))
     }
 }
@@ -581,20 +790,19 @@ impl WsTransport {
         if config.urls.is_empty() {
             return Err(CatcherError::InvalidConfig("no WS URLs configured".into()));
         }
-        let reqwest_client = build_reqwest_client(config)?;
+        let connect_ctx = build_connect_context(config)?;
 
         // 初始连接 — 多端点竞速或单 URL
-        let (connected_url, initial_stream, latency_ms) = if config.urls.len() > 1
-            || config.race_count > 1
-        {
-            let racer = EndpointRacer::new(config.urls.clone(), config.race_count);
-            let (url, stream, lat) = racer.race(config, &reqwest_client).await?;
-            (url, stream, lat)
-        } else {
-            let url = config.urls.first().unwrap().clone();
-            let (stream, lat) = connect_stream_with_client(&url, config, &reqwest_client).await?;
-            (url, stream, lat)
-        };
+        let (connected_url, initial_stream, latency_ms) =
+            if config.urls.len() > 1 || config.race_count > 1 {
+                let racer = EndpointRacer::new(config.urls.clone(), config.race_count);
+                let (url, stream, lat) = racer.race(config, &connect_ctx).await?;
+                (url, stream, lat)
+            } else {
+                let url = config.urls.first().unwrap().clone();
+                let (stream, lat) = connect_stream_with_context(&url, config, &connect_ctx).await?;
+                (url, stream, lat)
+            };
 
         let handle_url = connected_url.clone();
         let mgr_config = config.clone();
@@ -606,7 +814,7 @@ impl WsTransport {
                 initial_stream,
                 latency_ms,
                 &mgr_config,
-                reqwest_client,
+                connect_ctx,
                 event_tx,
                 cmd_rx,
             )
@@ -630,7 +838,7 @@ async fn connection_manager(
     initial_stream: WsStream,
     initial_latency_ms: u64,
     config: &WsClientConfig,
-    mut reqwest_client: reqwest::Client,
+    mut connect_ctx: WsConnectContext,
     event_tx: mpsc::UnboundedSender<WsEvent>,
     mut cmd_rx: mpsc::UnboundedReceiver<WsCommand>,
 ) {
@@ -900,43 +1108,8 @@ async fn connection_manager(
                 break;
             }
 
-            // 重建 reqwest client：丢弃旧连接池，并重新应用 proxy/TLS/DNS 配置。
-            // 显式启用 Catcher DNS 时，也会随新 client 重建 resolver。
-            // System 代理模式：重新检测 OS 代理。
-            let effective_config;
-            let owned_config;
-            if config
-                .proxy
-                .as_ref()
-                .is_some_and(|p| p.mode == catcher_core::types::network::ProxyMode::System)
-            {
-                let mut c = config.clone();
-                let user_no_proxy = c
-                    .proxy
-                    .as_ref()
-                    .map(|p| p.no_proxy.clone())
-                    .unwrap_or_default();
-                c.proxy = catcher_dns::proxy::detect_system_proxy();
-                if let Some(ref mut p) = c.proxy {
-                    for entry in user_no_proxy {
-                        if !p.no_proxy.contains(&entry) {
-                            p.no_proxy.push(entry);
-                        }
-                    }
-                }
-                owned_config = c;
-                effective_config = &owned_config;
-            } else {
-                effective_config = config;
-            };
-            match build_reqwest_client(effective_config) {
-                Ok(client) => reqwest_client = client,
-                Err(e) => {
-                    let _ = event_tx.send(WsEvent::Error {
-                        message: format!("network changed client rebuild failed: {e}"),
-                    });
-                }
-            }
+            rebuild_reqwest_client_after_network_change(&mut connect_ctx, config, &event_tx);
+
             if let Some(ref mut mgr) = reconnect_mgr {
                 mgr.reset();
             }
@@ -944,7 +1117,7 @@ async fn connection_manager(
                 attempt: 0,
                 delay_ms: 0,
             });
-            match connect_any_endpoint(config, &reqwest_client).await {
+            match connect_any_endpoint(config, &connect_ctx).await {
                 Ok((url, mut stream, lat)) => {
                     let replay_status =
                         replay_buffered_commands(&mut stream, &buffered_commands, config).await;
@@ -1040,27 +1213,24 @@ async fn connection_manager(
                     break;
                 }
                 if skip_backoff {
-                    match build_reqwest_client(config) {
-                        Ok(client) => reqwest_client = client,
-                        Err(e) => {
-                            let _ = event_tx.send(WsEvent::Error {
-                                message: format!("network changed client rebuild failed: {e}"),
-                            });
-                        }
-                    }
+                    rebuild_reqwest_client_after_network_change(
+                        &mut connect_ctx,
+                        config,
+                        &event_tx,
+                    );
                     mgr.reset();
                     race_endpoints = true;
                 }
 
                 let connect_result = if race_endpoints {
-                    connect_any_endpoint(config, &reqwest_client)
+                    connect_any_endpoint(config, &connect_ctx)
                         .await
                         .map(|(url, stream, lat)| {
                             current_url = url;
                             (stream, lat)
                         })
                 } else {
-                    connect_stream_with_client(&current_url, config, &reqwest_client).await
+                    connect_stream_with_context(&current_url, config, &connect_ctx).await
                 };
 
                 match connect_result {
@@ -1100,7 +1270,18 @@ async fn connection_manager(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        build_request, connect_stream_with_client, needs_reqwest_backend, replay_buffered_commands,
+        request_host_port, send_frame_with_timeout, SendStatus, WsCommand, WsEvent, WsStream,
+        WsTransport,
+    };
+    use crate::types::ws::{
+        ApplicationCompressionAlgorithm, ApplicationCompressionConfig, DnsConfig, DnsMode,
+        ProxyConfig, ReconnectConfig, TlsVersion, WsClientConfig,
+    };
+    use futures_util::StreamExt;
+    use std::time::{Duration, Instant};
+    use yawc::Frame;
 
     /// 验证 build_request 成功构建带 headers 和 protocols 的请求
     #[test]
@@ -1191,7 +1372,7 @@ mod tests {
         );
     }
 
-    /// 验证显式配置 DNS 时，WS 连接使用 host_mapping。
+    /// 验证显式配置 DNS 时，WS 连接使用 host_mapping，并走 reqwest backend。
     #[tokio::test]
     async fn connect_stream_uses_dns_host_mapping() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1213,17 +1394,18 @@ mod tests {
             handshake_timeout_ms: 1_000,
             ..Default::default()
         };
-        let client = build_reqwest_client(&config).unwrap();
 
-        let result = connect_stream_with_client(&config.urls[0], &config, &client).await;
-        assert!(result.is_ok());
-        drop(result);
+        let (stream, _) = connect_stream_with_client(&config.urls[0], &config)
+            .await
+            .unwrap();
+        assert!(matches!(stream, WsStream::Reqwest(_)));
+        drop(stream);
         let _ = server.await.unwrap();
     }
 
-    /// 验证未配置 DNS 时，默认路径仍能连接本机 IP。
+    /// 验证未配置高级网络能力时，默认 native 路径仍能连接本机 IP。
     #[tokio::test]
-    async fn connect_stream_without_dns_config_still_connects_ip() {
+    async fn native_connect_stream_without_advanced_config_connects_ip() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         let server = tokio::spawn(async move {
@@ -1236,12 +1418,35 @@ mod tests {
             handshake_timeout_ms: 1_000,
             ..Default::default()
         };
-        let client = build_reqwest_client(&config).unwrap();
 
-        let result = connect_stream_with_client(&config.urls[0], &config, &client).await;
-        assert!(result.is_ok());
-        drop(result);
+        let (stream, _) = connect_stream_with_client(&config.urls[0], &config)
+            .await
+            .unwrap();
+        assert!(matches!(stream, WsStream::Native(_)));
+        drop(stream);
         let _ = server.await.unwrap();
+    }
+
+    #[test]
+    fn backend_selection_uses_reqwest_for_advanced_network_config() {
+        let mut config = WsClientConfig::default();
+        assert!(!needs_reqwest_backend(&config));
+
+        config.dns = Some(DnsConfig::default());
+        assert!(needs_reqwest_backend(&config));
+
+        config.dns = Some(DnsConfig {
+            mode: DnsMode::Native,
+            ..Default::default()
+        });
+        assert!(!needs_reqwest_backend(&config));
+
+        config.proxy = Some(ProxyConfig::default());
+        assert!(needs_reqwest_backend(&config));
+
+        config.proxy = None;
+        config.tls.reject_unauthorized = false;
+        assert!(needs_reqwest_backend(&config));
     }
 
     /// 永远不就绪的 Sink — 模拟半开连接上发送阻塞

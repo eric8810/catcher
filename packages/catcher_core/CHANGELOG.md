@@ -1,3 +1,16 @@
+## 0.3.17
+
+### Bug Fixes
+
+- **Flutter WebSocket direct connections**: default simple WebSocket connections now use the yawc native backend, restoring Android Flutter socket connectivity while keeping reqwest for proxy, Catcher DNS, and advanced TLS configurations.
+- **WebSocket network change recovery**: `networkChanged()` immediately reconnects, resets reconnect backoff, re-races all endpoints for multi-endpoint configs, and replays buffered send commands after reconnect.
+- **WebSocket old native library compatibility**: missing `catcher_ws_network_changed` is handled lazily so older native libraries can still construct clients; calling `networkChanged()` reports a clear rebuild requirement.
+- **Apple framework metadata**: generated iOS/macOS `catcher_ffi.xcframework` bundles include minimum OS metadata, and podspec versions are synchronized for this release.
+
+### Behavior Changes
+
+- **Rust `EndpointRacer` internalized**: multi-endpoint racing is now an implementation detail of `WsTransport::connect()` and is no longer exposed as `catcher_ws::EndpointRacer`. Configure `WsClientConfig.urls` / `race_count` instead.
+
 ## 0.3.16
 
 ### Bug Fixes

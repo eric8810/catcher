@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file. See [release-please](https://github.com/googleapis/release-please) for automated management.
 
+## 0.3.17 (2026-06-15)
+
+> 修复 Flutter WebSocket 直连可用性：默认简单直连场景改走 yawc native backend，高级网络配置继续走 reqwest backend；同时完善网络切换重连、Apple framework 元数据与 Flutter 兼容性处理。
+
+### 🐛 Bug Fixes
+
+- **Flutter WebSocket 直连恢复**：无 proxy / Catcher DNS / 高级 TLS 的默认场景改走 yawc native backend，避免 reqwest backend 在 Flutter 场景下的 socket 连接问题；需要 proxy、Catcher DNS 或高级 TLS 时仍走 reqwest backend。
+- **WebSocket 网络切换恢复**：`network_changed()` 会立即丢弃半开连接、重置退避并重连；多端点配置下会重新竞速全部端点，退避期间缓存的发送命令在重连成功后重放。
+- **Dart WebSocket 旧动态库兼容**：`catcher_ws_network_changed` 符号不存在时延迟到调用 `networkChanged()` 再报错，避免旧 native library 在客户端构造阶段直接失败。
+- **Flutter Apple framework 元数据**：生成 iOS/macOS `catcher_ffi.xcframework` 时写入最低系统版本，并将 podspec 版本同步到本次发布。
+
+### ⚠️ Behavior Changes
+
+- **Rust `EndpointRacer` 内部化**：多端点竞速改为 `WsTransport::connect()` 的内部实现细节，不再作为 `catcher_ws::EndpointRacer` public API 暴露；Rust 调用方应通过 `WsClientConfig.urls` / `race_count` 使用多端点能力。
+
 ## 0.3.16 (2026-06-14)
 
 > 修复 napi 绑定：0.3.15 的 `proxy.mode = "system"` 在发布的 npm 包中静默失效——两个 napi 绑定都漏启用了 `system-proxy` cargo feature，导致 `detect_system_proxy()` 编译为空操作 stub。同时同步了 napi TypeScript 类型（#19）。
@@ -267,13 +282,13 @@ All notable changes to this project will be documented in this file. See [releas
 
 ### 📐 C ABI Symbol Count: 16 → 25
 
-| Module | Count | Symbols |
-|--------|:-----:|---------|
-| HTTP | 9 | client_create, client_destroy, execute, get, post, client_cancel_all, circuit_breaker_state, metrics, adaptive_timeout_config |
-| SSE | 6 | connect, stream, ready_state, last_event_id, close, destroy |
-| WS | 5 | create, send_text, send_binary, close, destroy |
-| Codec | 3 | pack, unpack, free_data |
-| Quality | 2 | evaluate_quality, quality_history |
+| Module  | Count | Symbols                                                                                                                       |
+| ------- | :---: | ----------------------------------------------------------------------------------------------------------------------------- |
+| HTTP    |   9   | client_create, client_destroy, execute, get, post, client_cancel_all, circuit_breaker_state, metrics, adaptive_timeout_config |
+| SSE     |   6   | connect, stream, ready_state, last_event_id, close, destroy                                                                   |
+| WS      |   5   | create, send_text, send_binary, close, destroy                                                                                |
+| Codec   |   3   | pack, unpack, free_data                                                                                                       |
+| Quality |   2   | evaluate_quality, quality_history                                                                                             |
 
 ### 📝 Documentation
 

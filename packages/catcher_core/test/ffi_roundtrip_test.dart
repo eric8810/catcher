@@ -19,7 +19,6 @@ import 'dart:io';
 
 import 'package:catcher_core/catcher_core.dart';
 import 'package:catcher_core/src/ffi_bindings.dart';
-import 'package:ffi/ffi.dart';
 import 'package:test/test.dart';
 
 import 'http_test_server.dart';
@@ -27,13 +26,15 @@ import 'http_test_server.dart';
 void main() {
   // Skip entire suite if the native library is not available.
   final ffiPath = Platform.environment['CATCHER_FFI_PATH'];
-  final hasFfi = ffiPath != null && ffiPath.isNotEmpty && File(ffiPath).existsSync();
+  final hasFfi =
+      ffiPath != null && ffiPath.isNotEmpty && File(ffiPath).existsSync();
 
   // Allow explicit skip via CATCHER_FFI_SKIP=1
   final skipAll = Platform.environment['CATCHER_FFI_SKIP'] == '1';
 
   if (!hasFfi || skipAll) {
-    print('⚠️  Skipping FFI roundtrip tests — CATCHER_FFI_PATH not set or file not found.');
+    print(
+        '⚠️  Skipping FFI roundtrip tests — CATCHER_FFI_PATH not set or file not found.');
     print('   Set CATCHER_FFI_PATH=<path_to_catcher_ffi.dll> to enable.');
     return;
   }
@@ -49,43 +50,47 @@ void main() {
 
     test('all core symbols are exported', () {
       // HTTP lifecycle
-      lib.lookupFunction<CatcherHttpClientCreateNative, CatcherHttpClientCreateDart>(
-          'catcher_http_client_create');
-      lib.lookupFunction<CatcherHttpClientDestroyNative, CatcherHttpClientDestroyDart>(
-          'catcher_http_client_destroy');
+      lib.lookupFunction<CatcherHttpClientCreateNative,
+          CatcherHttpClientCreateDart>('catcher_http_client_create');
+      lib.lookupFunction<CatcherHttpClientDestroyNative,
+          CatcherHttpClientDestroyDart>('catcher_http_client_destroy');
 
       // HTTP execute (generic method)
       lib.lookupFunction<CatcherHttpExecuteNative, CatcherHttpExecuteDart>(
           'catcher_http_execute');
 
       // HTTP runtime control
-      lib.lookupFunction<CatcherHttpClientCancelAllNative, CatcherHttpClientCancelAllDart>(
-          'catcher_http_client_cancel_all');
+      lib.lookupFunction<CatcherHttpClientCancelAllNative,
+          CatcherHttpClientCancelAllDart>('catcher_http_client_cancel_all');
       lib.lookupFunction<CatcherHttpCircuitBreakerStateNative,
-          CatcherHttpCircuitBreakerStateDart>('catcher_http_circuit_breaker_state');
+              CatcherHttpCircuitBreakerStateDart>(
+          'catcher_http_circuit_breaker_state');
       lib.lookupFunction<CatcherHttpMetricsNative, CatcherHttpMetricsDart>(
           'catcher_http_metrics');
       lib.lookupFunction<CatcherHttpAdaptiveTimeoutConfigNative,
-          CatcherHttpAdaptiveTimeoutConfigDart>('catcher_http_adaptive_timeout_config');
+              CatcherHttpAdaptiveTimeoutConfigDart>(
+          'catcher_http_adaptive_timeout_config');
 
       // Per-request cancel
-      lib.lookupFunction<CatcherHttpExecuteWithIdNative, CatcherHttpExecuteWithIdDart>(
-          'catcher_http_execute_with_id');
-      lib.lookupFunction<CatcherHttpCancelRequestNative, CatcherHttpCancelRequestDart>(
-          'catcher_http_cancel_request');
+      lib.lookupFunction<CatcherHttpExecuteWithIdNative,
+          CatcherHttpExecuteWithIdDart>('catcher_http_execute_with_id');
+      lib.lookupFunction<CatcherHttpCancelRequestNative,
+          CatcherHttpCancelRequestDart>('catcher_http_cancel_request');
 
       // Streaming download
-      lib.lookupFunction<CatcherHttpExecuteStreamNative, CatcherHttpExecuteStreamDart>(
-          'catcher_http_execute_stream');
+      lib.lookupFunction<CatcherHttpExecuteStreamNative,
+          CatcherHttpExecuteStreamDart>('catcher_http_execute_stream');
 
       // Codec
       lib.lookupFunction<CatcherPackNative, CatcherPackDart>('catcher_pack');
-      lib.lookupFunction<CatcherUnpackNative, CatcherUnpackDart>('catcher_unpack');
+      lib.lookupFunction<CatcherUnpackNative, CatcherUnpackDart>(
+          'catcher_unpack');
 
       // Memory management
       lib.lookupFunction<CatcherFreeResultNative, CatcherFreeResultDart>(
           'catcher_free_result');
-      lib.lookupFunction<CatcherFreeDataNative, CatcherFreeDataDart>('catcher_free_data');
+      lib.lookupFunction<CatcherFreeDataNative, CatcherFreeDataDart>(
+          'catcher_free_data');
 
       // print success with count
       print('  ✅ All 16 core FFI symbols resolved');

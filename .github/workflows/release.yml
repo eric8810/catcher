@@ -452,7 +452,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/catcher_core-v')
     runs-on: macos-latest
     env:
-      IPHONEOS_DEPLOYMENT_TARGET: "13.0"
+      IPHONEOS_DEPLOYMENT_TARGET: "15.0"
       CARGO_PROFILE_RELEASE_OPT_LEVEL: "z"
       CARGO_PROFILE_RELEASE_PANIC: "abort"
     steps:
@@ -577,6 +577,9 @@ jobs:
     needs: [build-native-android, build-native-ios, build-native-macos, build-native-windows, build-native-linux]
     if: startsWith(github.ref, 'refs/tags/catcher_core-v')
     runs-on: macos-latest
+    env:
+      IPHONEOS_DEPLOYMENT_TARGET: "15.0"
+      MACOSX_DEPLOYMENT_TARGET: "10.15"
     permissions:
       id-token: write
     steps:
@@ -633,6 +636,8 @@ jobs:
             local src="$1"
             local dst="$2"
             local bundle_id="$3"
+            local minimum_os_key="$4"
+            local minimum_os_version="$5"
             rm -rf "$dst"
             mkdir -p "$dst"
             cp "$src" "$dst/catcher_ffi"
@@ -659,6 +664,8 @@ jobs:
             <string>1.0</string>
             <key>CFBundleVersion</key>
             <string>1</string>
+            <key>${minimum_os_key}</key>
+            <string>${minimum_os_version}</string>
           </dict>
           </plist>
           PLIST
@@ -668,8 +675,8 @@ jobs:
           IOS_SIM_ARM64=$(find_one "*/aarch64-apple-ios-sim/release/libcatcher_ffi.dylib")
           IOS_SIM_X64=$(find_one "*/x86_64-apple-ios/release/libcatcher_ffi.dylib")
           lipo -create "$IOS_SIM_ARM64" "$IOS_SIM_X64" -output "$RUNNER_TEMP/libcatcher_ffi_ios_sim.dylib"
-          make_framework "$IOS_DEVICE" "$RUNNER_TEMP/ios-device/catcher_ffi.framework" "com.eric8810.catcher.ffi.ios"
-          make_framework "$RUNNER_TEMP/libcatcher_ffi_ios_sim.dylib" "$RUNNER_TEMP/ios-simulator/catcher_ffi.framework" "com.eric8810.catcher.ffi.ios-simulator"
+          make_framework "$IOS_DEVICE" "$RUNNER_TEMP/ios-device/catcher_ffi.framework" "com.eric8810.catcher.ffi.ios" "MinimumOSVersion" "$IPHONEOS_DEPLOYMENT_TARGET"
+          make_framework "$RUNNER_TEMP/libcatcher_ffi_ios_sim.dylib" "$RUNNER_TEMP/ios-simulator/catcher_ffi.framework" "com.eric8810.catcher.ffi.ios-simulator" "MinimumOSVersion" "$IPHONEOS_DEPLOYMENT_TARGET"
           xcodebuild -create-xcframework \
             -framework "$RUNNER_TEMP/ios-device/catcher_ffi.framework" \
             -framework "$RUNNER_TEMP/ios-simulator/catcher_ffi.framework" \
@@ -678,7 +685,7 @@ jobs:
           MACOS_ARM64=$(find_one "*/aarch64-apple-darwin/release/libcatcher_ffi.dylib")
           MACOS_X64=$(find_one "*/x86_64-apple-darwin/release/libcatcher_ffi.dylib")
           lipo -create "$MACOS_ARM64" "$MACOS_X64" -output "$RUNNER_TEMP/libcatcher_ffi_macos.dylib"
-          make_framework "$RUNNER_TEMP/libcatcher_ffi_macos.dylib" "$RUNNER_TEMP/macos/catcher_ffi.framework" "com.eric8810.catcher.ffi.macos"
+          make_framework "$RUNNER_TEMP/libcatcher_ffi_macos.dylib" "$RUNNER_TEMP/macos/catcher_ffi.framework" "com.eric8810.catcher.ffi.macos" "LSMinimumSystemVersion" "$MACOSX_DEPLOYMENT_TARGET"
           xcodebuild -create-xcframework \
             -framework "$RUNNER_TEMP/macos/catcher_ffi.framework" \
             -output packages/catcher_core/macos/Frameworks/catcher_ffi.xcframework
@@ -713,6 +720,9 @@ jobs:
           find packages/catcher_core/macos/Frameworks -type f | sort
           find packages/catcher_core/linux/lib -type f | sort
           find packages/catcher_core/windows/lib -type f | sort
+          test "$(plutil -extract MinimumOSVersion raw packages/catcher_core/ios/Frameworks/catcher_ffi.xcframework/ios-arm64/catcher_ffi.framework/Info.plist)" = "$IPHONEOS_DEPLOYMENT_TARGET"
+          test "$(plutil -extract MinimumOSVersion raw packages/catcher_core/ios/Frameworks/catcher_ffi.xcframework/ios-arm64_x86_64-simulator/catcher_ffi.framework/Info.plist)" = "$IPHONEOS_DEPLOYMENT_TARGET"
+          test "$(plutil -extract LSMinimumSystemVersion raw packages/catcher_core/macos/Frameworks/catcher_ffi.xcframework/macos-arm64_x86_64/catcher_ffi.framework/Info.plist)" = "$MACOSX_DEPLOYMENT_TARGET"
 
       - name: Check catcher_core package
         working-directory: packages/catcher_core

@@ -183,9 +183,10 @@ class CatcherWsClient {
   // ── Internal ──
 
   void _emitEvent(WsEvent event) {
-    if (!_disposed && !_eventController.isClosed) {
-      _eventController.add(event);
+    if (_disposed || _eventController.isClosed) {
+      return;
     }
+    _eventController.add(event);
   }
 
   void _ensureHandle() {
