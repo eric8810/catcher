@@ -26,61 +26,27 @@ where
         operation()
     };
 
+    let when_retry = |e: &CatcherError| {
+        let a = attempt.get();
+        let should = e.category() == ErrorCategory::Retryable && retry_if(e) && a < max_attempts;
+        if should { on_retry(a, e); }
+        should
+    };
+
     let result = match config.backoff {
         BackoffKind::Fixed => {
-            let backoff = ConstantBuilder::default().with_delay(min_delay);
-            action
-                .retry(backoff)
-                .when(|e: &CatcherError| {
-                    let a = attempt.get();
-                    let should =
-                        e.category() == ErrorCategory::Retryable && retry_if(e) && a < max_attempts;
-                    if should {
-                        on_retry(a, e);
-                    }
-                    should
-                })
-                .sleep(tokio::time::sleep)
-                .await
+            action.retry(ConstantBuilder::default().with_delay(min_delay))
+                .when(when_retry).sleep(tokio::time::sleep).await
         }
         BackoffKind::Exponential => {
-            let backoff = ExponentialBuilder::default()
-                .with_min_delay(min_delay)
-                .with_max_delay(max_delay)
-                .with_factor(2.0);
-            action
-                .retry(backoff)
-                .when(|e: &CatcherError| {
-                    let a = attempt.get();
-                    let should =
-                        e.category() == ErrorCategory::Retryable && retry_if(e) && a < max_attempts;
-                    if should {
-                        on_retry(a, e);
-                    }
-                    should
-                })
-                .sleep(tokio::time::sleep)
-                .await
+            action.retry(ExponentialBuilder::default()
+                .with_min_delay(min_delay).with_max_delay(max_delay).with_factor(2.0))
+                .when(when_retry).sleep(tokio::time::sleep).await
         }
         BackoffKind::DecorrelatedJitter => {
-            let backoff = ExponentialBuilder::default()
-                .with_min_delay(min_delay)
-                .with_max_delay(max_delay)
-                .with_factor(2.0)
-                .with_jitter();
-            action
-                .retry(backoff)
-                .when(|e: &CatcherError| {
-                    let a = attempt.get();
-                    let should =
-                        e.category() == ErrorCategory::Retryable && retry_if(e) && a < max_attempts;
-                    if should {
-                        on_retry(a, e);
-                    }
-                    should
-                })
-                .sleep(tokio::time::sleep)
-                .await
+            action.retry(ExponentialBuilder::default()
+                .with_min_delay(min_delay).with_max_delay(max_delay).with_factor(2.0).with_jitter())
+                .when(when_retry).sleep(tokio::time::sleep).await
         }
     };
 

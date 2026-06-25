@@ -93,21 +93,17 @@ pub fn build_tls_config(
     }
 
     // TLS version control
+    let to_reqwest = |v: &crate::types::http::TlsVersion| match v {
+        crate::types::http::TlsVersion::Tls1_0 => reqwest::tls::Version::TLS_1_0,
+        crate::types::http::TlsVersion::Tls1_1 => reqwest::tls::Version::TLS_1_1,
+        crate::types::http::TlsVersion::Tls1_2 => reqwest::tls::Version::TLS_1_2,
+        crate::types::http::TlsVersion::Tls1_3 => reqwest::tls::Version::TLS_1_3,
+    };
     if let Some(ref min) = config.min_tls_version {
-        builder = builder.min_tls_version(match min {
-            crate::types::http::TlsVersion::Tls1_0 => reqwest::tls::Version::TLS_1_0,
-            crate::types::http::TlsVersion::Tls1_1 => reqwest::tls::Version::TLS_1_1,
-            crate::types::http::TlsVersion::Tls1_2 => reqwest::tls::Version::TLS_1_2,
-            crate::types::http::TlsVersion::Tls1_3 => reqwest::tls::Version::TLS_1_3,
-        });
+        builder = builder.min_tls_version(to_reqwest(min));
     }
     if let Some(ref max) = config.max_tls_version {
-        builder = builder.max_tls_version(match max {
-            crate::types::http::TlsVersion::Tls1_0 => reqwest::tls::Version::TLS_1_0,
-            crate::types::http::TlsVersion::Tls1_1 => reqwest::tls::Version::TLS_1_1,
-            crate::types::http::TlsVersion::Tls1_2 => reqwest::tls::Version::TLS_1_2,
-            crate::types::http::TlsVersion::Tls1_3 => reqwest::tls::Version::TLS_1_3,
-        });
+        builder = builder.max_tls_version(to_reqwest(max));
     }
 
     Ok(builder)

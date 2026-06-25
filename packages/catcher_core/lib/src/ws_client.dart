@@ -5,6 +5,7 @@ import 'dart:ffi';
 import 'package:ffi/ffi.dart';
 
 import 'ffi_bindings.dart';
+import 'ffi_utils.dart';
 import 'http_client.dart' show DnsConfig, ProxyConfig, TlsConfig;
 import 'native_loader.dart';
 
@@ -121,19 +122,16 @@ class CatcherWsClient {
   /// Send a text message
   void sendText(String text) {
     _ensureHandle();
-    final ffiStr = _allocFfiString(text);
+    final ffiStr = allocFfiString(text);
     final result = _sendText(_handle!, ffiStr.ref);
-    _freeFfiString(ffiStr);
+    freeFfiString(ffiStr);
     _checkResult(result);
   }
 
   /// Send a binary message
   void sendBinary(List<int> data) {
     _ensureHandle();
-    final ptr = malloc<Uint8>(data.length);
-    for (var i = 0; i < data.length; i++) {
-      ptr[i] = data[i];
-    }
+    final ptr = copyBytesToMalloc(data);
     final result = _sendBinary(_handle!, ptr, data.length);
     malloc.free(ptr);
     _checkResult(result);
@@ -193,23 +191,6 @@ class CatcherWsClient {
     if (_handle == null || _handle == nullptr) {
       throw StateError('WebSocket client has been disposed');
     }
-  }
-
-  Pointer<FfiStringNative> _allocFfiString(String dartString) {
-    final encoded = utf8.encode(dartString);
-    final native = malloc<Uint8>(encoded.length);
-    for (var i = 0; i < encoded.length; i++) {
-      native[i] = encoded[i];
-    }
-    final ffiStr = calloc<FfiStringNative>();
-    ffiStr.ref.data = native.cast<Char>();
-    ffiStr.ref.len = encoded.length;
-    return ffiStr;
-  }
-
-  void _freeFfiString(Pointer<FfiStringNative> ffiStr) {
-    malloc.free(ffiStr.ref.data);
-    calloc.free(ffiStr);
   }
 
   void _checkResult(FfiResultNative result) {
@@ -465,10 +446,4 @@ class WsClientConfig {
 }
 
 /// Error thrown when the Rust WS client returns an error
-class CatcherWsError implements Exception {
-  final String message;
-  const CatcherWsError(this.message);
-
-  @override
-  String toString() => 'CatcherWsError: $message';
-}
+typedef CatcherWsError = CatcherError;

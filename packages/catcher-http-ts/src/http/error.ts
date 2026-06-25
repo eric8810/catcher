@@ -1,6 +1,6 @@
 import type { CatcherErrorType, CatcherHttpError, RequestConfig } from '@eric8810/catcher-core'
-
-const SENSITIVE_HEADERS = new Set(['authorization', 'cookie', 'set-cookie', 'proxy-authorization'])
+export { classifyFetchError } from '@eric8810/catcher-core'
+import { redactHeaders } from '@eric8810/catcher-core'
 
 /**
  * Classify an axios error into a CatcherErrorType.
@@ -18,28 +18,6 @@ export function classifyAxiosError(error: any): CatcherErrorType {
   if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED' || error.code === 'ECANCELED') return 'cancelled'
   if (error.response) return 'http'
   return 'unknown'
-}
-
-/**
- * Classify a browser fetch error into a CatcherErrorType.
- */
-export function classifyFetchError(error: any): CatcherErrorType {
-  if (error.name === 'AbortError' || error.code === 'ECANCELED') return 'cancelled'
-  if (error.name === 'TypeError' && error.message?.includes('Failed to fetch')) return 'connection'
-  if (error.code === 'HTTP_5XX') return 'http'
-  if (error.response) return 'http'
-  return 'unknown'
-}
-
-/**
- * Redact sensitive headers for safe serialization.
- */
-function redactHeaders(headers: Record<string, string>): Record<string, string> {
-  const safe: Record<string, string> = {}
-  for (const [key, value] of Object.entries(headers)) {
-    safe[key] = SENSITIVE_HEADERS.has(key.toLowerCase()) ? '[REDACTED]' : value
-  }
-  return safe
 }
 
 /**

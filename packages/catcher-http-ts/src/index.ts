@@ -1,5 +1,5 @@
 export { createHttpClient, createRetryWrapper, createInterceptorManager, classifyAxiosError, classifyFetchError, createCatcherError } from './http/index.js'
-export { createSharedAgent, clearDnsCache } from './agent/index.js'
+export { createSharedAgent } from './agent/index.js'
 export { createPriorityQueue, enqueueWithPriority } from './queue/index.js'
 export { createSSEStream, createSSEClient } from './sse/index.js'
 

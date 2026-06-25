@@ -178,11 +178,3 @@ export function createSharedAgent(options: SharedAgentOptions & { hostMapping?: 
   return agent
 }
 
-/**
- * Reset all DNS caches.
- * Since each agent now has its own cache, this is a no-op kept for API compat.
- */
-export function clearDnsCache(): void {
-  // No-op: DNS caches are now per-agent, not global.
-  // Individual agents will naturally GC when dereferenced.
-}

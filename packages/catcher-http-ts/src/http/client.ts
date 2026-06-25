@@ -1,6 +1,5 @@
 import axios, { type AxiosInstance, type AxiosRequestConfig } from 'axios'
 import { CircuitBreakerPolicy, ConsecutiveBreaker } from 'cockatiel'
-import type { ExecuteWrapper } from 'cockatiel/dist/common/Executor.js'
 import { createSharedAgent } from '../agent/shared-agent.js'
 import type {
   HttpClientConfig,
@@ -13,59 +12,9 @@ import type {
 } from '@eric8810/catcher-core'
 import { createRetryWrapper } from './retry.js'
 import { createPriorityQueue } from '../queue/priority-queue.js'
+import { createExecutor } from '@eric8810/catcher-core'
 import { createInterceptorManager } from './interceptors.js'
 import { classifyAxiosError, createCatcherError } from './error.js'
-
-/**
- * Minimal ExecuteWrapper compatible with Cockatiel's internal one.
- * Needed because ExecuteWrapper is not exported from 'cockatiel' directly.
- */
-function createExecutor(): ExecuteWrapper {
-  const self: any = {
-    onSuccess: {
-      addListener: () => {},
-      removeListener: () => {},
-      get size() { return 0 },
-    },
-    onFailure: {
-      addListener: () => {},
-      removeListener: () => {},
-      get size() { return 0 },
-    },
-    clone() {
-      return createExecutor()
-    },
-    async invoke(fn: (...args: any[]) => any, ...args: any[]) {
-      try {
-        const value = await fn(...args)
-        return { success: value }
-      } catch (error) {
-        return { error }
-      }
-    },
-  }
-  return self
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/** Merge instance-level config with per-request overrides. */
-function mergeConfig(
-  instance: HttpClientConfig,
-  req?: RequestConfig,
-): RequestConfig {
-  if (!req) return {}
-  const merged: any = { ...req }
-
-  // Merge headers: instance defaults → request overrides
-  if (req.headers) {
-    merged.headers = { ...req.headers }
-  }
-
-  return merged
-}
 
 /** Serialize query params into a URL query string. */
 function serializeParams(
@@ -375,8 +324,8 @@ export function createHttpClient(config: HttpClientConfig): IHttpClient {
     const startTime = Date.now()
     retryContext.lastAttempt = 0
 
-    // 9a. Build initial request config (merge instance defaults + per-request)
-    const merged = mergeConfig(config, reqConfig)
+    // 9a. Build initial request config from per-request overrides
+    const merged = { ...reqConfig }
 
     // G12: Auth helpers — inject auth headers before interceptor chain
     const authHeaders: Record<string, string> = {}

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import http from 'node:http'
-import { createSharedAgent, clearDnsCache } from '../shared-agent.js'
+import { createSharedAgent } from '../shared-agent.js'
 
 describe('A1 — Default config creates Agent with keepAlive', () => {
   it('returns https.Agent with keepAlive=true', () => {
@@ -26,7 +26,6 @@ describe('A3 — maxSockets config', () => {
 
 describe('A4 — DNS cache enabled', () => {
   it('agent has custom lookup when dnsCacheTtl > 0', () => {
-    clearDnsCache()
     const agent = createSharedAgent({ dnsCacheTtl: 300 }) as any
     // When dnsCacheTtl > 0, the lookup is overridden via agentOpts.lookup
     // Check that options were set (Node stores it internally)
@@ -48,19 +47,7 @@ describe('A6 — rejectUnauthorized=false', () => {
   })
 })
 
-describe('A7 — clearDnsCache()', () => {
-  it('allows creating a new agent with fresh DNS cache', () => {
-    clearDnsCache()
-    const agent1 = createSharedAgent({ dnsCacheTtl: 300 })
-    clearDnsCache()
-    const agent2 = createSharedAgent({ dnsCacheTtl: 300 })
-    // Both should be valid agents (new cache created after clear)
-    expect(agent1).toBeInstanceOf(http.Agent)
-    expect(agent2).toBeInstanceOf(http.Agent)
-  })
-})
-
-// ── A8-A9: G7 hostMapping end-to-end ────────────────────────────
+// ── A7-A8: G7 hostMapping end-to-end ────────────────────────────
 
 let e2eServer: http.Server
 let e2ePort: number

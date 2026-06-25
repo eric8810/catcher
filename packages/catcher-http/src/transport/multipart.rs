@@ -1,11 +1,7 @@
 //! Lightweight multipart/form-data encoder (RFC 7578).
 //!
 //! Builds a `multipart/form-data` body as `Vec<u8>` with a random boundary.
-//! No streaming — the entire body is materialized in memory. This is suitable
-//! for typical file uploads and form submissions where the total payload fits
-//! comfortably in memory.
-
-use std::fmt;
+//! No streaming — the entire body is materialized in memory.
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -178,30 +174,6 @@ fn generate_boundary() -> String {
     let hex = format!("{:032x}", now);
     format!("----RustFormBoundary{hex}")
 }
-
-// ── Error ────────────────────────────────────────────────────
-
-/// Errors that can occur during multipart encoding.
-#[derive(Debug)]
-pub enum MultipartError {
-    /// No parts were added to the form.
-    Empty,
-    /// A field name contained invalid characters.
-    InvalidName(String),
-}
-
-impl fmt::Display for MultipartError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            MultipartError::Empty => write!(f, "multipart form has no parts"),
-            MultipartError::InvalidName(name) => {
-                write!(f, "invalid multipart field name: {name:?}")
-            }
-        }
-    }
-}
-
-impl std::error::Error for MultipartError {}
 
 #[cfg(test)]
 mod tests {

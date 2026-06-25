@@ -33,3 +33,8 @@ export type {
 } from './types.js'
 
 export { isCatcherError } from './types.js'
+export { createInterceptorManager } from './interceptors.js'
+export { routeLine, PushQueue } from './sse-router.js'
+export type { RouteAction } from './sse-router.js'
+export { createExecutor, sleep, calculateDelay, SENSITIVE_HEADERS, classifyFetchError, redactHeaders, SSETimeoutErrorImpl, createSSEStreamCore, createSSEClientCore } from './helpers.js'
+export type { SseConnectOnceCtx, ConnectOnceFn } from './helpers.js'

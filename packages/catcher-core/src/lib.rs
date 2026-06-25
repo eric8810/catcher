@@ -8,12 +8,14 @@
 //! - `FfiResult`, `FfiString`, `FfiBytes`, `EventCallback` — FFI-safe types
 
 pub mod error;
+pub mod ffi_helpers;
 pub mod ffi_types;
 pub mod handle_registry;
 pub mod types;
 
 // Re-export everything at crate root for convenience
 pub use error::{CatcherError, ErrorCategory};
+pub use ffi_helpers::CancellationGuard;
 pub use ffi_types::{EventCallback, FfiBytes, FfiResult, FfiString};
 pub use handle_registry::HandleRegistry;
 pub use types::network::{ProxyAuth, ProxyConfig, ProxyMode, TlsConfig, TlsVersion};

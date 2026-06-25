@@ -6,6 +6,7 @@ import 'dart:isolate';
 import 'package:ffi/ffi.dart';
 
 import 'ffi_bindings.dart';
+import 'ffi_utils.dart';
 import 'native_loader.dart';
 
 // Lazy-resolved FFI function handles
@@ -60,22 +61,7 @@ class NetworkQualityResult {
 }
 
 /// Build a heap-allocated FfiStringNative. Caller must free.
-Pointer<FfiStringNative> _allocFfiString(String dartString) {
-  final encoded = utf8.encode(dartString);
-  final native = malloc<Uint8>(encoded.length);
-  for (var i = 0; i < encoded.length; i++) {
-    native[i] = encoded[i];
-  }
-  final ffiStr = calloc<FfiStringNative>();
-  ffiStr.ref.data = native.cast<Char>();
-  ffiStr.ref.len = encoded.length;
-  return ffiStr;
-}
-
-void _freeFfiString(Pointer<FfiStringNative> ffiStr) {
-  malloc.free(ffiStr.ref.data);
-  calloc.free(ffiStr);
-}
+// Use shared allocFfiString/freeFfiString from ffi_utils.dart
 
 /// Evaluate network quality to the given host.
 Future<NetworkQualityResult> evaluateQuality(String host) async {
@@ -101,45 +87,25 @@ Future<NetworkQualityResult> evaluateQuality(String host) async {
   late StreamSubscription sub;
   sub = receivePort.listen((message) {
     sub.cancel();
-    if (!cleanedUp) {
-      cleanedUp = true;
-      nativeCallback.close();
-      receivePort.close();
-    }
-    if (!completer.isCompleted) {
-      completer.complete(message as String);
-    }
+    if (!cleanedUp) { cleanedUp = true; nativeCallback.close(); receivePort.close(); }
+    if (!completer.isCompleted) completer.complete(message as String);
   });
 
-  final hostFfi = _allocFfiString(host);
-
+  final hostFfi = allocFfiString(host);
   try {
-    _eval()(
-      hostFfi.ref,
-      nativeCallback.nativeFunction,
-      nullptr,
-    );
+    _eval()(hostFfi.ref, nativeCallback.nativeFunction, nullptr);
   } catch (e) {
-    if (!cleanedUp) {
-      cleanedUp = true;
-      nativeCallback.close();
-      receivePort.close();
-    }
-    _freeFfiString(hostFfi);
+    if (!cleanedUp) { cleanedUp = true; nativeCallback.close(); receivePort.close(); }
+    freeFfiString(hostFfi);
     rethrow;
   }
-
-  _freeFfiString(hostFfi);
+  freeFfiString(hostFfi);
 
   final resultJson = await completer.future.timeout(
     const Duration(seconds: 30),
     onTimeout: () {
       Future.delayed(const Duration(seconds: 60), () {
-        if (!cleanedUp) {
-          cleanedUp = true;
-          nativeCallback.close();
-          receivePort.close();
-        }
+        if (!cleanedUp) { cleanedUp = true; nativeCallback.close(); receivePort.close(); }
       });
       return '{}';
     },

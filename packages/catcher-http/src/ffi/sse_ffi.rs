@@ -4,10 +4,10 @@
 //! and SseStream (one-shot POST SSE) to FFI consumers.
 #![allow(clippy::missing_safety_doc)]
 
-use std::collections::HashMap;
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::sync::Arc;
 
+use catcher_core::ffi_helpers::{self, CancellationGuard};
 use catcher_core::types::sse::{SseClientConfig, SseMethod};
 use catcher_core::{EventCallback, FfiString, HandleRegistry};
 
@@ -15,10 +15,11 @@ use crate::sse::client::{SseClient, SseReadyState};
 use crate::sse::SseStream;
 
 // ── Handle registry for SseClient ──
-// Inner mutex uses tokio::sync::Mutex so guards are Send-safe across .await
 use tokio::sync::Mutex as TokioMutex;
 
 static SSE_REGISTRY: HandleRegistry<TokioMutex<SseClient>> = HandleRegistry::new();
+static SSE_GUARD: std::sync::OnceLock<CancellationGuard> = std::sync::OnceLock::new();
+fn sse_guard() -> &'static CancellationGuard { SSE_GUARD.get_or_init(CancellationGuard::new) }
 
 fn sse_runtime() -> &'static tokio::runtime::Runtime {
     static RT: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
@@ -30,97 +31,16 @@ fn sse_runtime() -> &'static tokio::runtime::Runtime {
     })
 }
 
-/// Safely read an FfiString as a Rust String. Returns default on null/invalid.
-fn ffi_string_to_string(s: FfiString, default: &str) -> String {
-    s.to_string_lossy(default)
-}
-
-/// Safely read body bytes from a raw pointer. Returns empty vec on null.
-fn read_body_bytes(body: *const u8, body_len: usize) -> Vec<u8> {
-    if body.is_null() || body_len == 0 {
-        return Vec::new();
-    }
-    unsafe { std::slice::from_raw_parts(body, body_len).to_vec() }
-}
-
 fn build_sse_event_json(event_type: &str, data: &str) -> String {
-    serde_json::json!({
-        "type": event_type,
-        "data": data,
-    })
-    .to_string()
+    serde_json::json!({ "type": event_type, "data": data }).to_string()
 }
 
 fn invoke_sse_callback(callback: EventCallback, json: String, user_data: usize) {
-    let event_name = CString::new("sse_event").unwrap_or_default();
-    let c_json = CString::new(json.replace('\0', "")).unwrap_or_default();
-    let json_len = c_json.as_bytes().len();
-
-    callback(
-        event_name.into_raw(),
-        c_json.into_raw() as *const u8,
-        json_len,
-        user_data as *mut c_void,
-    );
+    ffi_helpers::invoke_callback(callback, "sse_event", json, user_data)
 }
 
-/// 已销毁的 SSE 句柄 id 集合。后台转发循环在 destroy 后仍可能回调，标记取消后回调前
-/// 检查可避免在 destroy 后触发宿主 `user_data`（use-after-free）。与 WS/HTTP 对齐。
-/// 详见 issue #034。id 由 HandleRegistry 单调分配、不复用，集合只增是安全的。
-fn cancelled_sse_ids() -> &'static std::sync::RwLock<std::collections::HashSet<usize>> {
-    static CANCELLED: std::sync::OnceLock<std::sync::RwLock<std::collections::HashSet<usize>>> =
-        std::sync::OnceLock::new();
-    CANCELLED.get_or_init(|| std::sync::RwLock::new(std::collections::HashSet::new()))
-}
-
-fn mark_sse_cancelled(id: usize) {
-    let lock = cancelled_sse_ids();
-    match lock.write() {
-        Ok(mut ids) => {
-            ids.insert(id);
-        }
-        Err(poisoned) => {
-            poisoned.into_inner().insert(id);
-        }
-    }
-}
-
-fn is_sse_cancelled(id: usize) -> bool {
-    let lock = cancelled_sse_ids();
-    match lock.read() {
-        Ok(ids) => ids.contains(&id),
-        Err(poisoned) => poisoned.into_inner().contains(&id),
-    }
-}
-
-/// 仅当句柄未被 destroy 时回调；返回 false 表示已取消（调用方应停止转发循环）。
-fn invoke_sse_callback_if_active(
-    id: usize,
-    callback: EventCallback,
-    json: String,
-    user_data: usize,
-) -> bool {
-    if is_sse_cancelled(id) {
-        return false;
-    }
-    invoke_sse_callback(callback, json, user_data);
-    true
-}
-
-fn parse_headers_json(headers_json: *const c_char) -> HashMap<String, String> {
-    if headers_json.is_null() {
-        return HashMap::new();
-    }
-    let json_str = unsafe {
-        match CStr::from_ptr(headers_json).to_str() {
-            Ok(s) => s,
-            Err(_) => return HashMap::new(),
-        }
-    };
-    if json_str.is_empty() {
-        return HashMap::new();
-    }
-    serde_json::from_str::<HashMap<String, String>>(json_str).unwrap_or_default()
+fn invoke_sse_callback_if_active(id: usize, callback: EventCallback, json: String, user_data: usize) -> bool {
+    ffi_helpers::invoke_callback_if_active(sse_guard(), id, callback, "sse_event", json, user_data)
 }
 
 // ── SseStream — one-shot POST SSE (OpenAI/Anthropic streaming API) ──
@@ -143,10 +63,10 @@ pub unsafe extern "C" fn catcher_sse_stream(
     }
     let ud = user_data as usize;
 
-    let method_str = ffi_string_to_string(method, "GET");
-    let url_str = ffi_string_to_string(url, "/");
-    let body_data = read_body_bytes(body, body_len);
-    let headers = parse_headers_json(headers_json);
+    let method_str = ffi_helpers::ffi_str(method, "GET");
+    let url_str = ffi_helpers::ffi_str(url, "/");
+    let body_data = unsafe { ffi_helpers::read_body_bytes(body, body_len) };
+    let headers = unsafe { ffi_helpers::parse_headers_json(headers_json) };
 
     let sse_method = match method_str.to_uppercase().as_str() {
         "GET" => SseMethod::GET,
@@ -248,7 +168,7 @@ pub unsafe extern "C" fn catcher_sse_connect(
                     sse_runtime().spawn(async move {
                         loop {
                             // destroy 后停止转发，避免回调已释放的 user_data（issue #034）。
-                            if is_sse_cancelled(id) {
+                            if sse_guard().is_cancelled(id) {
                                 break;
                             }
                             let mut c = client_arc.lock().await;
@@ -350,7 +270,7 @@ pub unsafe extern "C" fn catcher_sse_destroy(sse_handle: *mut c_void) {
     }
     let id = sse_handle as usize;
     // 标记取消并关闭，阻止后台转发循环在 destroy 后再回调宿主 user_data（issue #034）。
-    mark_sse_cancelled(id);
+    sse_guard().mark(id);
     if let Some(client) = SSE_REGISTRY.get(id) {
         client.blocking_lock().close();
     }

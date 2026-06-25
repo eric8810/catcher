@@ -19,7 +19,7 @@
 import http from 'node:http'
 import axios from 'axios'
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { createHttpClient, clearDnsCache } from '@eric8810/catcher-http'
+import { createHttpClient } from '@eric8810/catcher-http'
 import { createHttpTestServer, type TestServer } from '../servers/http-server.js'
 import { createNetworkProxy, type NetworkProxy } from '../network/proxy.js'
 import { NETWORK_PROFILES } from '../network/presets.js'
@@ -116,7 +116,6 @@ describe('Scenario A — direct throughput', () => {
   })
 
   it(`vanilla — ${THROUGHPUT_REQUESTS} requests, concurrency=${THROUGHPUT_CONCURRENCY}`, async () => {
-    clearDnsCache()
     const vanillaAxios = axios.create({
       baseURL: serverUrl,
       timeout: 10_000,
@@ -153,7 +152,6 @@ describe('Scenario A — direct throughput', () => {
   }, TIMEOUT)
 
   it(`catcher — ${THROUGHPUT_REQUESTS} requests, concurrency=${THROUGHPUT_CONCURRENCY}`, async () => {
-    clearDnsCache()
     const client = createHttpClient({
       baseURL: serverUrl,
       keepAlive: true,
@@ -221,7 +219,6 @@ for (const [key, profile] of Object.entries(NETWORK_PROFILES)) {
     it(`vanilla — ${WEAK_REQUESTS} requests, concurrency=${WEAK_CONCURRENCY}`, async () => {
       proxy.setConditions(profile.conditions)
       proxy.disruptAll()
-      clearDnsCache()
 
       const vanillaAxios = axios.create({
         baseURL: proxyUrl,
@@ -259,7 +256,6 @@ for (const [key, profile] of Object.entries(NETWORK_PROFILES)) {
     it(`catcher with retry — ${WEAK_REQUESTS} requests, concurrency=${WEAK_CONCURRENCY}`, async () => {
       proxy.setConditions(profile.conditions)
       proxy.disruptAll()
-      clearDnsCache()
 
       const client = createHttpClient({
         baseURL: proxyUrl,
@@ -319,7 +315,6 @@ describe('Scenario C — connection efficiency', () => {
   })
 
   it(`vanilla — 200 sequential, 1 at a time (no keepAlive)`, async () => {
-    clearDnsCache()
     const vanillaAxios = axios.create({
       baseURL: serverUrl,
       timeout: 5_000,
@@ -355,7 +350,6 @@ describe('Scenario C — connection efficiency', () => {
   }, TIMEOUT)
 
   it(`catcher — 200 sequential, 1 at a time (keepAlive)`, async () => {
-    clearDnsCache()
     const client = createHttpClient({
       baseURL: serverUrl,
       keepAlive: true,
@@ -421,7 +415,6 @@ describe('Scenario D — mixed IM workload', () => {
   }
 
   it('vanilla mixed workload', async () => {
-    clearDnsCache()
     const vanillaAxios = axios.create({
       baseURL: serverUrl,
       timeout: 10_000,
@@ -463,7 +456,6 @@ describe('Scenario D — mixed IM workload', () => {
   }, TIMEOUT)
 
   it('catcher mixed workload (priority queue)', async () => {
-    clearDnsCache()
     const client = createHttpClient({
       baseURL: serverUrl,
       keepAlive: true,

@@ -6,6 +6,7 @@ import 'dart:isolate';
 import 'package:ffi/ffi.dart';
 
 import 'ffi_bindings.dart';
+import 'ffi_utils.dart';
 import 'native_loader.dart';
 import 'sse_client.dart';
 
@@ -479,130 +480,38 @@ class CatcherHttpClient {
     int? timeoutMs,
   ) async {
     _ensureHandle();
-    final receivePort = ReceivePort();
-    final completer = Completer<({int requestId, HttpResponse response})>();
-    bool cleanedUp = false;
 
-    final nativeCallback = NativeCallable<EventCallbackNative>.listener(
-      (Pointer<Char> eventType, Pointer<Uint8> eventData, int eventDataLen,
-          Pointer<Void> userData) {
-        final jsonBytes = eventData.asTypedList(eventDataLen);
-        final jsonStr = utf8.decode(jsonBytes, allowMalformed: true);
-
-        _freeEventDataFn(eventType, eventData);
-
-        final Map<String, dynamic> result;
-        try {
-          result = jsonDecode(jsonStr) as Map<String, dynamic>;
-        } catch (_) {
-          receivePort.sendPort.send({'error': jsonStr});
-          return;
-        }
-        receivePort.sendPort.send(result);
-      },
-    );
-
-    late StreamSubscription sub;
-    sub = receivePort.listen((message) {
-      sub.cancel();
-      if (!cleanedUp) {
-        cleanedUp = true;
-        nativeCallback.close();
-        receivePort.close();
+    final bridge = FfiAsyncBridge<({int requestId, HttpResponse response})>();
+    final callback = bridge.createCallback(_freeEventDataFn);
+    bridge.listen((m) {
+      if (m.containsKey('request_id') && !m.containsKey('error') && m['type'] != 'cancelled') {
+        return (requestId: m['request_id'] as int, response: HttpResponse.fromJson(Map<String, dynamic>.from(m)));
       }
-      if (!completer.isCompleted) {
-        if (message is Map && message.containsKey('request_id')) {
-          if (message.containsKey('error')) {
-            completer.completeError(CatcherHttpError(
-              message['error']?.toString() ?? 'Unknown error',
-            ));
-          } else if (message['type'] == 'cancelled') {
-            completer.completeError(CatcherHttpError('Request cancelled'));
-          } else {
-            final requestId = message['request_id'] as int;
-            final response = HttpResponse.fromJson(
-                Map<String, dynamic>.from(message));
-            completer.complete((requestId: requestId, response: response));
-          }
-        } else if (message is Map && message.containsKey('error')) {
-          completer.completeError(CatcherHttpError(
-            message['error']?.toString() ?? 'Unknown error',
-          ));
-        } else {
-          completer.completeError(CatcherHttpError(message.toString()));
-        }
+      if (m['type'] == 'cancelled') {
+        throw CatcherError('Request cancelled');
       }
+      throw CatcherError(m['error']?.toString() ?? 'Unknown error');
     });
 
-    final methodFfi = _allocFfiString(method);
-    final urlFfi = _allocFfiString(path);
-    final ctFfi = contentType != null
-        ? _allocFfiString(contentType)
-        : _allocFfiString('');
-    final headersJson = (headers != null && headers.isNotEmpty)
-        ? jsonEncode(headers).toNativeUtf8().cast<Char>()
-        : nullptr.cast<Char>();
-    final bodyPtr = (body != null && body.isNotEmpty)
-        ? malloc<Uint8>(body.length)
-        : Pointer<Uint8>.fromAddress(0);
-    if (body != null && body.isNotEmpty) {
-      for (var i = 0; i < body.length; i++) {
-        bodyPtr[i] = body[i];
-      }
-    }
+    final methodFfi = allocFfiString(method);
+    final urlFfi = allocFfiString(path);
+    final ctFfi = contentType != null ? allocFfiString(contentType) : allocFfiString('');
+    final headersJson = allocHeaders(headers);
+    final bodyPtr = copyBytesToMalloc(body);
 
     try {
-      final requestId = fn(
-        _handle!,
-        methodFfi.ref,
-        urlFfi.ref,
-        bodyPtr,
-        body?.length ?? 0,
-        ctFfi.ref,
-        headersJson,
-        timeoutMs ?? 0,
-        nativeCallback.nativeFunction,
-        nullptr,
-      );
-      if (requestId == 0) {
-        throw CatcherHttpError('Failed to start HTTP request');
-      }
+      final requestId = fn(_handle!, methodFfi.ref, urlFfi.ref, bodyPtr,
+          body?.length ?? 0, ctFfi.ref, headersJson, timeoutMs ?? 0,
+          callback.nativeFunction, nullptr);
+      if (requestId == 0) throw CatcherError('Failed to start HTTP request');
     } catch (e) {
-      if (!cleanedUp) {
-        cleanedUp = true;
-        nativeCallback.close();
-        receivePort.close();
-      }
-      _freeFfiString(methodFfi);
-      _freeFfiString(urlFfi);
-      _freeFfiString(ctFfi);
-      if (headersJson != nullptr) malloc.free(headersJson);
-      if (body != null && body.isNotEmpty) malloc.free(bodyPtr);
+      bridge.cleanupOnError();
+      _freeAll(methodFfi, urlFfi, ctFfi, headersJson, bodyPtr, body);
       rethrow;
     }
 
-    _freeFfiString(methodFfi);
-    _freeFfiString(urlFfi);
-    _freeFfiString(ctFfi);
-    if (headersJson != nullptr) malloc.free(headersJson);
-    if (body != null && body.isNotEmpty) malloc.free(bodyPtr);
-
-    return completer.future.timeout(
-      const Duration(seconds: 30),
-      onTimeout: () {
-        if (!cleanedUp) {
-          cleanedUp = true;
-          nativeCallback.close();
-          receivePort.close();
-        }
-        if (!completer.isCompleted) {
-          completer.completeError(
-            TimeoutException('HTTP request timed out after 30s'),
-          );
-        }
-        throw TimeoutException('HTTP request timed out after 30s');
-      },
-    );
+    _freeAll(methodFfi, urlFfi, ctFfi, headersJson, bodyPtr, body);
+    return bridge.future;
   }
 
   /// Streaming download implementation.
@@ -776,121 +685,37 @@ class CatcherHttpClient {
     int? timeoutMs,
   }) async {
     _ensureHandle();
-    final receivePort = ReceivePort();
-    final completer = Completer<HttpResponse>();
-    bool cleanedUp = false;
 
-    final nativeCallback = NativeCallable<EventCallbackNative>.listener(
-      (Pointer<Char> eventType, Pointer<Uint8> eventData, int eventDataLen,
-          Pointer<Void> userData) {
-        final jsonBytes = eventData.asTypedList(eventDataLen);
-        final jsonStr = utf8.decode(jsonBytes, allowMalformed: true);
+    final bridge = FfiAsyncBridge<HttpResponse>();
+    final callback = bridge.createCallback(_freeEventDataFn);
+    bridge.listen((m) => HttpResponse.fromJson(m));
 
-        _freeEventDataFn(eventType, eventData);
-
-        final Map<String, dynamic> result;
-        try {
-          result = jsonDecode(jsonStr) as Map<String, dynamic>;
-        } catch (_) {
-          receivePort.sendPort.send({'error': jsonStr});
-          return;
-        }
-        receivePort.sendPort.send(result);
-      },
-    );
-
-    late StreamSubscription sub;
-    sub = receivePort.listen((message) {
-      sub.cancel();
-      if (!cleanedUp) {
-        cleanedUp = true;
-        nativeCallback.close();
-        receivePort.close();
-      }
-      if (!completer.isCompleted) {
-        if (message is Map && !message.containsKey('error')) {
-          completer.complete(
-              HttpResponse.fromJson(Map<String, dynamic>.from(message)));
-        } else if (message is Map) {
-          completer.completeError(CatcherHttpError(
-            message['error']?.toString() ?? 'Unknown error',
-          ));
-        } else {
-          completer.completeError(CatcherHttpError(message.toString()));
-        }
-      }
-    });
-
-    final methodFfi = _allocFfiString(method);
-    final urlFfi = _allocFfiString(path);
-    final ctFfi = contentType != null
-        ? _allocFfiString(contentType)
-        : _allocFfiString('');
-
-    final headersJson = (headers != null && headers.isNotEmpty)
-        ? jsonEncode(headers).toNativeUtf8().cast<Char>()
-        : nullptr.cast<Char>();
-
-    final bodyPtr = (body != null && body.isNotEmpty)
-        ? malloc<Uint8>(body.length)
-        : Pointer<Uint8>.fromAddress(0);
-    if (body != null && body.isNotEmpty) {
-      for (var i = 0; i < body.length; i++) {
-        bodyPtr[i] = body[i];
-      }
-    }
+    final methodFfi = allocFfiString(method);
+    final urlFfi = allocFfiString(path);
+    final ctFfi = contentType != null ? allocFfiString(contentType) : allocFfiString('');
+    final headersJson = allocHeaders(headers);
+    final bodyPtr = copyBytesToMalloc(body);
 
     try {
-      _executeFn(
-        _handle!,
-        methodFfi.ref,
-        urlFfi.ref,
-        bodyPtr,
-        body?.length ?? 0,
-        ctFfi.ref,
-        headersJson,
-        timeoutMs ?? 0,
-        nativeCallback.nativeFunction,
-        nullptr,
-      );
+      _executeFn(_handle!, methodFfi.ref, urlFfi.ref, bodyPtr,
+          body?.length ?? 0, ctFfi.ref, headersJson,
+          timeoutMs ?? 0, callback.nativeFunction, nullptr);
     } catch (e) {
-      if (!cleanedUp) {
-        cleanedUp = true;
-        nativeCallback.close();
-        receivePort.close();
-      }
-      _freeFfiString(methodFfi);
-      _freeFfiString(urlFfi);
-      _freeFfiString(ctFfi);
-      if (headersJson != nullptr) malloc.free(headersJson);
-      if (body != null && body.isNotEmpty) malloc.free(bodyPtr);
+      bridge.cleanupOnError();
+      _freeAll(methodFfi, urlFfi, ctFfi, headersJson, bodyPtr, body);
       rethrow;
     }
 
-    _freeFfiString(methodFfi);
-    _freeFfiString(urlFfi);
-    _freeFfiString(ctFfi);
-    if (headersJson != nullptr) malloc.free(headersJson);
-    if (body != null && body.isNotEmpty) malloc.free(bodyPtr);
+    _freeAll(methodFfi, urlFfi, ctFfi, headersJson, bodyPtr, body);
+    return bridge.future;
+  }
 
-    return completer.future.timeout(
-      const Duration(seconds: 30),
-      onTimeout: () {
-        Future.delayed(const Duration(seconds: 60), () {
-          if (!cleanedUp) {
-            cleanedUp = true;
-            nativeCallback.close();
-            receivePort.close();
-          }
-        });
-        if (!completer.isCompleted) {
-          completer.completeError(
-            TimeoutException('HTTP request timed out after 30s'),
-          );
-        }
-        throw TimeoutException('HTTP request timed out after 30s');
-      },
-    );
+  void _freeAll(Pointer<FfiStringNative> m, Pointer<FfiStringNative> u,
+      Pointer<FfiStringNative> c, Pointer<Char> h, Pointer<Uint8> b,
+      List<int>? body) {
+    freeFfiString(m); freeFfiString(u); freeFfiString(c);
+    if (h != nullptr) malloc.free(h);
+    if (body != null && body.isNotEmpty) malloc.free(b);
   }
 }
 
@@ -1191,13 +1016,7 @@ class HttpResponse {
 }
 
 /// Error thrown when the Rust HTTP client returns an error
-class CatcherHttpError implements Exception {
-  final String message;
-  const CatcherHttpError(this.message);
-
-  @override
-  String toString() => 'CatcherHttpError: $message';
-}
+typedef CatcherHttpError = CatcherError;
 
 // ═══════════════════════════════════════════════════════════════
 // Stream download events (H-04)

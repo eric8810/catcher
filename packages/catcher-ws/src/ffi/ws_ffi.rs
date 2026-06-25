@@ -1,164 +1,65 @@
 //! WebSocket C ABI — create / send / close / destroy
 #![allow(clippy::missing_safety_doc)]
 
-use std::collections::HashSet;
-use std::ffi::{c_char, c_void, CStr, CString};
-use std::sync::{Arc, OnceLock, RwLock};
+use std::ffi::{c_char, c_void, CStr};
+use std::sync::{Arc, OnceLock};
 
 use crate::transport::ws_client::{WsHandle, WsTransport};
 use crate::types::ws::WsClientConfig;
 
+use catcher_core::ffi_helpers::{self, CancellationGuard};
 use catcher_core::{EventCallback, FfiResult, FfiString, HandleRegistry};
 
 static WS_REGISTRY: HandleRegistry<WsHandle> = HandleRegistry::new();
+static WS_GUARD: OnceLock<CancellationGuard> = OnceLock::new();
+fn ws_guard() -> &'static CancellationGuard { WS_GUARD.get_or_init(CancellationGuard::new) }
 
-fn cancelled_ws_ids() -> &'static RwLock<HashSet<usize>> {
-    static CANCELLED: OnceLock<RwLock<HashSet<usize>>> = OnceLock::new();
-    CANCELLED.get_or_init(|| RwLock::new(HashSet::new()))
-}
-
-fn mark_ws_cancelled(id: usize) {
-    let lock = cancelled_ws_ids();
-    match lock.write() {
-        Ok(mut ids) => {
-            ids.insert(id);
-        }
-        Err(poisoned) => {
-            let mut ids = poisoned.into_inner();
-            ids.insert(id);
-        }
-    }
-}
-
-fn is_ws_cancelled(id: usize) -> bool {
-    let lock = cancelled_ws_ids();
-    match lock.read() {
-        Ok(ids) => ids.contains(&id),
-        Err(poisoned) => poisoned.into_inner().contains(&id),
-    }
-}
-
-/// Global tokio runtime for WS async operations (spawning, etc.)
 fn runtime() -> &'static tokio::runtime::Runtime {
-    static RT: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
-    RT.get_or_init(|| {
-        tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .expect("Failed to create tokio runtime for catcher-ws FFI")
-    })
+    static RT: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
+    RT.get_or_init(|| tokio::runtime::Builder::new_multi_thread().enable_all().build().expect("ws runtime"))
 }
 
-/// Safely read an FfiString as a Rust String. Returns default on null/invalid.
-fn ffi_string_to_string(s: FfiString, default: &str) -> String {
-    s.to_string_lossy(default)
-}
-
-/// Build a JSON error string safely (no format! injection).
-fn error_json(msg: &str) -> String {
-    serde_json::json!({ "error": msg }).to_string()
-}
-
-/// Invoke an FFI event callback with ownership-transferred CStrings.
-fn invoke_event_callback(cb: EventCallback, event_name: &str, json: String, user_data: usize) {
-    let c_event = CString::new(event_name.replace('\0', "")).unwrap_or_default();
-    let c_json = CString::new(json.replace('\0', "")).unwrap_or_default();
-    let json_len = c_json.as_bytes().len();
-
-    cb(
-        c_event.into_raw(),
-        c_json.into_raw() as *const u8,
-        json_len,
-        user_data as *mut c_void,
-    );
-}
-
-fn invoke_event_callback_if_active(
-    id: usize,
-    cb: EventCallback,
-    event_name: &str,
-    json: String,
-    user_data: usize,
-) -> bool {
-    let lock = cancelled_ws_ids();
-    let ids = match lock.read() {
-        Ok(ids) => ids,
-        Err(poisoned) => poisoned.into_inner(),
-    };
-    if ids.contains(&id) {
-        return false;
-    }
-    invoke_event_callback(cb, event_name, json, user_data);
-    true
-}
-
-/// 创建 WS 客户端。返回的句柄是注册表 id 直接编码为指针值（id ≥ 1，
-/// 与 null 不冲突），**不指向任何内存** — destroy 之后用旧句柄调用任何
-/// API 都安全返回 "handle not found"，而不是 use-after-free。
 #[no_mangle]
 pub unsafe extern "C" fn catcher_ws_create(
-    config_json: *const c_char,
-    event_callback: EventCallback,
-    user_data: *mut c_void,
+    config_json: *const c_char, event_callback: EventCallback, user_data: *mut c_void,
 ) -> *mut c_void {
-    if config_json.is_null() {
-        return std::ptr::null_mut();
-    }
+    if config_json.is_null() { return std::ptr::null_mut(); }
     let json = CStr::from_ptr(config_json);
     let config: WsClientConfig = match serde_json::from_str(json.to_str().unwrap_or("")) {
-        Ok(c) => c,
-        Err(_) => return std::ptr::null_mut(),
+        Ok(c) => c, Err(_) => return std::ptr::null_mut(),
     };
     if config.urls.is_empty() {
-        // Return error via callback instead of silently connecting to localhost
-        let json = error_json("urls cannot be empty");
-        invoke_event_callback(event_callback, "ws_error", json, user_data as usize);
+        ffi_helpers::invoke_callback(event_callback, "ws_error", ffi_helpers::error_json("urls cannot be empty"), user_data as usize);
         return std::ptr::null_mut();
     }
-
     let id = WS_REGISTRY.next_id();
     let cb = event_callback;
     let ud = user_data as usize;
-
     runtime().spawn(async move {
         match WsTransport::connect(&config).await {
             Ok((handle, mut rx)) => {
-                if is_ws_cancelled(id) {
-                    let _ = handle.close(1000, "destroy");
-                    return;
-                }
+                if ws_guard().is_cancelled(id) { let _ = handle.close(1000, "destroy"); return; }
                 WS_REGISTRY.insert_with_id(id, Arc::new(handle));
-
                 while let Some(event) = rx.recv().await {
                     let json = event.to_ffi_json();
-                    if !invoke_event_callback_if_active(id, cb, "ws_event", json, ud) {
-                        break;
-                    }
+                    if !ffi_helpers::invoke_callback_if_active(ws_guard(), id, cb, "ws_event", json, ud) { break; }
                 }
                 WS_REGISTRY.remove(id);
             }
             Err(e) => {
-                let json = error_json(&e.to_string());
-                let _ = invoke_event_callback_if_active(id, cb, "ws_error", json, ud);
+                let _ = ffi_helpers::invoke_callback_if_active(ws_guard(), id, cb, "ws_error", ffi_helpers::error_json(&e.to_string()), ud);
             }
         }
     });
-
     id as *mut c_void
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn catcher_ws_send_text(
-    handle: *mut c_void,
-    message: FfiString,
-) -> FfiResult {
-    if handle.is_null() {
-        return FfiResult::error(1, "null handle");
-    }
+pub unsafe extern "C" fn catcher_ws_send_text(handle: *mut c_void, message: FfiString) -> FfiResult {
+    if handle.is_null() { return FfiResult::error(1, "null handle"); }
     let id = handle as usize;
-    let text = ffi_string_to_string(message, "");
     match WS_REGISTRY.get(id) {
-        Some(h) => match h.send_text(&text) {
+        Some(h) => match h.send_text(&ffi_helpers::ffi_str(message, "")) {
             Ok(()) => FfiResult::ok(std::ptr::null_mut(), 0),
             Err(e) => FfiResult::error(1, &e.to_string()),
         },
@@ -167,21 +68,11 @@ pub unsafe extern "C" fn catcher_ws_send_text(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn catcher_ws_send_binary(
-    handle: *mut c_void,
-    data: *const u8,
-    len: usize,
-) -> FfiResult {
-    if handle.is_null() {
-        return FfiResult::error(1, "null handle");
-    }
-    if data.is_null() {
-        return FfiResult::error(1, "null data pointer");
-    }
+pub unsafe extern "C" fn catcher_ws_send_binary(handle: *mut c_void, data: *const u8, len: usize) -> FfiResult {
+    if handle.is_null() || data.is_null() { return FfiResult::error(1, "null pointer"); }
     let id = handle as usize;
-    let bytes = std::slice::from_raw_parts(data, len);
     match WS_REGISTRY.get(id) {
-        Some(h) => match h.send_binary(bytes) {
+        Some(h) => match h.send_binary(std::slice::from_raw_parts(data, len)) {
             Ok(()) => FfiResult::ok(std::ptr::null_mut(), 0),
             Err(e) => FfiResult::error(1, &e.to_string()),
         },
@@ -191,44 +82,25 @@ pub unsafe extern "C" fn catcher_ws_send_binary(
 
 #[no_mangle]
 pub unsafe extern "C" fn catcher_ws_close(handle: *mut c_void, code: u16, reason: FfiString) {
-    if handle.is_null() {
-        return;
-    }
-    let id = handle as usize;
-    let reason_str = ffi_string_to_string(reason, "normal");
-    if let Some(h) = WS_REGISTRY.get(id) {
-        let _ = h.close(code, &reason_str);
+    if handle.is_null() { return; }
+    if let Some(h) = WS_REGISTRY.get(handle as usize) {
+        let _ = h.close(code, &ffi_helpers::ffi_str(reason, "normal"));
     }
 }
 
-/// 通知 WS 客户端网络环境已变化（WiFi 切换 / VPN 换节点等）。
-/// 立即断开当前连接、清空 DNS 缓存、跳过退避延迟重连。
 #[no_mangle]
 pub unsafe extern "C" fn catcher_ws_network_changed(handle: *mut c_void) -> FfiResult {
-    if handle.is_null() {
-        return FfiResult::error(1, "null handle");
-    }
-    let id = handle as usize;
-    match WS_REGISTRY.get(id) {
-        Some(h) => match h.network_changed() {
-            Ok(()) => FfiResult::ok(std::ptr::null_mut(), 0),
-            Err(e) => FfiResult::error(1, &e.to_string()),
-        },
+    if handle.is_null() { return FfiResult::error(1, "null handle"); }
+    match WS_REGISTRY.get(handle as usize) {
+        Some(h) => match h.network_changed() { Ok(()) => FfiResult::ok(std::ptr::null_mut(), 0), Err(e) => FfiResult::error(1, &e.to_string()) },
         None => FfiResult::error(1, "handle not found"),
     }
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn catcher_ws_destroy(handle: *mut c_void) {
-    if handle.is_null() {
-        return;
-    }
+    if handle.is_null() { return; }
     let id = handle as usize;
-    mark_ws_cancelled(id);
-    if let Some(h) = WS_REGISTRY.remove(id) {
-        let _ = h.close(1000, "destroy");
-    }
+    ws_guard().mark(id);
+    if let Some(h) = WS_REGISTRY.remove(id) { let _ = h.close(1000, "destroy"); }
 }
-
-// Note: catcher_free_result is provided by catcher-core (ffi_types.rs).
-// Do not re-define here to avoid duplicate symbol errors at link time.

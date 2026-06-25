@@ -8,7 +8,6 @@
  */
 
 import { CircuitBreakerPolicy, ConsecutiveBreaker } from 'cockatiel'
-import type { ExecuteWrapper } from 'cockatiel/dist/common/Executor.js'
 import pRetry, { AbortError } from 'p-retry'
 import PQueue from 'p-queue'
 import type {
@@ -22,26 +21,9 @@ import type {
   ClientEvent,
 } from '@eric8810/catcher-core'
 import { createInterceptorManager } from './interceptors.js'
+import { createExecutor, classifyFetchError, redactHeaders } from '@eric8810/catcher-core'
 
 // ── Error helpers (G2) ──────────────────────────────────────────
-
-const SENSITIVE_HEADERS = new Set(['authorization', 'cookie', 'set-cookie', 'proxy-authorization'])
-
-function classifyFetchError(error: any): CatcherErrorType {
-  if (error.name === 'AbortError' || error.code === 'ECANCELED') return 'cancelled'
-  if (error.name === 'TypeError' && error.message?.includes('Failed to fetch')) return 'connection'
-  if (error.code === 'HTTP_5XX') return 'http'
-  if (error.response) return 'http'
-  return 'unknown'
-}
-
-function redactHeaders(headers: Record<string, string>): Record<string, string> {
-  const safe: Record<string, string> = {}
-  for (const [key, value] of Object.entries(headers)) {
-    safe[key] = SENSITIVE_HEADERS.has(key.toLowerCase()) ? '[REDACTED]' : value
-  }
-  return safe
-}
 
 function createCatcherError(
   error: any,
@@ -78,19 +60,6 @@ function createCatcherError(
 }
 
 // ── Helpers ───────────────────────────────────────────────────
-
-function createExecutor(): ExecuteWrapper {
-  const self: any = {
-    onSuccess: { addListener: () => {}, removeListener: () => {}, get size() { return 0 } },
-    onFailure: { addListener: () => {}, removeListener: () => {}, get size() { return 0 } },
-    clone() { return createExecutor() },
-    async invoke(fn: (...args: any[]) => any, ...args: any[]) {
-      try { return { success: await fn(...args) } }
-      catch (error) { return { error } }
-    },
-  }
-  return self
-}
 
 /** Serialize query params. */
 function serializeParams(params: Record<string, any>): string {

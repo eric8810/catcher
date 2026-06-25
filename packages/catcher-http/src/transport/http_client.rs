@@ -280,7 +280,8 @@ fn build_middleware_client(
 
     // G12: Auth — set default headers for basic auth and bearer token
     if let Some(ref auth) = config.auth {
-        let encoded = base64_encode(&format!("{}:{}", auth.username, auth.password));
+        use base64::Engine;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(format!("{}:{}", auth.username, auth.password));
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             "Authorization",
@@ -871,29 +872,6 @@ fn map_middleware_error_standalone(
     CatcherError::Internal(format!("request: {e}"))
 }
 
-/// Simple base64 encoding for Basic auth (no external dependency needed)
-fn base64_encode(input: &str) -> String {
-    use std::fmt::Write;
-    const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let bytes = input.as_bytes();
-    let mut result = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let mut n = 0u32;
-        for (i, &byte) in chunk.iter().enumerate() {
-            n |= (byte as u32) << (16 - i * 8);
-        }
-        for i in 0..4 {
-            if i <= chunk.len() {
-                let idx = ((n >> (18 - i * 6)) & 0x3F) as usize;
-                result.write_char(CHARSET[idx] as char).unwrap();
-            } else {
-                result.write_char('=').unwrap();
-            }
-        }
-    }
-    result
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1024,21 +1002,23 @@ mod tests {
     #[test]
     fn re4_display_no_authorization() {
         // Test that base64_encode works correctly (Basic auth)
-        let encoded = base64_encode("user:pass");
+        use base64::Engine;
+        let encoded = base64::engine::general_purpose::STANDARD.encode("user:pass");
         assert_eq!(encoded, "dXNlcjpwYXNz");
 
-        // Verify no sensitive data leaks through simple formatting
-        let encoded = base64_encode("u:p");
+        let encoded = base64::engine::general_purpose::STANDARD.encode("u:p");
         assert_eq!(encoded, "dTpw");
     }
 
     #[test]
     fn base64_encode_correctness() {
-        assert_eq!(base64_encode(""), "");
-        assert_eq!(base64_encode("a"), "YQ==");
-        assert_eq!(base64_encode("ab"), "YWI=");
-        assert_eq!(base64_encode("abc"), "YWJj");
-        assert_eq!(base64_encode("test"), "dGVzdA==");
+        use base64::Engine;
+        let e = base64::engine::general_purpose::STANDARD;
+        assert_eq!(e.encode(""), "");
+        assert_eq!(e.encode("a"), "YQ==");
+        assert_eq!(e.encode("ab"), "YWI=");
+        assert_eq!(e.encode("abc"), "YWJj");
+        assert_eq!(e.encode("test"), "dGVzdA==");
     }
 
     // ── 网络变化通知 tests ──

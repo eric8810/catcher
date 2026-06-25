@@ -28,54 +28,41 @@ use catcher_dns::reqwest_resolver::build_reqwest_resolver;
 // ── 类型别名 ──
 
 /// 底层 WebSocket 流类型。
-///
-/// Native 路径用于 Flutter 的简单直连场景；Reqwest 路径用于
-/// DNS / proxy / TLS 等高级网络配置，保持与 Electron/桌面行为一致。
 pub(crate) enum WsStream {
     Native(Box<yawc::TcpWebSocket>),
     Reqwest(Box<yawc::HttpWebSocket>),
 }
 
+/// 委托 WsStream 的 Stream/Sink 方法到内部变体。
+macro_rules! delegate_ws {
+    ($self:expr, $method:ident $(, $arg:expr)*) => {
+        match $self {
+            WsStream::Native(s) => Pin::new(s).$method($($arg),*),
+            WsStream::Reqwest(s) => Pin::new(s).$method($($arg),*),
+        }
+    };
+}
+
 impl futures_util::Stream for WsStream {
     type Item = Frame;
-
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        match self.get_mut() {
-            WsStream::Native(stream) => Pin::new(stream).poll_next(cx),
-            WsStream::Reqwest(stream) => Pin::new(stream).poll_next(cx),
-        }
+        delegate_ws!(self.get_mut(), poll_next, cx)
     }
 }
 
 impl futures_util::Sink<Frame> for WsStream {
     type Error = yawc::WebSocketError;
-
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        match self.get_mut() {
-            WsStream::Native(stream) => Pin::new(stream).poll_ready(cx),
-            WsStream::Reqwest(stream) => Pin::new(stream).poll_ready(cx),
-        }
+        delegate_ws!(self.get_mut(), poll_ready, cx)
     }
-
     fn start_send(self: Pin<&mut Self>, item: Frame) -> Result<(), Self::Error> {
-        match self.get_mut() {
-            WsStream::Native(stream) => Pin::new(stream).start_send(item),
-            WsStream::Reqwest(stream) => Pin::new(stream).start_send(item),
-        }
+        delegate_ws!(self.get_mut(), start_send, item)
     }
-
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        match self.get_mut() {
-            WsStream::Native(stream) => Pin::new(stream).poll_flush(cx),
-            WsStream::Reqwest(stream) => Pin::new(stream).poll_flush(cx),
-        }
+        delegate_ws!(self.get_mut(), poll_flush, cx)
     }
-
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        match self.get_mut() {
-            WsStream::Native(stream) => Pin::new(stream).poll_close(cx),
-            WsStream::Reqwest(stream) => Pin::new(stream).poll_close(cx),
-        }
+        delegate_ws!(self.get_mut(), poll_close, cx)
     }
 }
 
