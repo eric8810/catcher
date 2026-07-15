@@ -14,8 +14,8 @@ use crate::resilience::timeout::AdaptiveTimeout;
 use crate::transport::retry_middleware::MetricsRetryMiddleware;
 use crate::transport::tls::build_tls_config;
 use crate::types::http::*;
-use catcher_core::types::resilience::CbState;
 use catcher_core::types::network::ProxyMode;
+use catcher_core::types::resilience::CbState;
 use catcher_core::CatcherError;
 
 /// HTTP 传输层 — 真实收发 HTTP 请求，带重试中间件 + 熔断器 + 取消 + 自适应超时
@@ -173,15 +173,11 @@ impl HttpTransport {
                 .as_ref()
                 .map(|p| p.no_proxy.clone())
                 .unwrap_or_default();
-            new_config.proxy = catcher_dns::proxy::detect_system_proxy();
-            if let Some(ref mut p) = new_config.proxy {
-                // 合并：OS whitelist + 用户额外配置的去重
-                for entry in user_no_proxy {
-                    if !p.no_proxy.contains(&entry) {
-                        p.no_proxy.push(entry);
-                    }
-                }
-            }
+            // 检测不到固定代理时必须保留显式 Direct，不能设为 None；None 会让
+            // reqwest 重新启用自动环境/系统代理，破坏 System 的直连回退语义。
+            new_config.proxy = Some(catcher_dns::proxy::detect_system_proxy_or_direct(
+                user_no_proxy,
+            ));
             Arc::new(new_config)
         } else {
             self.config.clone()
@@ -248,10 +244,12 @@ fn build_middleware_client(
 
     // G4: Proxy configuration
     if let Some(ref proxy_config) = config.proxy {
-        // System 模式且尚未解析（url=None）时跳过：networkChanged() 会重新检测后再重建。
-        // 首次构建时若无系统代理，退化直连。
-        if proxy_config.mode == ProxyMode::System && proxy_config.url.is_none() {
-            // 跳过 — 无系统代理可用，直连
+        if proxy_config.mode == ProxyMode::Direct
+            || (proxy_config.mode == ProxyMode::System && proxy_config.url.is_none())
+        {
+            // Direct 必须显式关闭 reqwest 自动环境代理。System 尚未解析到固定代理时也
+            // 按文档语义退化为真正直连，避免残留 HTTP_PROXY/HTTPS_PROXY 被意外使用。
+            reqwest_builder = reqwest_builder.no_proxy();
         } else {
             let proxy_url = proxy_config.transport_url();
             let mut proxy = reqwest::Proxy::all(proxy_url.as_ref())

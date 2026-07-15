@@ -30,6 +30,11 @@ const client = new HttpClient({
 
 `networkChanged()` 时会自动重新检测系统代理，地址变化后重建连接池。详见 [`proxy.rs`](../../packages/catcher-dns/src/proxy.rs) 注释了解平台支持情况。
 
+> `System` 模式不执行 PAC/WPAD 脚本。Electron 等宿主应先用平台 API 按目标 URL
+> 解析 PAC，再把结果作为 Manual 代理传入。需要严格绕过显式代理、环境代理和
+> reqwest 自动系统代理时，使用 `proxy: { mode: 'direct' }`；仅省略 `proxy` 不等价于
+> 强制直连。
+
 ---
 
 ## 版本升级：0.3.12 → 0.3.13

@@ -448,11 +448,13 @@ pub(crate) fn build_reqwest_client(
     }
 
     if let Some(ref proxy_config) = config.proxy {
-        // System 模式且尚未解析（url=None）时跳过
-        if proxy_config.mode == catcher_core::types::network::ProxyMode::System
-            && proxy_config.url.is_none()
+        if proxy_config.mode == catcher_core::types::network::ProxyMode::Direct
+            || (proxy_config.mode == catcher_core::types::network::ProxyMode::System
+                && proxy_config.url.is_none())
         {
-            // 跳过 — 无系统代理可用，直连
+            // Direct 必须显式关闭 reqwest 自动环境代理。System 尚未解析到固定代理时也
+            // 按文档语义退化为真正直连，避免残留 HTTP_PROXY/HTTPS_PROXY 被意外使用。
+            builder = builder.no_proxy();
         } else {
             let proxy_url = proxy_config.transport_url();
             let mut proxy = reqwest::Proxy::all(proxy_url.as_ref())
@@ -599,14 +601,11 @@ fn build_reqwest_client_for_network_change(
             .as_ref()
             .map(|p| p.no_proxy.clone())
             .unwrap_or_default();
-        c.proxy = catcher_dns::proxy::detect_system_proxy();
-        if let Some(ref mut p) = c.proxy {
-            for entry in user_no_proxy {
-                if !p.no_proxy.contains(&entry) {
-                    p.no_proxy.push(entry);
-                }
-            }
-        }
+        // 检测不到固定代理时必须保留显式 Direct，不能设为 None；None 会让
+        // reqwest 重新启用自动环境/系统代理，破坏 System 的直连回退语义。
+        c.proxy = Some(catcher_dns::proxy::detect_system_proxy_or_direct(
+            user_no_proxy,
+        ));
         owned_config = c;
         effective_config = &owned_config;
     } else {

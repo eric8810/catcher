@@ -97,6 +97,8 @@ pub enum ProxyMode {
     /// 手动指定代理（现有行为）。
     #[default]
     Manual,
+    /// 强制直连，禁用显式代理、环境代理和 reqwest 自动系统代理。
+    Direct,
     /// 自动从 OS 系统代理检测。
     System,
 }
@@ -108,7 +110,7 @@ pub struct ProxyConfig {
     #[serde(default)]
     pub mode: ProxyMode,
     /// 代理地址，例如 `http://host:port`、`https://host:port`、`socks5://host:port`、`socks5h://host:port`。
-    /// Manual 模式必填，System 模式忽略。
+    /// Manual 模式必填，Direct / System 模式忽略。
     pub url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auth: Option<ProxyAuth>,
@@ -125,13 +127,12 @@ impl ProxyConfig {
     ///
     /// # Panics
     ///
-    /// 当 `url` 为 `None` 时 panic。调用方应在调用前确保 proxy 已解析
-    /// （System 模式在 `detect_system_proxy()` 后 url 一定为 Some）。
+    /// 当 `url` 为 `None` 时 panic。仅 Manual 模式或已解析为 Manual 的 System
+    /// 模式可以调用此方法。
     pub fn transport_url(&self) -> Cow<'_, str> {
-        let url = self
-            .url
-            .as_deref()
-            .expect("transport_url: url is None; System proxy must be resolved via detect_system_proxy() before building the client");
+        let url = self.url.as_deref().expect(
+            "transport_url: url is None; only resolved manual proxies have a transport URL",
+        );
         let Some((scheme, rest)) = url.split_once("://") else {
             return Cow::Borrowed(url);
         };
@@ -198,5 +199,16 @@ mod tests {
         let parsed: ProxyConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.mode, ProxyMode::System);
         assert!(parsed.url.is_none());
+    }
+
+    #[test]
+    fn direct_mode_json_roundtrip() {
+        let config: ProxyConfig = serde_json::from_str(r#"{"mode":"direct"}"#).unwrap();
+        assert_eq!(config.mode, ProxyMode::Direct);
+        assert!(config.url.is_none());
+
+        let json = serde_json::to_string(&config).unwrap();
+        let parsed: ProxyConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.mode, ProxyMode::Direct);
     }
 }
