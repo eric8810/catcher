@@ -448,11 +448,13 @@ pub(crate) fn build_reqwest_client(
     }
 
     if let Some(ref proxy_config) = config.proxy {
-        // System 模式且尚未解析（url=None）时跳过
-        if proxy_config.mode == catcher_core::types::network::ProxyMode::System
-            && proxy_config.url.is_none()
+        if proxy_config.mode == catcher_core::types::network::ProxyMode::Direct
+            || (proxy_config.mode == catcher_core::types::network::ProxyMode::System
+                && proxy_config.url.is_none())
         {
-            // 跳过 — 无系统代理可用，直连
+            // Direct 必须显式关闭 reqwest 自动环境代理。System 尚未解析到固定代理时也
+            // 按文档语义退化为真正直连，避免残留 HTTP_PROXY/HTTPS_PROXY 被意外使用。
+            builder = builder.no_proxy();
         } else {
             let proxy_url = proxy_config.transport_url();
             let mut proxy = reqwest::Proxy::all(proxy_url.as_ref())

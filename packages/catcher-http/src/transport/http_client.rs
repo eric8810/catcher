@@ -14,8 +14,8 @@ use crate::resilience::timeout::AdaptiveTimeout;
 use crate::transport::retry_middleware::MetricsRetryMiddleware;
 use crate::transport::tls::build_tls_config;
 use crate::types::http::*;
-use catcher_core::types::resilience::CbState;
 use catcher_core::types::network::ProxyMode;
+use catcher_core::types::resilience::CbState;
 use catcher_core::CatcherError;
 
 /// HTTP 传输层 — 真实收发 HTTP 请求，带重试中间件 + 熔断器 + 取消 + 自适应超时
@@ -248,10 +248,12 @@ fn build_middleware_client(
 
     // G4: Proxy configuration
     if let Some(ref proxy_config) = config.proxy {
-        // System 模式且尚未解析（url=None）时跳过：networkChanged() 会重新检测后再重建。
-        // 首次构建时若无系统代理，退化直连。
-        if proxy_config.mode == ProxyMode::System && proxy_config.url.is_none() {
-            // 跳过 — 无系统代理可用，直连
+        if proxy_config.mode == ProxyMode::Direct
+            || (proxy_config.mode == ProxyMode::System && proxy_config.url.is_none())
+        {
+            // Direct 必须显式关闭 reqwest 自动环境代理。System 尚未解析到固定代理时也
+            // 按文档语义退化为真正直连，避免残留 HTTP_PROXY/HTTPS_PROXY 被意外使用。
+            reqwest_builder = reqwest_builder.no_proxy();
         } else {
             let proxy_url = proxy_config.transport_url();
             let mut proxy = reqwest::Proxy::all(proxy_url.as_ref())

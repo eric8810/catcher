@@ -137,9 +137,19 @@ interface DnsConfig {
   nameservers?: string[]
   host_mapping?: Record<string, string>
 }
+
+type ProxyConfig =
+  | { mode?: 'manual'; url: string; auth?: ProxyAuth; no_proxy?: string[] }
+  | { mode: 'direct' }
+  | { mode: 'system'; no_proxy?: string[] }
 ```
 
 When `msgpack` is enabled, JSON request bodies are encoded as MessagePack and MessagePack responses are decoded back to JSON bytes when the response content type contains `msgpack`.
+
+`mode: 'direct'` calls reqwest's `ClientBuilder::no_proxy()` and therefore ignores
+explicit, environment, and automatic system proxies. `mode: 'system'` detects fixed
+system proxies after `networkChanged()`; PAC/WPAD scripts must be resolved by the host
+application and passed as a manual proxy because Catcher does not embed a PAC engine.
 
 ### Methods
 

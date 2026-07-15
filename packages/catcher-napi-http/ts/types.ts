@@ -121,11 +121,15 @@ export interface ProxyAuth {
  * 代理配置 — 对应 Rust ProxyConfig（判别联合，按 `mode` 区分）。
  *
  * - Manual（默认，省略 `mode` 或 `mode: 'manual'`）：必须提供 `url`。
+ * - Direct（`mode: 'direct'`）：强制直连，禁用显式代理、环境代理和自动系统代理。
  * - System（`mode: 'system'`）：自动从 OS 读取系统代理（需构建时启用 `system-proxy`
  *   feature），`url` 可省略。注意：System 模式仅在调用 `networkChanged()` 后才会
  *   探测并应用系统代理，首次构建时走直连。
  */
-export type ProxyConfig = ManualProxyConfig | SystemProxyConfig
+export type ProxyConfig =
+  | ManualProxyConfig
+  | DirectProxyConfig
+  | SystemProxyConfig
 
 /** 手动代理（默认）。`url` 必填。 */
 export interface ManualProxyConfig {
@@ -135,6 +139,11 @@ export interface ManualProxyConfig {
   auth?: ProxyAuth
   /** 不走代理的 hostname 列表 */
   no_proxy?: string[]
+}
+
+/** 强制直连，不读取任何代理配置。 */
+export interface DirectProxyConfig {
+  mode: 'direct'
 }
 
 /** 系统代理：自动从 OS 检测（需构建时启用 `system-proxy` feature）。 */
