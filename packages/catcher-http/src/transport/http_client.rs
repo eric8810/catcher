@@ -173,15 +173,11 @@ impl HttpTransport {
                 .as_ref()
                 .map(|p| p.no_proxy.clone())
                 .unwrap_or_default();
-            new_config.proxy = catcher_dns::proxy::detect_system_proxy();
-            if let Some(ref mut p) = new_config.proxy {
-                // 合并：OS whitelist + 用户额外配置的去重
-                for entry in user_no_proxy {
-                    if !p.no_proxy.contains(&entry) {
-                        p.no_proxy.push(entry);
-                    }
-                }
-            }
+            // 检测不到固定代理时必须保留显式 Direct，不能设为 None；None 会让
+            // reqwest 重新启用自动环境/系统代理，破坏 System 的直连回退语义。
+            new_config.proxy = Some(catcher_dns::proxy::detect_system_proxy_or_direct(
+                user_no_proxy,
+            ));
             Arc::new(new_config)
         } else {
             self.config.clone()

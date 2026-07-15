@@ -72,3 +72,44 @@ async fn direct_mode_bypasses_proxy_environment_after_network_change() -> Result
     assert_eq!(response.body, b"direct");
     Ok(())
 }
+
+/// 未启用 system-proxy feature 时，System 检测必然无结果。networkChanged() 仍须
+/// 显式回退 Direct，不能让 reqwest 重新读取不可达的代理环境变量。
+#[cfg(not(feature = "system-proxy"))]
+#[tokio::test]
+async fn unresolved_system_mode_stays_direct_after_network_change() -> Result<(), Box<dyn Error>> {
+    install_unreachable_proxy_env();
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("system-fallback-direct"))
+        .mount(&server)
+        .await;
+
+    let transport = HttpTransport::new(HttpClientConfig {
+        proxy: Some(ProxyConfig {
+            mode: ProxyMode::System,
+            url: None,
+            auth: None,
+            no_proxy: Vec::new(),
+        }),
+        connect_timeout_ms: 1_000,
+        response_timeout_ms: 2_000,
+        max_concurrency: 0,
+        ..Default::default()
+    })?;
+
+    transport.network_changed()?;
+    let response = transport
+        .execute(HttpRequest {
+            method: HttpMethod::GET,
+            url: format!("{}/after-network-change", server.uri()),
+            timeout_ms: Some(2_000),
+            ..Default::default()
+        })
+        .await?;
+
+    assert_eq!(response.status, 200);
+    assert_eq!(response.body, b"system-fallback-direct");
+    Ok(())
+}

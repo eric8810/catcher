@@ -12,9 +12,9 @@
 //! - **Linux**: 不读取 GNOME gsettings，仅读取环境变量和 /etc/sysconfig/proxy。
 //! - **PAC/WPAD**: 不支持，需要 JS 引擎执行 PAC 脚本。
 
+use catcher_core::types::network::ProxyConfig;
 #[cfg(feature = "system-proxy")]
 use catcher_core::types::network::ProxyMode;
-use catcher_core::types::network::ProxyConfig;
 
 /// 从操作系统读取系统代理配置。
 ///
@@ -54,6 +54,36 @@ pub fn detect_system_proxy() -> Option<ProxyConfig> {
     None
 }
 
+/// 重新检测系统代理，并在未检测到可用的固定代理时返回显式 Direct 配置。
+///
+/// `reqwest::ClientBuilder` 在未配置 proxy 时会自动读取环境/系统代理，因此不能用
+/// `None` 表示 System 模式的直连回退。这里始终返回一个有效配置，确保调用方重建
+/// client 后仍保持严格直连语义。
+pub fn detect_system_proxy_or_direct(user_no_proxy: Vec<String>) -> ProxyConfig {
+    system_proxy_or_direct(detect_system_proxy(), user_no_proxy)
+}
+
+fn system_proxy_or_direct(
+    detected_proxy: Option<ProxyConfig>,
+    user_no_proxy: Vec<String>,
+) -> ProxyConfig {
+    if let Some(mut proxy) = detected_proxy {
+        for entry in user_no_proxy {
+            if !proxy.no_proxy.contains(&entry) {
+                proxy.no_proxy.push(entry);
+            }
+        }
+        proxy
+    } else {
+        ProxyConfig {
+            mode: catcher_core::types::network::ProxyMode::Direct,
+            url: None,
+            auth: None,
+            no_proxy: user_no_proxy,
+        }
+    }
+}
+
 #[cfg(all(test, feature = "system-proxy"))]
 mod tests {
     use super::*;
@@ -79,5 +109,35 @@ mod tests {
         if let Some(proxy) = detect_system_proxy() {
             assert_eq!(proxy.mode, ProxyMode::Manual);
         }
+    }
+
+    #[test]
+    fn unresolved_system_proxy_becomes_explicit_direct() {
+        let proxy = system_proxy_or_direct(None, vec!["localhost".into()]);
+
+        assert_eq!(proxy.mode, ProxyMode::Direct);
+        assert!(proxy.url.is_none());
+        assert_eq!(proxy.no_proxy, vec!["localhost"]);
+    }
+
+    #[test]
+    fn detected_system_proxy_merges_user_no_proxy() {
+        let detected = ProxyConfig {
+            mode: ProxyMode::Manual,
+            url: Some("http://127.0.0.1:7890".into()),
+            auth: None,
+            no_proxy: vec!["localhost".into()],
+        };
+
+        let proxy = system_proxy_or_direct(
+            Some(detected),
+            vec!["localhost".into(), "internal.example".into()],
+        );
+
+        assert_eq!(proxy.mode, ProxyMode::Manual);
+        assert_eq!(
+            proxy.no_proxy,
+            vec!["localhost".to_string(), "internal.example".to_string()]
+        );
     }
 }
