@@ -2,7 +2,11 @@
  * napi smoke test: verify native addons load and work
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { HttpClient, JsHttpResponse } from '@eric8810/catcher-napi-http'
+import {
+  HttpClient,
+  HttpError,
+  JsHttpResponse,
+} from '@eric8810/catcher-napi-http'
 import { WsClient } from '@eric8810/catcher-napi-ws'
 import { createHttpTestServer, type TestServer } from '../servers/http-server.js'
 import { createWSTestServer, type WSTestServer } from '../servers/ws-server.js'
@@ -38,6 +42,44 @@ describe('@eric8810/catcher-napi-http', () => {
     }))
     const resp: JsHttpResponse = await client.get('/channels')
     expect(resp.status).toBe(200)
+  })
+
+  it('exposes HTTP status and body as a structured HttpError', async () => {
+    const client = new HttpClient({
+      base_url: `http://localhost:${httpServer.port}`,
+      connect_timeout_ms: 5000,
+      response_timeout_ms: 30000,
+    })
+
+    const error = await client.get('/not-found').catch((reason) => reason)
+
+    expect(error).toBeInstanceOf(HttpError)
+    expect(error).toMatchObject({
+      name: 'HttpError',
+      status: 404,
+    })
+    expect(error.body).toContain('not found')
+  })
+
+  it('retries HTTP 421 once after resetting only its connection pool', async () => {
+    const client = new HttpClient({
+      base_url: `http://localhost:${httpServer.port}`,
+      connect_timeout_ms: 5000,
+      response_timeout_ms: 30000,
+    })
+
+    const response = await client.post(
+      '/misdirected-once',
+      Buffer.from('{"cmid":"client-message-1"}'),
+      { contentType: 'application/json' },
+    )
+
+    expect(response.status).toBe(201)
+    expect(JSON.parse(response.body.toString())).toMatchObject({
+      accepted: true,
+      attempts: 2,
+    })
+    expect(client.metrics().httpRetries).toBe(1)
   })
 })
 

@@ -7,6 +7,7 @@
  *   GET  /channels          → channel list
  *   GET  /channels/:id/messages → paginated messages
  *   POST /messages          → send a message
+ *   POST /misdirected-once  → first request returns 421, fresh retry returns 201
  *
  * All endpoints accept a ?delay=ms query param to simulate server processing time.
  */
@@ -22,6 +23,7 @@ export interface TestServer {
 export function createHttpTestServer(): Promise<TestServer> {
   return new Promise((resolve) => {
     const connections = new Set<import('net').Socket>()
+    let misdirectedRequests = 0
     const server = http.createServer((req, res) => {
       const url = new URL(req.url ?? '/', `http://${req.headers.host}`)
       const delay = parseInt(url.searchParams.get('delay') ?? '0', 10)
@@ -70,6 +72,17 @@ export function createHttpTestServer(): Promise<TestServer> {
             }
           })
           return // prevent double respond
+        } else if (url.pathname === '/misdirected-once' && req.method === 'POST') {
+          req.resume()
+          req.on('end', () => {
+            misdirectedRequests++
+            if (misdirectedRequests === 1) {
+              respond(421, { error: 'misdirected' })
+            } else {
+              respond(201, { accepted: true, attempts: misdirectedRequests })
+            }
+          })
+          return
         } else if (url.pathname === '/upload' && req.method === 'POST') {
           // Simulate 2MB upload
           let received = 0

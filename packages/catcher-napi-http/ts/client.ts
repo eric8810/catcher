@@ -9,6 +9,31 @@ import { loadNativeAddon } from './native'
 
 const { JsHttpClient } = loadNativeAddon('catcher-napi-http')
 
+const NATIVE_HTTP_ERROR_PATTERN = /^HTTP error: status (\d{3}), body: ([\s\S]*)$/
+
+/** Catcher HTTP 状态错误。 */
+export class HttpError extends Error {
+  readonly status: number
+  readonly body: string
+  readonly cause: unknown
+
+  constructor(status: number, body: string, cause?: unknown) {
+    super(`HTTP error: status ${status}, body: ${body}`)
+    this.name = 'HttpError'
+    this.status = status
+    this.body = body
+    this.cause = cause
+  }
+}
+
+function normalizeNativeError(error: unknown): Error {
+  if (error instanceof HttpError) return error
+  const message = error instanceof Error ? error.message : String(error)
+  const match = NATIVE_HTTP_ERROR_PATTERN.exec(message)
+  if (!match) return error instanceof Error ? error : new Error(message)
+  return new HttpError(Number(match[1]), match[2], error)
+}
+
 // ── 选项归一化 ──
 // NAPI-RS 自动把 Rust snake_case 转成 JS camelCase。
 // 旧代码可能仍传 { content_type, timeout_ms }，映射到正确属性名。
@@ -39,33 +64,47 @@ export class HttpClient {
     this._raw = new JsHttpClient(json)
   }
 
+  private async _execute<T>(operation: () => Promise<T>): Promise<T> {
+    try {
+      return await operation()
+    } catch (error) {
+      throw normalizeNativeError(error)
+    }
+  }
+
   async get(url: string, options?: RequestOptions): Promise<HttpResponse> {
-    return this._raw.get(url, normalizeOptions(options))
+    return this._execute(() => this._raw.get(url, normalizeOptions(options)))
   }
 
   async post(url: string, body?: Buffer, options?: RequestOptions): Promise<HttpResponse> {
-    return this._raw.post(url, body ?? undefined, normalizeOptions(options))
+    return this._execute(() =>
+      this._raw.post(url, body ?? undefined, normalizeOptions(options)),
+    )
   }
 
   async put(url: string, body?: Buffer, options?: RequestOptions): Promise<HttpResponse> {
     if (!this._raw.put) {
       throw new Error('put() requires rebuilt native addon (cargo build)')
     }
-    return this._raw.put(url, body ?? undefined, normalizeOptions(options))
+    return this._execute(() =>
+      this._raw.put(url, body ?? undefined, normalizeOptions(options)),
+    )
   }
 
   async delete(url: string, options?: RequestOptions): Promise<HttpResponse> {
     if (!this._raw.delete) {
       throw new Error('delete() requires rebuilt native addon (cargo build)')
     }
-    return this._raw.delete(url, normalizeOptions(options))
+    return this._execute(() => this._raw.delete(url, normalizeOptions(options)))
   }
 
   async patch(url: string, body?: Buffer, options?: RequestOptions): Promise<HttpResponse> {
     if (!this._raw.patch) {
       throw new Error('patch() requires rebuilt native addon (cargo build)')
     }
-    return this._raw.patch(url, body ?? undefined, normalizeOptions(options))
+    return this._execute(() =>
+      this._raw.patch(url, body ?? undefined, normalizeOptions(options)),
+    )
   }
 
   circuitBreakerState(): 'closed' | 'open' | 'half-open' {
