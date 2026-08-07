@@ -317,8 +317,13 @@ fn build_middleware_client(
 }
 
 impl HttpTransport {
-    /// 发起 HTTP 请求（带熔断器检查 + cancel 支持 + metrics 记录 + 自适应超时 + 并发控制）
+    /// 发起 HTTP 请求（带熔断器检查 + cancel 支持 + metrics 记录 + 自适应超时 + 并发控制）。
+    ///
+    /// HTTP 421 表示当前连接无法为目标源站提供权威响应。收到 421 后仅重建
+    /// 当前传输实例的连接池，并在新连接上重试一次；其他传输实例和飞行中的
+    /// 请求不受影响。
     pub async fn execute(&self, request: HttpRequest) -> Result<HttpResponse, CatcherError> {
+        let retry_request = request.clone();
         let (_, result) = self
             .execute_with_token(
                 0,                                          // dummy request_id, not registered for cancel
@@ -326,7 +331,20 @@ impl HttpTransport {
                 request,
             )
             .await;
-        result
+        if !matches!(&result, Err(CatcherError::HttpError { status: 421, .. })) {
+            return result;
+        }
+
+        // RFC 9110 §15.5.20 permits retrying a 421 response, including a
+        // non-idempotent method, over a different connection. Rebuilding this
+        // transport's client retires its pooled connections without cancelling
+        // unrelated in-flight requests or touching other HttpTransport values.
+        self.network_changed()?;
+        self.metrics.increment_http_retries();
+        let (_, retry_result) = self
+            .execute_with_token(0, tokio_util::sync::CancellationToken::new(), retry_request)
+            .await;
+        retry_result
     }
 
     /// 使用预分配的 token 执行请求（N-03，供 FFI 层使用）。
@@ -895,6 +913,117 @@ fn base64_encode(input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn misdirected_post_retries_once_after_connection_pool_reset() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/messages"))
+            .respond_with(ResponseTemplate::new(421).set_body_string("misdirected"))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/messages"))
+            .respond_with(ResponseTemplate::new(201).set_body_string("accepted"))
+            .mount(&server)
+            .await;
+
+        let transport = HttpTransport::new(HttpClientConfig {
+            base_url: server.uri(),
+            ..Default::default()
+        })
+        .unwrap();
+
+        let response = transport
+            .post(
+                "/messages",
+                br#"{"cmid":"client-message-1"}"#,
+                "application/json",
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status, 201);
+        assert_eq!(transport.network_generation.load(Ordering::SeqCst), 1);
+        assert_eq!(transport.metrics().http_retries, 1);
+        assert_eq!(server.received_requests().await.unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn persistent_misdirected_response_stops_after_one_retry() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/profile"))
+            .respond_with(ResponseTemplate::new(421).set_body_string("misdirected"))
+            .mount(&server)
+            .await;
+
+        let transport = HttpTransport::new(HttpClientConfig {
+            base_url: server.uri(),
+            ..Default::default()
+        })
+        .unwrap();
+
+        let error = transport.get("/profile").await.unwrap_err();
+
+        assert!(matches!(error, CatcherError::HttpError { status: 421, .. }));
+        assert_eq!(transport.network_generation.load(Ordering::SeqCst), 1);
+        assert_eq!(transport.metrics().http_retries, 1);
+        assert_eq!(server.received_requests().await.unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn misdirected_recovery_does_not_cancel_in_flight_request() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/slow"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string("slow response")
+                    .set_delay(Duration::from_millis(200)),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/profile"))
+            .respond_with(ResponseTemplate::new(421).set_body_string("misdirected"))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/profile"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("profile"))
+            .mount(&server)
+            .await;
+
+        let transport = Arc::new(
+            HttpTransport::new(HttpClientConfig {
+                base_url: server.uri(),
+                ..Default::default()
+            })
+            .unwrap(),
+        );
+        let in_flight_transport = transport.clone();
+        let in_flight = tokio::spawn(async move { in_flight_transport.get("/slow").await });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let recovered = transport.get("/profile").await.unwrap();
+        let slow_response = in_flight.await.unwrap().unwrap();
+
+        assert_eq!(recovered.status, 200);
+        assert_eq!(slow_response.status, 200);
+        assert_eq!(slow_response.body, b"slow response");
+    }
 
     #[tokio::test]
     async fn re1_http_error_carries_request_info() {

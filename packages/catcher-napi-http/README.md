@@ -43,7 +43,7 @@ Pre-built binaries available for Linux (x64/arm64 gnu/musl), macOS (x64/arm64), 
 ## Usage
 
 ```typescript
-import { HttpClient } from '@eric8810/catcher-napi-http'
+import { HttpClient, HttpError } from '@eric8810/catcher-napi-http'
 import type { HttpClientConfig, SseEvent } from '@eric8810/catcher-napi-http/types'
 
 // Config as typed object (recommended) or JSON string
@@ -72,6 +72,14 @@ console.log(resp.status, resp.body.toString())
 await client.post('/messages', Buffer.from(JSON.stringify({ text: 'hello' })), {
   contentType: 'application/json',
 })
+
+try {
+  await client.get('/missing')
+} catch (error) {
+  if (error instanceof HttpError) {
+    console.log(error.status, error.body)
+  }
+}
 
 // Circuit breaker state
 console.log(client.circuitBreakerState()) // 'closed' | 'open' | 'half-open'
@@ -150,6 +158,11 @@ When `msgpack` is enabled, JSON request bodies are encoded as MessagePack and Me
 explicit, environment, and automatic system proxies. `mode: 'system'` detects fixed
 system proxies after `networkChanged()`; PAC/WPAD scripts must be resolved by the host
 application and passed as a manual proxy because Catcher does not embed a PAC engine.
+
+HTTP responses with status `>= 400` reject with `HttpError`, which exposes structured
+`status` and `body` fields. A `421 Misdirected Request` additionally retires this
+client's connection pool and retries once on a fresh connection. Other clients and
+in-flight requests are not cancelled.
 
 ### Methods
 
