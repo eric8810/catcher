@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file. See [release-please](https://github.com/googleapis/release-please) for automated management.
 
+## 0.3.18 (2026-08-07)
+
+> 修复代理/VPN/网络路径变化后服务端返回 HTTP 421（Misdirected Request）时客户端持续失败的问题，并为 NAPI 调用方提供结构化 HTTP 状态错误。
+
+### 🐛 Bug Fixes
+
+- **HTTP 421 自动恢复**：`catcher-http` 收到 421 后仅重建当前 transport 的连接池，并在新连接上重试一次；持续返回 421 时停止重试，避免无限循环。
+- **保留在途请求**：421 恢复不会取消同一 transport 上其他正在执行的请求，也不会影响其他 `HttpTransport` 实例。
+- **NAPI 结构化状态错误**：`@eric8810/catcher-napi-http` 将原生 HTTP 状态错误规范化为导出的 `HttpError`，上层可直接读取 `status`、`body` 和 `cause`。
+- **跨层回归覆盖**：新增 Rust 与 NAPI 集成测试，覆盖 POST 421 后成功恢复、持续 421 只重试一次、在途请求不被取消，以及结构化状态字段。
+
+### 📦 Packaging
+
+- 所有 npm、Rust、NAPI 和 Flutter 包统一同步到 `0.3.18`。
+
 ## 0.3.17 (2026-06-15)
 
 > 修复 Flutter WebSocket 直连可用性：默认简单直连场景改走 yawc native backend，高级网络配置继续走 reqwest backend；同时完善网络切换重连、Apple framework 元数据与 Flutter 兼容性处理。

@@ -28,7 +28,7 @@ Resilient WebSocket client for the [catcher](https://github.com/eric8810/catcher
 
 ```toml
 [dependencies]
-catcher-ws = "0.3.17"
+catcher-ws = "0.3.18"
 ```
 
 ### Basic WebSocket connection

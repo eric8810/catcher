@@ -1,6 +1,6 @@
 [package]
 name = "catcher-dns"
-version = "0.3.17"
+version = "0.3.18"
 edition = "2021"
 description = "Shared DNS resolver and system proxy detection for catcher"
 license = "MIT"
@@ -13,7 +13,7 @@ reqwest-resolver = ["dep:reqwest"]
 system-proxy = ["dep:proxy_cfg"]
 
 [dependencies]
-catcher-core = { path = "../catcher-core", version = "0.3.17" }
+catcher-core = { path = "../catcher-core", version = "0.3.18" }
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["net", "rt", "time", "macros"] }
 parking_lot = "0.12"

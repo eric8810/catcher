@@ -1,15 +1,15 @@
 {
-  "packages/catcher-core-ts": "0.3.17",
-  "packages/catcher-http-ts": "0.3.17",
-  "packages/catcher-ws-ts": "0.3.17",
-  "packages/catcher-web": "0.3.17",
-  "packages/catcher-napi-http": "0.3.17",
-  "packages/catcher-napi-ws": "0.3.17",
-  "packages/catcher-core": "0.3.17",
-  "packages/catcher-dns": "0.3.17",
-  "packages/catcher-http": "0.3.17",
-  "packages/catcher-ws": "0.3.17",
-  "packages/catcher-ffi": "0.3.17",
-  "packages/catcher-uniffi": "0.3.17",
-  "packages/catcher_core": "0.3.17"
+  "packages/catcher-core-ts": "0.3.18",
+  "packages/catcher-http-ts": "0.3.18",
+  "packages/catcher-ws-ts": "0.3.18",
+  "packages/catcher-web": "0.3.18",
+  "packages/catcher-napi-http": "0.3.18",
+  "packages/catcher-napi-ws": "0.3.18",
+  "packages/catcher-core": "0.3.18",
+  "packages/catcher-dns": "0.3.18",
+  "packages/catcher-http": "0.3.18",
+  "packages/catcher-ws": "0.3.18",
+  "packages/catcher-ffi": "0.3.18",
+  "packages/catcher-uniffi": "0.3.18",
+  "packages/catcher_core": "0.3.18"
 }
