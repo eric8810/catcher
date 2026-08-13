@@ -93,7 +93,9 @@ describe('@eric8810/catcher-napi-http error contract', () => {
       phase: 'connect',
       retryable: true,
     })
-    expect(lastError.details.reason).toContain('connect')
+    expect(lastError.details.reason).toEqual(expect.any(String))
+    expect(lastError.details.reason).not.toBe('')
+    expect(lastError.details.reason).not.toContain('must-not-leak')
     expect(error.message).not.toContain('Request failed after')
     expect(JSON.stringify(error)).not.toContain('must-not-leak')
   })

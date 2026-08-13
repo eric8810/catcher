@@ -35,7 +35,9 @@ pub enum CatcherError {
 
     #[error("retry exhausted after {attempts} attempts: {last_error}")]
     RetryExhausted {
+        /// 已实际执行的总次数，包含首次请求，不是额外重试次数。
         attempts: u32,
+        /// 最后一次请求的结构化错误。
         #[source]
         last_error: Box<CatcherError>,
     },

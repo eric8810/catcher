@@ -167,9 +167,9 @@ in-flight requests are not cancelled.
 Native transport failures reject with `CatcherError` instead of the N-API default
 `GenericFailure`. The error exposes a stable `code`, failure `phase`, `retryable`
 flag, and structured `details`. Retry exhaustion includes both the total attempt
-count and the final structured transport error in `details.lastError`, including its
-own `code`, `phase`, `retryable`, and `details`; request URLs are stripped before the
-native cause chain is serialized.
+count (the initial request plus retries actually executed) and the final structured
+transport error in `details.lastError`, including its own `code`, `phase`, `retryable`,
+and `details`; request URLs are stripped before the native cause chain is serialized.
 
 ```typescript
 import { CatcherError } from '@eric8810/catcher-napi-http'

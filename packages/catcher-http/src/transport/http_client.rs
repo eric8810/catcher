@@ -892,11 +892,7 @@ fn map_middleware_error_standalone(
             Ok(RetryError::Error(err)) => map_middleware_error_standalone(err, config),
             Err(error) => CatcherError::Internal(format!(
                 "request middleware: {}",
-                error
-                    .chain()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join(": ")
+                error_chain(error.as_ref())
             )),
         },
     }

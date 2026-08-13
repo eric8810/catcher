@@ -4,7 +4,11 @@ use catcher_core::{CatcherError, ErrorCategory};
 use std::cell::Cell;
 use std::time::Duration;
 
-/// 对异步操作执行重试，带指数退避 + jitter
+/// 对异步操作执行重试，带指数退避 + jitter。
+///
+/// 这是供 Rust 调用方独立使用的通用工具，不参与 `HttpTransport` 内部的
+/// `MetricsRetryMiddleware` 请求链。已经耗尽的 `RetryExhausted` 是不可重试错误，
+/// 即使调用方把它返回给本函数，也不会再次重试或嵌套包装。
 pub async fn retry_with_backoff<T, F, Fut>(
     config: &RetryConfig,
     mut operation: F,
@@ -175,6 +179,41 @@ mod tests {
             other => panic!("expected EncodeError, got {other:?}"),
         }
         assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn retry_exhausted_is_not_retried_or_nested() {
+        let calls = AtomicU32::new(0);
+        let result = retry_with_backoff(
+            &test_config(),
+            || {
+                calls.fetch_add(1, Ordering::SeqCst);
+                async {
+                    Err::<u32, _>(CatcherError::RetryExhausted {
+                        attempts: 2,
+                        last_error: Box::new(CatcherError::ConnectionTimeout(100)),
+                    })
+                }
+            },
+            |_| true,
+            |_, _| {},
+        )
+        .await;
+
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        match result {
+            Err(CatcherError::RetryExhausted {
+                attempts,
+                last_error,
+            }) => {
+                assert_eq!(attempts, 2);
+                assert!(matches!(
+                    last_error.as_ref(),
+                    CatcherError::ConnectionTimeout(100)
+                ));
+            }
+            other => panic!("expected one RetryExhausted layer, got {other:?}"),
+        }
     }
 
     #[tokio::test]
