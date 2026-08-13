@@ -1,6 +1,6 @@
 [package]
 name = "catcher-dns"
-version = "0.3.18"
+version = "0.4.0"
 edition = "2021"
 description = "Shared DNS resolver and system proxy detection for catcher"
 license = "MIT"
