@@ -15,6 +15,12 @@ pub enum CatcherError {
     #[error("DNS resolution failed for {host}: {reason}")]
     DnsError { host: String, reason: String },
 
+    #[error("connection failed for {host}: {reason}")]
+    ConnectionError { host: String, reason: String },
+
+    #[error("transport request failed: {0}")]
+    TransportError(String),
+
     #[error("HTTP error: status {status}, body: {body}")]
     HttpError { status: u16, body: String },
 
@@ -28,7 +34,13 @@ pub enum CatcherError {
     WsAllEndpointsFailed { count: usize },
 
     #[error("retry exhausted after {attempts} attempts: {last_error}")]
-    RetryExhausted { attempts: u32, last_error: String },
+    RetryExhausted {
+        /// 已实际执行的总次数，包含首次请求，不是额外重试次数。
+        attempts: u32,
+        /// 最后一次请求的结构化错误。
+        #[source]
+        last_error: Box<CatcherError>,
+    },
 
     #[error("circuit breaker is OPEN, request rejected")]
     CircuitBreakerOpen,
@@ -74,6 +86,8 @@ impl CatcherError {
             | CatcherError::RequestTimeout(_)
             | CatcherError::TlsError(_)
             | CatcherError::DnsError { .. }
+            | CatcherError::ConnectionError { .. }
+            | CatcherError::TransportError(_)
             | CatcherError::WsHandshakeTimeout(_)
             | CatcherError::WsDisconnected { .. }
             | CatcherError::WsAllEndpointsFailed { .. }
@@ -168,7 +182,7 @@ mod tests {
     fn retry_exhausted_is_non_retryable() {
         let err = CatcherError::RetryExhausted {
             attempts: 5,
-            last_error: "timeout".into(),
+            last_error: Box::new(CatcherError::RequestTimeout(1000)),
         };
         assert_eq!(err.category(), ErrorCategory::NonRetryable);
     }
@@ -242,6 +256,11 @@ mod tests {
                 host: "h".into(),
                 reason: "r".into(),
             },
+            CatcherError::ConnectionError {
+                host: "h".into(),
+                reason: "refused".into(),
+            },
+            CatcherError::TransportError("socket reset".into()),
             CatcherError::HttpError {
                 status: 500,
                 body: "b".into(),
@@ -254,7 +273,10 @@ mod tests {
             CatcherError::WsAllEndpointsFailed { count: 1 },
             CatcherError::RetryExhausted {
                 attempts: 3,
-                last_error: "e".into(),
+                last_error: Box::new(CatcherError::ConnectionError {
+                    host: "h".into(),
+                    reason: "e".into(),
+                }),
             },
             CatcherError::CircuitBreakerOpen,
             CatcherError::QueueTimeout(1000),

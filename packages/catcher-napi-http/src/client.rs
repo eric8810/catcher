@@ -25,7 +25,9 @@ use catcher_http::{
 };
 
 use catcher_core::types::resilience::CbState;
+use catcher_core::CatcherError;
 
+use crate::error::to_napi_error;
 use crate::helpers::{parse_method, stream_event_to_json, Tsfn};
 
 // ── JavaScript-facing types ──
@@ -91,9 +93,8 @@ impl JsHttpClient {
     #[napi(constructor)]
     pub fn new(config_json: String) -> napi::Result<Self> {
         let config: HttpClientConfig = serde_json::from_str(&config_json)
-            .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-        let transport =
-            HttpTransport::new(config).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+            .map_err(|e| to_napi_error(CatcherError::InvalidConfig(e.to_string())))?;
+        let transport = HttpTransport::new(config).map_err(to_napi_error)?;
         Ok(Self {
             inner: Arc::new(transport),
         })
@@ -208,9 +209,7 @@ impl JsHttpClient {
     /// In-flight requests are unaffected.
     #[napi]
     pub fn network_changed(&self) -> napi::Result<()> {
-        self.inner
-            .network_changed()
-            .map_err(|e| napi::Error::from_reason(e.to_string()))
+        self.inner.network_changed().map_err(to_napi_error)
     }
 
     // ── Cancel ──
@@ -325,11 +324,7 @@ impl JsHttpClient {
             multipart: None,
         };
 
-        let resp = self
-            .inner
-            .execute(request)
-            .await
-            .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+        let resp = self.inner.execute(request).await.map_err(to_napi_error)?;
 
         Ok(JsHttpResponse {
             status: resp.status,

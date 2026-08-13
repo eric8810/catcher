@@ -9,7 +9,10 @@ export default defineConfig({
       'packages/catcher-ws-ts/src/**/__tests__/**/*.test.ts',
       'packages/catcher-web/src/**/__tests__/**/*.test.ts',
     ],
-    exclude: ['packages/test/integration/napi.test.ts'],
+    exclude: [
+      'packages/test/integration/napi.test.ts',
+      'packages/test/integration/napi-error-contract.test.ts',
+    ],
     testTimeout: 30_000,
     hookTimeout: 15_000,
     reporters: ['verbose'],
