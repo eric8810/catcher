@@ -1,3 +1,13 @@
+## 0.3.19
+
+### Bug Fixes
+
+- Preserve structured transport failure details through NAPI HTTP retries, including error codes and chained causes, so host applications can diagnose connection failures after retries are exhausted.
+
+### Packaging
+
+- Synchronize the Flutter package version with the unified Catcher `0.3.19` release; the Dart API surface is otherwise unchanged.
+
 ## 0.3.18
 
 ### Bug Fixes
