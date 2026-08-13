@@ -1,6 +1,6 @@
 [package]
 name = "catcher-uniffi"
-version = "0.3.19"
+version = "0.4.0"
 edition = "2021"
 description = "UniFFI bindings for catcher — auto-generates Swift + Kotlin from Rust API"
 license = "MIT"

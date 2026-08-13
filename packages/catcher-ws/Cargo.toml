@@ -1,6 +1,6 @@
 [package]
 name = "catcher-ws"
-version = "0.3.19"
+version = "1.0.0"
 edition = "2021"
 description = "WebSocket client for catcher — resilient reconnect, heartbeat, multi-endpoint racing"
 license = "MIT"
