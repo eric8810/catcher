@@ -9,26 +9,140 @@ import { loadNativeAddon } from './native'
 
 const { JsHttpClient } = loadNativeAddon('catcher-napi-http')
 
+const NATIVE_ERROR_PREFIX = 'CATCHER_ERROR:'
 const NATIVE_HTTP_ERROR_PATTERN = /^HTTP error: status (\d{3}), body: ([\s\S]*)$/
 
-/** Catcher HTTP 状态错误。 */
-export class HttpError extends Error {
-  readonly status: number
-  readonly body: string
+export type CatcherErrorCode =
+  | 'CONNECTION_TIMEOUT'
+  | 'REQUEST_TIMEOUT'
+  | 'TLS_ERROR'
+  | 'DNS_ERROR'
+  | 'HTTP_ERROR'
+  | 'WS_HANDSHAKE_TIMEOUT'
+  | 'WS_DISCONNECTED'
+  | 'WS_ALL_ENDPOINTS_FAILED'
+  | 'RETRY_EXHAUSTED'
+  | 'CIRCUIT_BREAKER_OPEN'
+  | 'QUEUE_TIMEOUT'
+  | 'ENCODE_ERROR'
+  | 'DECODE_ERROR'
+  | 'INVALID_CONFIG'
+  | 'SSE_TIMEOUT'
+  | 'INTERNAL_ERROR'
+
+export type CatcherErrorPhase =
+  | 'config'
+  | 'dns'
+  | 'connect'
+  | 'tls'
+  | 'queue'
+  | 'request'
+  | 'response'
+  | 'encode'
+  | 'decode'
+  | 'internal'
+
+export interface CatcherErrorDetails {
+  status?: number
+  body?: string
+  timeoutMs?: number
+  host?: string
+  reason?: string
+  attempts?: number
+  lastError?: string
+}
+
+interface NativeErrorPayload {
+  code: CatcherErrorCode
+  phase: CatcherErrorPhase
+  retryable: boolean
+  message: string
+  details: CatcherErrorDetails
+}
+
+/** Catcher 原生层的结构化错误。 */
+export class CatcherError extends Error {
+  readonly code: CatcherErrorCode
+  readonly phase: CatcherErrorPhase
+  readonly retryable: boolean
+  readonly details: CatcherErrorDetails
   readonly cause: unknown
 
+  constructor(payload: NativeErrorPayload, cause?: unknown) {
+    super(payload.message)
+    this.name = 'CatcherError'
+    this.code = payload.code
+    this.phase = payload.phase
+    this.retryable = payload.retryable
+    this.details = payload.details
+    this.cause = cause
+  }
+
+  toJSON(): Record<string, unknown> {
+    return {
+      name: this.name,
+      code: this.code,
+      phase: this.phase,
+      retryable: this.retryable,
+      message: this.message,
+      details: this.details,
+    }
+  }
+}
+
+/** Catcher HTTP 状态错误。 */
+export class HttpError extends CatcherError {
+  readonly status: number
+  readonly body: string
+
   constructor(status: number, body: string, cause?: unknown) {
-    super(`HTTP error: status ${status}, body: ${body}`)
+    super({
+      code: 'HTTP_ERROR',
+      phase: 'response',
+      retryable: status >= 500,
+      message: `HTTP error: status ${status}, body: ${body}`,
+      details: { status, body },
+    }, cause)
     this.name = 'HttpError'
     this.status = status
     this.body = body
-    this.cause = cause
+  }
+}
+
+function parseNativeErrorPayload(message: string): NativeErrorPayload | undefined {
+  if (!message.startsWith(NATIVE_ERROR_PREFIX)) return undefined
+  try {
+    const payload = JSON.parse(message.slice(NATIVE_ERROR_PREFIX.length)) as NativeErrorPayload
+    if (
+      typeof payload.code !== 'string' ||
+      typeof payload.phase !== 'string' ||
+      typeof payload.retryable !== 'boolean' ||
+      typeof payload.message !== 'string' ||
+      typeof payload.details !== 'object' ||
+      payload.details === null
+    ) {
+      return undefined
+    }
+    return payload
+  } catch {
+    return undefined
   }
 }
 
 function normalizeNativeError(error: unknown): Error {
-  if (error instanceof HttpError) return error
+  if (error instanceof CatcherError) return error
   const message = error instanceof Error ? error.message : String(error)
+  const payload = parseNativeErrorPayload(message)
+  if (payload) {
+    if (
+      payload.code === 'HTTP_ERROR' &&
+      typeof payload.details.status === 'number' &&
+      typeof payload.details.body === 'string'
+    ) {
+      return new HttpError(payload.details.status, payload.details.body, error)
+    }
+    return new CatcherError(payload, error)
+  }
   const match = NATIVE_HTTP_ERROR_PATTERN.exec(message)
   if (!match) return error instanceof Error ? error : new Error(message)
   return new HttpError(Number(match[1]), match[2], error)
@@ -61,7 +175,11 @@ export class HttpClient {
 
   constructor(config: HttpClientConfig | string) {
     const json = typeof config === 'string' ? config : JSON.stringify(config)
-    this._raw = new JsHttpClient(json)
+    try {
+      this._raw = new JsHttpClient(json)
+    } catch (error) {
+      throw normalizeNativeError(error)
+    }
   }
 
   private async _execute<T>(operation: () => Promise<T>): Promise<T> {
@@ -138,7 +256,11 @@ export class HttpClient {
     if (!this._raw.networkChanged) {
       throw new Error('networkChanged() requires rebuilt native addon (cargo build)')
     }
-    this._raw.networkChanged()
+    try {
+      this._raw.networkChanged()
+    } catch (error) {
+      throw normalizeNativeError(error)
+    }
   }
 
   cancelAll(): void {

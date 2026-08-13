@@ -1,6 +1,8 @@
 use reqwest::Client;
 use reqwest_middleware::{ClientBuilder as MiddlewareBuilder, ClientWithMiddleware};
+use reqwest_retry::RetryError;
 use std::collections::HashMap;
+use std::error::Error as StdError;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
@@ -877,14 +879,77 @@ fn map_middleware_error_standalone(
     e: reqwest_middleware::Error,
     config: &HttpClientConfig,
 ) -> CatcherError {
-    let msg = format!("{e}");
-    if msg.contains("timeout") || msg.contains("timed out") {
-        return CatcherError::RequestTimeout(config.response_timeout_ms);
+    match e {
+        reqwest_middleware::Error::Reqwest(error) => map_reqwest_error(error, config),
+        reqwest_middleware::Error::Middleware(error) => match error.downcast::<RetryError>() {
+            Ok(RetryError::WithRetries { retries, err }) => {
+                let last_error = map_middleware_error_standalone(err, config);
+                CatcherError::RetryExhausted {
+                    attempts: retries.saturating_add(1),
+                    last_error: last_error.to_string(),
+                }
+            }
+            Ok(RetryError::Error(err)) => map_middleware_error_standalone(err, config),
+            Err(error) => CatcherError::Internal(format!(
+                "request middleware: {}",
+                error
+                    .chain()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(": ")
+            )),
+        },
     }
-    if msg.contains("connect") || msg.contains("connection") {
+}
+
+fn map_reqwest_error(error: reqwest::Error, config: &HttpClientConfig) -> CatcherError {
+    let is_timeout = error.is_timeout();
+    let is_connect = error.is_connect();
+    let host = error
+        .url()
+        .and_then(|url| url.host_str())
+        .unwrap_or("unknown")
+        .to_string();
+    let error = error.without_url();
+    let reason = error_chain(&error);
+    let normalized_reason = reason.to_ascii_lowercase();
+
+    if is_timeout && is_connect {
         return CatcherError::ConnectionTimeout(config.connect_timeout_ms);
     }
-    CatcherError::Internal(format!("request: {e}"))
+    if is_timeout {
+        return CatcherError::RequestTimeout(config.response_timeout_ms);
+    }
+    if normalized_reason.contains("dns")
+        || normalized_reason.contains("failed to lookup address")
+        || normalized_reason.contains("failed to resolve")
+        || normalized_reason.contains("no record found")
+    {
+        return CatcherError::DnsError { host, reason };
+    }
+    if normalized_reason.contains("tls")
+        || normalized_reason.contains("certificate")
+        || normalized_reason.contains("handshake")
+    {
+        return CatcherError::TlsError(reason);
+    }
+    if is_connect {
+        return CatcherError::Internal(format!("connection failed for {host}: {reason}"));
+    }
+    CatcherError::Internal(format!("request failed for {host}: {reason}"))
+}
+
+fn error_chain(error: &(dyn StdError + 'static)) -> String {
+    let mut messages = Vec::new();
+    let mut current = Some(error);
+    while let Some(cause) = current {
+        let message = cause.to_string();
+        if messages.last() != Some(&message) {
+            messages.push(message);
+        }
+        current = cause.source();
+    }
+    messages.join(": ")
 }
 
 /// Simple base64 encoding for Basic auth (no external dependency needed)
@@ -1064,6 +1129,44 @@ mod tests {
         let transport = HttpTransport::new(config).unwrap();
         let result = transport.get("/test").await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn retry_exhaustion_preserves_last_transport_error() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+
+        let config = HttpClientConfig {
+            base_url: format!("http://127.0.0.1:{port}"),
+            connect_timeout_ms: 500,
+            response_timeout_ms: 500,
+            retry: Some(catcher_core::RetryConfig {
+                max_attempts: 1,
+                min_backoff_ms: 1,
+                max_backoff_ms: 1,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let transport = HttpTransport::new(config).unwrap();
+        let error = transport
+            .get("/test?access_token=must-not-leak")
+            .await
+            .unwrap_err();
+
+        match error {
+            CatcherError::RetryExhausted {
+                attempts,
+                last_error,
+            } => {
+                assert_eq!(attempts, 2);
+                assert!(last_error.contains("connection failed"));
+                assert!(!last_error.contains("Request failed after"));
+                assert!(!last_error.contains("must-not-leak"));
+            }
+            other => panic!("expected RetryExhausted, got {other:?}"),
+        }
     }
 
     #[tokio::test]

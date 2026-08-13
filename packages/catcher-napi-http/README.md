@@ -164,6 +164,24 @@ HTTP responses with status `>= 400` reject with `HttpError`, which exposes struc
 client's connection pool and retries once on a fresh connection. Other clients and
 in-flight requests are not cancelled.
 
+Native transport failures reject with `CatcherError` instead of the N-API default
+`GenericFailure`. The error exposes a stable `code`, failure `phase`, `retryable`
+flag, and structured `details`. Retry exhaustion includes both the total attempt
+count and the final transport error in `details.lastError`; request URLs are stripped
+before the native cause chain is serialized.
+
+```typescript
+import { CatcherError } from '@eric8810/catcher-napi-http'
+
+try {
+  await client.get('/users/1')
+} catch (error) {
+  if (error instanceof CatcherError) {
+    console.log(error.code, error.phase, error.details)
+  }
+}
+```
+
 ### Methods
 
 | Method | Signature |

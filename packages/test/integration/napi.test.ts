@@ -3,6 +3,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import {
+  CatcherError,
   HttpClient,
   HttpError,
   JsHttpResponse,
@@ -34,6 +35,23 @@ describe('@eric8810/catcher-napi-http', () => {
     expect(client).toBeDefined()
   })
 
+  it('exposes invalid native configuration as a structured CatcherError', () => {
+    let error: unknown
+    try {
+      new HttpClient('{')
+    } catch (reason) {
+      error = reason
+    }
+
+    expect(error).toBeInstanceOf(CatcherError)
+    expect(error).toMatchObject({
+      name: 'CatcherError',
+      code: 'INVALID_CONFIG',
+      phase: 'config',
+      retryable: false,
+    })
+  })
+
   it('makes a GET request and receives response', async () => {
     const client = new HttpClient(JSON.stringify({
       base_url: `http://localhost:${httpServer.port}`,
@@ -59,6 +77,53 @@ describe('@eric8810/catcher-napi-http', () => {
       status: 404,
     })
     expect(error.body).toContain('not found')
+  })
+
+  it('preserves retry attempts and the final transport cause', async () => {
+    const listener = await import('node:net').then(({ createServer }) => {
+      const server = createServer()
+      return new Promise<{ server: import('node:net').Server; port: number }>((resolve) => {
+        server.listen(0, '127.0.0.1', () => {
+          resolve({
+            server,
+            port: (server.address() as import('node:net').AddressInfo).port,
+          })
+        })
+      })
+    })
+    await new Promise<void>((resolve, reject) => {
+      listener.server.close((error) => error ? reject(error) : resolve())
+    })
+
+    const client = new HttpClient({
+      base_url: `http://127.0.0.1:${listener.port}`,
+      connect_timeout_ms: 500,
+      response_timeout_ms: 500,
+      retry: {
+        max_attempts: 1,
+        min_backoff_ms: 1,
+        max_backoff_ms: 1,
+        backoff: 'Fixed',
+        jitter: false,
+      },
+    })
+
+    const error = await client
+      .get('/unreachable?access_token=must-not-leak')
+      .catch((reason) => reason)
+
+    expect(error).toBeInstanceOf(CatcherError)
+    expect(error).toMatchObject({
+      name: 'CatcherError',
+      code: 'RETRY_EXHAUSTED',
+      phase: 'request',
+      details: {
+        attempts: 2,
+      },
+    })
+    expect(error.details.lastError).toContain('connection failed')
+    expect(error.message).not.toContain('Request failed after')
+    expect(error.message).not.toContain('must-not-leak')
   })
 
   it('retries HTTP 421 once after resetting only its connection pool', async () => {
