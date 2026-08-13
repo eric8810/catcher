@@ -886,7 +886,7 @@ fn map_middleware_error_standalone(
                 let last_error = map_middleware_error_standalone(err, config);
                 CatcherError::RetryExhausted {
                     attempts: retries.saturating_add(1),
-                    last_error: last_error.to_string(),
+                    last_error: Box::new(last_error),
                 }
             }
             Ok(RetryError::Error(err)) => map_middleware_error_standalone(err, config),
@@ -934,9 +934,9 @@ fn map_reqwest_error(error: reqwest::Error, config: &HttpClientConfig) -> Catche
         return CatcherError::TlsError(reason);
     }
     if is_connect {
-        return CatcherError::Internal(format!("connection failed for {host}: {reason}"));
+        return CatcherError::ConnectionError { host, reason };
     }
-    CatcherError::Internal(format!("request failed for {host}: {reason}"))
+    CatcherError::TransportError(reason)
 }
 
 fn error_chain(error: &(dyn StdError + 'static)) -> String {
@@ -1133,12 +1133,8 @@ mod tests {
 
     #[tokio::test]
     async fn retry_exhaustion_preserves_last_transport_error() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        drop(listener);
-
         let config = HttpClientConfig {
-            base_url: format!("http://127.0.0.1:{port}"),
+            base_url: "http://127.0.0.1:0".into(),
             connect_timeout_ms: 500,
             response_timeout_ms: 500,
             retry: Some(catcher_core::RetryConfig {
@@ -1161,9 +1157,14 @@ mod tests {
                 last_error,
             } => {
                 assert_eq!(attempts, 2);
-                assert!(last_error.contains("connection failed"));
-                assert!(!last_error.contains("Request failed after"));
-                assert!(!last_error.contains("must-not-leak"));
+                assert!(matches!(
+                    last_error.as_ref(),
+                    CatcherError::ConnectionError { .. }
+                ));
+                let message = last_error.to_string();
+                assert!(message.contains("connection failed"));
+                assert!(!message.contains("Request failed after"));
+                assert!(!message.contains("must-not-leak"));
             }
             other => panic!("expected RetryExhausted, got {other:?}"),
         }

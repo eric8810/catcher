@@ -19,7 +19,7 @@ struct NativeErrorDetails {
     #[serde(skip_serializing_if = "Option::is_none")]
     attempts: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    last_error: Option<String>,
+    last_error: Option<Box<NativeErrorPayload>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -69,6 +69,23 @@ impl From<&CatcherError> for NativeErrorPayload {
                     ..Default::default()
                 },
             ),
+            CatcherError::ConnectionError { host, reason } => (
+                "CONNECTION_ERROR",
+                "connect",
+                NativeErrorDetails {
+                    host: Some(host.clone()),
+                    reason: Some(reason.clone()),
+                    ..Default::default()
+                },
+            ),
+            CatcherError::TransportError(reason) => (
+                "TRANSPORT_ERROR",
+                "request",
+                NativeErrorDetails {
+                    reason: Some(reason.clone()),
+                    ..Default::default()
+                },
+            ),
             CatcherError::HttpError { status, body } => (
                 "HTTP_ERROR",
                 "response",
@@ -111,7 +128,7 @@ impl From<&CatcherError> for NativeErrorPayload {
                 "request",
                 NativeErrorDetails {
                     attempts: Some(*attempts),
-                    last_error: Some(last_error.clone()),
+                    last_error: Some(Box::new(NativeErrorPayload::from(last_error.as_ref()))),
                     ..Default::default()
                 },
             ),
@@ -198,16 +215,22 @@ mod tests {
     fn retry_exhausted_payload_preserves_attempts_and_last_error() {
         let payload = NativeErrorPayload::from(&CatcherError::RetryExhausted {
             attempts: 2,
-            last_error: "internal error: connection failed: socket closed".into(),
+            last_error: Box::new(CatcherError::ConnectionError {
+                host: "api.example.com".into(),
+                reason: "socket closed".into(),
+            }),
         });
         let value = serde_json::to_value(payload).unwrap();
 
         assert_eq!(value["code"], "RETRY_EXHAUSTED");
         assert_eq!(value["phase"], "request");
         assert_eq!(value["details"]["attempts"], 2);
+        assert_eq!(value["details"]["lastError"]["code"], "CONNECTION_ERROR");
+        assert_eq!(value["details"]["lastError"]["phase"], "connect");
+        assert_eq!(value["details"]["lastError"]["retryable"], true);
         assert_eq!(
-            value["details"]["lastError"],
-            "internal error: connection failed: socket closed"
+            value["details"]["lastError"]["details"]["reason"],
+            "socket closed"
         );
     }
 

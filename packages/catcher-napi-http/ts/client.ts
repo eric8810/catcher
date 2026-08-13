@@ -17,6 +17,8 @@ export type CatcherErrorCode =
   | 'REQUEST_TIMEOUT'
   | 'TLS_ERROR'
   | 'DNS_ERROR'
+  | 'CONNECTION_ERROR'
+  | 'TRANSPORT_ERROR'
   | 'HTTP_ERROR'
   | 'WS_HANDSHAKE_TIMEOUT'
   | 'WS_DISCONNECTED'
@@ -42,6 +44,14 @@ export type CatcherErrorPhase =
   | 'decode'
   | 'internal'
 
+export interface CatcherErrorSnapshot {
+  code: CatcherErrorCode
+  phase: CatcherErrorPhase
+  retryable: boolean
+  message: string
+  details: CatcherErrorDetails
+}
+
 export interface CatcherErrorDetails {
   status?: number
   body?: string
@@ -49,16 +59,10 @@ export interface CatcherErrorDetails {
   host?: string
   reason?: string
   attempts?: number
-  lastError?: string
+  lastError?: CatcherErrorSnapshot
 }
 
-interface NativeErrorPayload {
-  code: CatcherErrorCode
-  phase: CatcherErrorPhase
-  retryable: boolean
-  message: string
-  details: CatcherErrorDetails
-}
+type NativeErrorPayload = CatcherErrorSnapshot
 
 /** Catcher 原生层的结构化错误。 */
 export class CatcherError extends Error {

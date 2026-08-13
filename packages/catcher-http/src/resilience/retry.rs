@@ -89,8 +89,8 @@ where
     result.map_err(|e| {
         if final_attempt > 1 {
             CatcherError::RetryExhausted {
-                attempts: max_attempts,
-                last_error: format!("{e}"),
+                attempts: final_attempt,
+                last_error: Box::new(e),
             }
         } else {
             e

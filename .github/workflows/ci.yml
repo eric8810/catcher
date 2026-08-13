@@ -57,6 +57,28 @@ jobs:
       # 测试（如 catcher-ffi quality_test）掩盖后续整个套件的执行结果（issue #033）。
       - run: cd packages && cargo test --workspace --no-fail-fast
 
+  napi-http-error-contract:
+    name: napi-http errors (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "packages -> target"
+      - run: pnpm install
+      - run: pnpm --filter @eric8810/catcher-napi-http build
+      - run: pnpm exec vitest run --config vitest.napi.config.ts packages/test/integration/napi-error-contract.test.ts
+
   dart-ffi-roundtrip:
     runs-on: ubuntu-latest
     steps:
