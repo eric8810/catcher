@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file. See [release-please](https://github.com/googleapis/release-please) for automated management.
 
+## 0.3.19 (2026-08-13)
+
+> 修复 N-API HTTP 传输异常被压缩成 `GenericFailure`、导致上层无法识别失败阶段和最终重试原因的问题。
+
+### 🐛 Bug Fixes
+
+- **结构化传输异常**：连接拒绝、DNS、TLS、连接超时、请求超时及其他传输失败均提供稳定的 `code`、`phase`、`retryable` 和白名单 `details`。
+- **保留重试根因**：`RETRY_EXHAUSTED` 记录实际执行总次数，并在 `details.lastError` 中保留最终结构化异常，不再只保存字符串。
+- **N-API 错误类型**：JavaScript 调用方收到导出的 `CatcherError` / `HttpError`，同时保留旧版 HTTP 文本错误兼容解析。
+- **安全诊断信息**：原生错误链序列化前移除请求 URL，避免查询参数和 token 泄漏。
+- **跨平台契约覆盖**：CI 在 Linux、macOS 和 Windows 上验证非法配置、连接拒绝、重试耗尽和请求超时契约。
+
+### 📦 Packaging
+
+- 所有 npm、Rust、NAPI 和 Flutter 包统一同步到 `0.3.19`。
+
 ## 0.3.18 (2026-08-07)
 
 > 修复代理/VPN/网络路径变化后服务端返回 HTTP 421（Misdirected Request）时客户端持续失败的问题，并为 NAPI 调用方提供结构化 HTTP 状态错误。
