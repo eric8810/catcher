@@ -302,12 +302,18 @@ xcodebuild -create-xcframework \
   -framework "$TMP_DIR/ios-device/catcher_ffi.framework" \
   -framework "$TMP_DIR/ios-simulator/catcher_ffi.framework" \
   -output packages/catcher_core/ios/Frameworks/catcher_ffi.xcframework
+
+rm -rf packages/catcher_core/ios/catcher_core/catcher_ffi.xcframework
+mkdir -p packages/catcher_core/ios/catcher_core
+cp -R packages/catcher_core/ios/Frameworks/catcher_ffi.xcframework \
+  packages/catcher_core/ios/catcher_core/catcher_ffi.xcframework
 ```
 
 输出位置：
 
 ```text
 packages/catcher_core/ios/Frameworks/catcher_ffi.xcframework
+packages/catcher_core/ios/catcher_core/catcher_ffi.xcframework
 ```
 
 #### 校验
@@ -340,7 +346,7 @@ nm -gU packages/catcher_core/ios/Frameworks/catcher_ffi.xcframework/ios-arm64/ca
   | rg '_catcher_http_execute$|_catcher_ws_create$|_catcher_free_result$|_catcher_sse_connect$'
 ```
 
-> `android/src/main/jniLibs/` 和 `ios/Frameworks/` 下的二进制产物默认被 git ignore。发布前请确认这些文件实际存在；pub.dev 打包依赖 `.pubignore` 中对平台 bundle 目录的例外规则。
+> `android/src/main/jniLibs/`、`ios/Frameworks/` 和 `ios/catcher_core/catcher_ffi.xcframework/` 下的二进制产物默认被 git ignore。发布前请确认这些文件实际存在；pub.dev 打包依赖 `.pubignore` 中对平台 bundle 目录的例外规则。
 
 ---
 

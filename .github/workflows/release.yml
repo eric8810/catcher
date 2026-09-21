@@ -657,6 +657,7 @@ jobs:
           mkdir -p packages/catcher_core/android/src/main/jniLibs/x86
           mkdir -p packages/catcher_core/android/src/main/jniLibs/x86_64
           mkdir -p packages/catcher_core/ios/Frameworks
+          mkdir -p packages/catcher_core/ios/catcher_core
           mkdir -p packages/catcher_core/macos/Frameworks
           mkdir -p packages/catcher_core/linux/lib/arm64
           mkdir -p packages/catcher_core/linux/lib/x64
@@ -737,6 +738,7 @@ jobs:
             -framework "$RUNNER_TEMP/ios-device/catcher_ffi.framework" \
             -framework "$RUNNER_TEMP/ios-simulator/catcher_ffi.framework" \
             -output packages/catcher_core/ios/Frameworks/catcher_ffi.xcframework
+          cp -R packages/catcher_core/ios/Frameworks/catcher_ffi.xcframework packages/catcher_core/ios/catcher_core/catcher_ffi.xcframework
 
           MACOS_ARM64=$(find_one "*/aarch64-apple-darwin/release/libcatcher_ffi.dylib")
           MACOS_X64=$(find_one "*/x86_64-apple-darwin/release/libcatcher_ffi.dylib")
@@ -768,11 +770,13 @@ jobs:
         run: |
           du -sh packages/catcher_core/android/src/main/jniLibs
           du -sh packages/catcher_core/ios/Frameworks
+          du -sh packages/catcher_core/ios/catcher_core/catcher_ffi.xcframework
           du -sh packages/catcher_core/macos/Frameworks
           du -sh packages/catcher_core/linux/lib
           du -sh packages/catcher_core/windows/lib
           find packages/catcher_core/android/src/main/jniLibs -type f | sort
           find packages/catcher_core/ios/Frameworks -type f | sort
+          find packages/catcher_core/ios/catcher_core/catcher_ffi.xcframework -type f | sort
           find packages/catcher_core/macos/Frameworks -type f | sort
           find packages/catcher_core/linux/lib -type f | sort
           find packages/catcher_core/windows/lib -type f | sort

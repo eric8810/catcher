@@ -8,6 +8,7 @@ native/
 
 !android/src/main/jniLibs/**/*.so
 !ios/Frameworks/**/*
+!ios/catcher_core/catcher_ffi.xcframework/**/*
 !linux/lib/**/*.so
 !macos/Frameworks/**/*
 !windows/lib/**/*.dll
