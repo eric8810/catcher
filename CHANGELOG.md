@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file. See [release-please](https://github.com/googleapis/release-please) for automated management.
 
+## 0.4.0 (2026-09-21)
+
+> Flutter iOS 插件新增 Swift Package Manager 接入，Flutter 工程可不再通过 CocoaPods 安装 `catcher_core`。
+
+### 📦 Packaging
+
+- **Flutter iOS SPM 支持**：新增 `packages/catcher_core/ios/catcher_core/Package.swift`，以 `catcher-ffi` binary target 暴露 `catcher_ffi.xcframework`；Flutter 检测到 `Package.swift` 后会自动跳过 CocoaPods 安装。
+- **发布产物同步**：本地构建脚本与 CI release 流程会额外生成 SPM 包内所需的 `ios/catcher_core/catcher_ffi.xcframework`，并纳入 pub.dev 打包。
+
 ## 0.3.19 (2026-08-13)
 
 > 修复 N-API HTTP 传输异常被压缩成 `GenericFailure`、导致上层无法识别失败阶段和最终重试原因的问题。

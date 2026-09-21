@@ -5,3 +5,7 @@ ios/Frameworks/
 linux/lib/
 macos/Frameworks/
 windows/lib/
+.gradle/
+.build/
+.swiftpm/
+ios/catcher_core/catcher_ffi.xcframework/

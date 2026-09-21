@@ -157,6 +157,9 @@ build_apple() {
     -framework "$tmp_dir/ios-device/catcher_ffi.framework" \
     -framework "$tmp_dir/ios-simulator/catcher_ffi.framework" \
     -output "$PACKAGE_DIR/ios/Frameworks/catcher_ffi.xcframework"
+  rm -rf "$PACKAGE_DIR/ios/catcher_core/catcher_ffi.xcframework"
+  mkdir -p "$PACKAGE_DIR/ios/catcher_core"
+  cp -R "$PACKAGE_DIR/ios/Frameworks/catcher_ffi.xcframework" "$PACKAGE_DIR/ios/catcher_core/catcher_ffi.xcframework"
 
   lipo -create \
     "$PACKAGES_DIR/target/aarch64-apple-darwin/release/libcatcher_ffi.dylib" \
@@ -215,6 +218,7 @@ echo "Native bundle files:"
 for dir in \
   "$PACKAGE_DIR/android/src/main/jniLibs" \
   "$PACKAGE_DIR/ios/Frameworks" \
+  "$PACKAGE_DIR/ios/catcher_core/catcher_ffi.xcframework" \
   "$PACKAGE_DIR/macos/Frameworks" \
   "$PACKAGE_DIR/linux/lib" \
   "$PACKAGE_DIR/windows/lib"; do

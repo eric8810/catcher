@@ -1,6 +1,6 @@
 {
   "name": "@eric8810/catcher-core",
-  "version": "0.3.19",
+  "version": "0.4.0",
   "description": "Catcher shared type definitions — zero runtime dependencies",
   "type": "module",
   "main": "./dist/index.js",

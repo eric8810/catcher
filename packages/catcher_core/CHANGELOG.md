@@ -1,3 +1,10 @@
+## 0.4.0
+
+### Packaging
+
+- Add Swift Package Manager support for the Flutter iOS plugin: `ios/catcher_core/Package.swift` exposes `catcher_ffi.xcframework` as a binary target, so Flutter apps can link `catcher_core` without CocoaPods.
+- Build scripts and the pub.dev release workflow now also assemble `ios/catcher_core/catcher_ffi.xcframework` for SPM consumers.
+
 ## 0.3.19
 
 ### Bug Fixes
