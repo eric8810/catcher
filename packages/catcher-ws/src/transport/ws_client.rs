@@ -588,8 +588,6 @@ fn build_connect_context(config: &WsClientConfig) -> Result<WsConnectContext, Ca
 fn build_reqwest_client_for_network_change(
     config: &WsClientConfig,
 ) -> Result<reqwest::Client, CatcherError> {
-    let effective_config;
-    let owned_config;
     if config
         .proxy
         .as_ref()
@@ -606,12 +604,10 @@ fn build_reqwest_client_for_network_change(
         c.proxy = Some(catcher_dns::proxy::detect_system_proxy_or_direct(
             user_no_proxy,
         ));
-        owned_config = c;
-        effective_config = &owned_config;
+        build_reqwest_client(&c)
     } else {
-        effective_config = config;
-    };
-    build_reqwest_client(effective_config)
+        build_reqwest_client(config)
+    }
 }
 
 fn rebuild_reqwest_client_after_network_change(
