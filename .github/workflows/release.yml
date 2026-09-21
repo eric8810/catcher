@@ -454,6 +454,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/catcher_core-v')
     runs-on: ubuntu-latest
     env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
       ANDROID_NDK_VERSION: "27.0.12077973"
       CARGO_PROFILE_RELEASE_OPT_LEVEL: "z"
       CARGO_PROFILE_RELEASE_PANIC: "abort"
@@ -468,7 +469,13 @@ jobs:
         with:
           workspaces: "packages -> target"
       - name: Install Android NDK
-        run: sdkmanager "ndk;$ANDROID_NDK_VERSION"
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager=$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | sort -V | tail -n 1)
+          test -n "$sdkmanager"
+          yes | "$sdkmanager" --licenses
+          "$sdkmanager" "ndk;$ANDROID_NDK_VERSION"
       - name: Build for all Android ABIs
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.ANDROID_NDK_VERSION }}
