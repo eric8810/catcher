@@ -103,7 +103,9 @@ jobs:
             echo "::error::Expected catcher-napi-http $expected, found $actual"
             exit 1
           fi
-      - uses: dtolnay/rust-toolchain@stable
+      # Rust 1.98 passes --fix-cortex-a53-843419 to Zig, which Zig rejects.
+      # Keep the NAPI cross-build toolchain on the last compatible release.
+      - uses: dtolnay/rust-toolchain@1.97.0
         with:
           targets: ${{ matrix.settings.target }}
       - uses: Swatinem/rust-cache@v2
@@ -191,7 +193,9 @@ jobs:
             echo "::error::Expected catcher-napi-ws $expected, found $actual"
             exit 1
           fi
-      - uses: dtolnay/rust-toolchain@stable
+      # Rust 1.98 passes --fix-cortex-a53-843419 to Zig, which Zig rejects.
+      # Keep the NAPI cross-build toolchain on the last compatible release.
+      - uses: dtolnay/rust-toolchain@1.97.0
         with:
           targets: ${{ matrix.settings.target }}
       - uses: Swatinem/rust-cache@v2
