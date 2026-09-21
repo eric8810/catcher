@@ -115,6 +115,8 @@ jobs:
       - name: Install zig (for cross-compilation)
         if: matrix.settings.use-zig
         uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
       - run: pnpm install
       - name: Ensure cargo path (macOS)
         if: runner.os == 'macOS'
@@ -201,6 +203,8 @@ jobs:
       - name: Install zig (for cross-compilation)
         if: matrix.settings.use-zig
         uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
       - run: pnpm install
       - name: Ensure cargo path (macOS)
         if: runner.os == 'macOS'
@@ -459,7 +463,6 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
-      - uses: android-actions/setup-android@v3
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
