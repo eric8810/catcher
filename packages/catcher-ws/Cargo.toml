@@ -7,6 +7,8 @@ license = "MIT"
 repository = "https://github.com/eric8810/catcher"
 
 [features]
+# 仅用于受控原生生命周期回归，发行构建不启用。
+lifecycle-test-hooks = []
 default = ["rustls-tls"]
 rustls-tls = ["yawc/rustls-ring", "reqwest/rustls"]
 system-proxy = ["catcher-dns/system-proxy"]

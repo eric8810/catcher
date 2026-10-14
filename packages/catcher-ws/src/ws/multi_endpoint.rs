@@ -42,52 +42,23 @@ impl EndpointRacer {
             return Ok((url, stream, lat));
         }
 
-        // 多端点 — 并发竞速
-        // spawn 的任务返回 (url, stream, lat) 以便识别是哪个端点
-        type RaceResult = Result<(String, WsStream, u64), CatcherError>;
-
-        let mut handles: Vec<tokio::task::JoinHandle<RaceResult>> = Vec::with_capacity(urls.len());
-
+        // 直接持有握手 future；竞速被取消或获胜时，丢弃其余 future，避免遗留后台任务。
+        use futures_util::{stream::FuturesUnordered, StreamExt};
+        let mut attempts = FuturesUnordered::new();
         for url in urls {
-            let config_c = config.clone();
-            let connect_ctx_c = connect_ctx.clone();
-            handles.push(tokio::spawn(async move {
-                let (stream, lat) =
-                    connect_stream_with_context(&url, &config_c, &connect_ctx_c).await?;
-                Ok((url, stream, lat))
-            }));
+            attempts.push(async move {
+                let (stream, latency) =
+                    connect_stream_with_context(&url, config, connect_ctx).await?;
+                Ok::<_, CatcherError>((url, stream, latency))
+            });
         }
-
-        // 用 select_all 逐个等待，取最先成功者
-        let mut first_ok: Option<(String, WsStream, u64)> = None;
-        let mut errors = Vec::new();
-
-        while !handles.is_empty() {
-            let (result, _, remaining) = futures_util::future::select_all(handles).await;
-            handles = remaining;
-
-            match result {
-                Ok(Ok(triple)) => {
-                    first_ok = Some(triple);
-                    break;
-                }
-                Ok(Err(e)) => errors.push(e),
-                Err(join_err) => errors.push(CatcherError::Internal(format!(
-                    "race task panicked: {join_err}"
-                ))),
+        while let Some(result) = attempts.next().await {
+            if let Ok(connected) = result {
+                return Ok(connected);
             }
         }
-
-        // 取消剩余任务
-        for h in handles {
-            h.abort();
-        }
-
-        match first_ok {
-            Some(result) => Ok(result),
-            None => Err(CatcherError::WsAllEndpointsFailed {
-                count: self.urls.len(),
-            }),
-        }
+        Err(CatcherError::WsAllEndpointsFailed {
+            count: self.urls.len(),
+        })
     }
 }

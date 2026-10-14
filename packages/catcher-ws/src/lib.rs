@@ -16,6 +16,7 @@ pub mod ws;
 
 // Re-export key types
 pub use codec::{pack, unpack, unpack_value};
+pub use transport::shutdown::WsShutdown;
 pub use transport::ws_client::{WsHandle, WsTransport};
 pub use types::ws::{
     ApplicationCompressionAlgorithm, ApplicationCompressionConfig, DnsConfig, DnsMode,
