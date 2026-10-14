@@ -155,3 +155,105 @@ test('GC of native wrapper cancels an unfinished handshake', { timeout: 5000, sk
     assert.equal(upgrades, 1)
   })
 })
+
+// Exercise both native exports and the public TS facade with each transport backend.
+for (const backend of ['native', 'reqwest']) {
+  for (const api of ['raw', 'ts']) {
+    const create = (config, onEvent) => {
+      if (backend === 'reqwest') config.proxy = { mode: 'direct' }
+      if (api === 'ts') {
+        const { WsClient } = require('../dist/client.js')
+        return new WsClient(config, onEvent)
+      }
+      return new JsWsClient(JSON.stringify(config), (err, value) => {
+        assert.ifError(err); onEvent(JSON.parse(value))
+      })
+    }
+
+    test(`${backend}/${api}: closeAndWait rejects sends synchronously and preserves idle Close`, { timeout: 5000 }, async () => {
+      for (let iteration = 0; iteration < 20; iteration++) {
+      await fixture(async (server, config) => {
+        const frames = []
+        let resolveConnected, ended
+        const connected = new Promise(resolve => { resolveConnected = resolve })
+        server.on('upgrade', (req, socket) => {
+          ended = once(socket, 'close')
+          socket.on('data', data => frames.push(data))
+          upgrade(req, socket)
+        })
+        const client = create(config, event => {
+          if (event.type === 'Connected') resolveConnected()
+        })
+        try {
+          await connected
+          const waiting = client.closeAndWait(1001, 'stop')
+          assert.throws(() => client.send('late'), /closed/)
+          assert.throws(() => client.sendBinary(Buffer.from('late')), /closed/)
+          assert.throws(() => client.networkChanged(), /closed/)
+          await waiting
+          await ended
+          const frame = Buffer.concat(frames)
+          assert.equal(frame[0] & 15, 8)
+          const length = frame[1] & 127
+          const payload = Buffer.from(frame.subarray(6, 6 + length))
+          for (let i = 0; i < payload.length; i++) payload[i] ^= frame[2 + i % 4]
+          assert.equal(payload.readUInt16BE(0), 1001)
+          assert.equal(payload.subarray(2).toString(), 'stop')
+          await client.closeAndWait(null, null)
+        } finally { client.close(null, null) }
+      })
+      }
+    })
+
+    test(`${backend}/${api}: cancelled in-flight payload is never flushed by Close`, { timeout: 10000 }, async () => {
+      await fixture(async (server, config) => {
+        config.send_timeout_ms = 0
+        const chunks = []
+        let resolveConnected, resolveStarted, socket, ended
+        const connected = new Promise(resolve => { resolveConnected = resolve })
+        const started = new Promise(resolve => { resolveStarted = resolve })
+        server.on('upgrade', (req, peer) => {
+          socket = peer
+          ended = once(peer, 'close')
+          peer.on('data', data => {
+            chunks.push(data)
+            // Pause as soon as the binary frame starts, ensuring send/flush is in flight.
+            peer.pause()
+            resolveStarted()
+          })
+          upgrade(req, peer)
+        })
+        const client = create(config, event => {
+          if (event.type === 'Connected') resolveConnected()
+        })
+        let resume
+        try {
+          await connected
+          const payload = crypto.randomBytes(32 * 1024 * 1024)
+          client.sendBinary(payload)
+          await started
+          await delay(100)
+          assert.ok(Buffer.concat(chunks).length < payload.length)
+          client.close(1001, 'stop')
+          const waiting = client.closeAndWait(null, null)
+          // A Close that repolls the cancelled sink will flush the full frame here.
+          resume = setTimeout(() => {
+            socket.removeAllListeners('data')
+            socket.on('data', data => chunks.push(data))
+            socket.resume()
+          }, 10)
+          await waiting
+          await ended
+          const received = Buffer.concat(chunks)
+          assert.equal(received[0] & 15, 2)
+          assert.equal(Number(received.readBigUInt64BE(2)), payload.length)
+          assert.ok(received.length < payload.length + 14,
+            `cancelled send was flushed: received ${received.length} bytes`)
+        } finally {
+          clearTimeout(resume)
+          client.close(null, null)
+        }
+      })
+    })
+  }
+}

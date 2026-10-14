@@ -149,7 +149,7 @@ impl WsHandle {
         Ok(())
     }
 
-    /// 等待本地握手/连接管理器完全退出。
+    /// 等待该 WS 握手/连接管理器退出，不包括共享 DNS 后台任务或绑定层回调。
     pub async fn wait_closed(&self) {
         self.shutdown.wait_closed().await;
     }
@@ -714,6 +714,7 @@ enum SendStatus {
     Sent,
     Failed,
     TimedOut,
+    Cancelled,
 }
 
 /// 带超时的帧发送。
@@ -760,7 +761,7 @@ where
 {
     tokio::select! {
         biased;
-        _ = shutdown.cancelled() => SendStatus::Failed,
+        _ = shutdown.cancelled() => SendStatus::Cancelled,
         result = send_frame_with_timeout(writer, frame, timeout_ms) => result,
     }
 }
@@ -803,7 +804,7 @@ where
 {
     for cmd in commands {
         if shutdown.is_cancelled() {
-            return SendStatus::Failed;
+            return SendStatus::Cancelled;
         }
         match cmd {
             WsCommand::Text(t) => {
@@ -837,6 +838,7 @@ fn replay_disconnect_reason(status: SendStatus) -> Option<&'static str> {
         SendStatus::Sent => None,
         SendStatus::Failed => Some("replay send failed"),
         SendStatus::TimedOut => Some("replay send timeout"),
+        SendStatus::Cancelled => Some("replay cancelled"),
     }
 }
 
@@ -1033,6 +1035,7 @@ async fn connection_manager(
                             };
                             match send_frame_until_closed(&mut writer, msg, config.send_timeout_ms, shutdown).await {
                                 SendStatus::Sent => {}
+                                SendStatus::Cancelled => break LoopOutcome::CleanClose,
                                 SendStatus::Failed => break LoopOutcome::Disconnected {
                                     code: 1006,
                                     reason: "send failed".into(),
@@ -1055,6 +1058,7 @@ async fn connection_manager(
                             };
                             match send_frame_until_closed(&mut writer, msg, config.send_timeout_ms, shutdown).await {
                                 SendStatus::Sent => {}
+                                SendStatus::Cancelled => break LoopOutcome::CleanClose,
                                 SendStatus::Failed => break LoopOutcome::Disconnected {
                                     code: 1006,
                                     reason: "send failed".into(),
@@ -1093,20 +1097,15 @@ async fn connection_manager(
                         }
                         state.waiting_for_pong = true;
                         state.ping_sent_at = Some(Instant::now());
-                        if matches!(
-                            send_frame_until_closed(
-                                &mut writer,
-                                Frame::ping(Vec::new()),
-                                config.send_timeout_ms,
-                                shutdown,
-                            )
-                            .await,
-                            SendStatus::TimedOut
-                        ) {
-                            // 半开连接：ping 都发不出去，不必再等 pong 超时
+                        let ping_status = send_frame_until_closed(
+                            &mut writer, Frame::ping(Vec::new()), config.send_timeout_ms, shutdown,
+                        ).await;
+                        if ping_status == SendStatus::Cancelled {
+                            break LoopOutcome::CleanClose;
+                        }
+                        if ping_status == SendStatus::TimedOut {
                             break LoopOutcome::Disconnected {
-                                code: 1006,
-                                reason: "ping send timeout".into(),
+                                code: 1006, reason: "ping send timeout".into(),
                             };
                         }
                         // 根据自适应间隔重设下一次 ping 时间
@@ -1181,7 +1180,8 @@ async fn connection_manager(
         };
 
         if shutdown.is_cancelled() {
-            close_from_queue(&mut writer, &mut cmd_rx).await;
+            // 在途 send 已取消时 sink 可能仍保留帧。不得再发送 Close 或 poll_flush，
+            // 否则会继续发送用户态缓存；仅空闲 select 分支可以尽力发送 Close。
             break;
         }
         // ── 处理 select loop 结果 ──
@@ -2118,7 +2118,7 @@ mod tests {
                 .await
                 .unwrap()
                 .unwrap(),
-            SendStatus::Failed
+            SendStatus::Cancelled
         );
         let mut sink = futures_util::sink::drain();
         assert_eq!(
@@ -2129,7 +2129,7 @@ mod tests {
                 &shutdown
             )
             .await,
-            SendStatus::Failed
+            SendStatus::Cancelled
         );
     }
 

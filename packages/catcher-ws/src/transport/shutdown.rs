@@ -33,7 +33,8 @@ impl WsShutdown {
         let _ = receiver.wait_for(|value| *value).await;
     }
 
-    /// 等待原生网络任务退出。须先启动 connect_with_shutdown。
+    /// 等待该 WS 握手/连接管理器退出；不包括共享 DNS 后台任务或绑定层回调。
+    /// 须先启动 connect_with_shutdown。
     pub async fn wait_closed(&self) {
         let mut receiver = self.stopped.subscribe();
         let _ = receiver.wait_for(|value| *value).await;

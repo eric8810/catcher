@@ -82,8 +82,8 @@ export class WsClient {
     this._raw.close(code ?? null, reason ?? null)
   }
 
-  /** 等待本地网络和事件转发任务退出；已排入 Node 队列的回调仍可能执行。 */
-  async closeAndWait(code?: number, reason?: string): Promise<void> {
-    await this._raw.closeAndWait(code ?? null, reason ?? null)
+  /** 同步请求关闭，等待 WS 管理器与转发退出；不等待共享 DNS 刷新或已排队回调。 */
+  closeAndWait(code?: number, reason?: string): Promise<void> {
+    return this._raw.closeAndWait(code ?? null, reason ?? null)
   }
 }

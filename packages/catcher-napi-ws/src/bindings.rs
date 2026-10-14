@@ -17,7 +17,7 @@
 use napi::threadsafe_function::{
     ErrorStrategy, ThreadSafeCallContext, ThreadsafeFunction, ThreadsafeFunctionCallMode,
 };
-use napi::JsFunction;
+use napi::{Env, JsFunction, JsObject};
 use napi_derive::napi;
 use std::sync::{Arc, Mutex};
 
@@ -181,18 +181,21 @@ impl JsWsClient {
         Ok(())
     }
 
-    /// 请求终止并等待本地网络及事件转发任务退出。
-    /// 已排入 Node.js 队列的回调仍可能执行；不等待对端关闭确认。
-    #[napi]
-    pub async fn close_and_wait(
+    /// 同步保存终止请求，然后返回等待 WS 连接管理器与事件转发退出的 Promise。
+    /// 不等待共享 DNS 后台刷新、已排入 Node.js 队列的回调或对端确认。
+    #[napi(ts_return_type = "Promise<void>")]
+    pub fn close_and_wait(
         &self,
+        env: Env,
         code: Option<u16>,
         reason: Option<String>,
-    ) -> napi::Result<()> {
+    ) -> napi::Result<JsObject> {
         self.close(code, reason)?;
         let mut forwarded = self.forwarded.clone();
-        let _ = forwarded.wait_for(|value| *value).await;
-        Ok(())
+        env.spawn_future(async move {
+            let _ = forwarded.wait_for(|value| *value).await;
+            Ok(())
+        })
     }
 }
 
