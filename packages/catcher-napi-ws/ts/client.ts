@@ -77,8 +77,13 @@ export class WsClient {
     this._raw.networkChanged()
   }
 
-  /** 关闭连接。默认 code=1000, reason='normal' */
+  /** 请求终止原生连接、握手和重连，丢弃缓存；可重复调用。 */
   close(code?: number, reason?: string): void {
     this._raw.close(code ?? null, reason ?? null)
+  }
+
+  /** 等待本地网络和事件转发任务退出；已排入 Node 队列的回调仍可能执行。 */
+  async closeAndWait(code?: number, reason?: string): Promise<void> {
+    await this._raw.closeAndWait(code ?? null, reason ?? null)
   }
 }

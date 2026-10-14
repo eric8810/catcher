@@ -102,3 +102,25 @@ jobs:
         run: |
           cd packages/catcher_core
           flutter test test/ffi_roundtrip_test.dart
+
+  napi-ws-close-lifecycle:
+    name: napi-ws close (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "packages -> target"
+      - run: pnpm install
+      - run: pnpm --filter @eric8810/catcher-napi-ws build
+      - run: node --expose-gc --test packages/catcher-napi-ws/tests/close-lifecycle.cjs

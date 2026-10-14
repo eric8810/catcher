@@ -1,0 +1,157 @@
+// Run against a locally built native addon, never a mock or published binary.
+// CATCHER_WS_ADDON=/absolute/path/addon.node node --test tests/close-lifecycle.cjs
+const { test } = require('node:test')
+const assert = require('node:assert/strict')
+const http = require('node:http')
+const crypto = require('node:crypto')
+const { once } = require('node:events')
+const path = require('node:path')
+const fs = require('node:fs')
+const root = path.resolve(__dirname, '..')
+const addon = process.env.CATCHER_WS_ADDON || path.join(root, fs.readdirSync(root).find(file => file.endsWith('.node')) || 'missing.node')
+const { JsWsClient } = require(addon)
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
+
+async function fixture(run) {
+  const server = http.createServer()
+  const sockets = new Set()
+  server.on('connection', socket => {
+    sockets.add(socket)
+    socket.on('close', () => sockets.delete(socket))
+    socket.on('end', () => socket.destroy())
+  })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  const config = {
+    urls: [`ws://127.0.0.1:${server.address().port}`],
+    handshake_timeout_ms: 60000,
+    reconnect: { initial_delay_ms: 30, max_delay_ms: 30, max_attempts: 3 },
+    per_message_deflate: false,
+  }
+  try { await run(server, config) }
+  finally {
+    for (const socket of sockets) socket.destroy()
+    await new Promise(resolve => server.close(resolve))
+  }
+}
+function upgrade(req, socket) {
+  const accept = crypto.createHash('sha1')
+    .update(req.headers['sec-websocket-key'] + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64')
+  socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`)
+}
+
+test('close before initial handshake stops the actual native instance', { timeout: 5000 }, async () => {
+  await fixture(async (server, config) => {
+    let upgrades = 0
+    const events = []
+    const accepted = once(server, 'upgrade')
+    server.on('upgrade', () => upgrades++)
+    const client = new JsWsClient(JSON.stringify(config), (err, value) => {
+      assert.ifError(err); events.push(JSON.parse(value))
+    })
+    const [, socket] = await accepted
+    const ended = once(socket, 'close')
+    client.close(null, null)
+    client.close(null, null)
+    await client.closeAndWait(null, null)
+    await ended
+    await delay(150)
+    assert.equal(upgrades, 1)
+    assert.deepEqual(events, [])
+    assert.throws(() => client.send('late'))
+    await client.closeAndWait(null, null)
+  })
+})
+
+test('close during reconnect cancels handshake and discards cached sends', { timeout: 5000 }, async () => {
+  await fixture(async (server, config) => {
+    let upgrades = 0, reconnectSocket
+    let resolveReconnect, resolveDisconnected
+    const reconnect = new Promise(resolve => { resolveReconnect = resolve })
+    const disconnected = new Promise(resolve => { resolveDisconnected = resolve })
+    const received = []
+    const events = []
+    server.on('upgrade', (req, socket) => {
+      upgrades++
+      if (upgrades === 1) {
+        upgrade(req, socket)
+        setTimeout(() => socket.destroy(), 20)
+      } else {
+        reconnectSocket = socket
+        socket.on('data', data => received.push(data))
+        resolveReconnect()
+      }
+    })
+    const client = new JsWsClient(JSON.stringify(config), (err, value) => {
+      assert.ifError(err)
+      const event = JSON.parse(value); events.push(event)
+      if (event.type === 'Disconnected') resolveDisconnected()
+    })
+    await disconnected
+    client.send('buffered text')
+    client.sendBinary(Buffer.from('buffered binary'))
+    await reconnect
+    const ended = once(reconnectSocket, 'close')
+    client.close(1000, 'stop')
+    await client.closeAndWait(null, null)
+    await ended
+    const count = events.length
+    await delay(150)
+    assert.equal(events.length, count)
+    assert.equal(events.filter(event => event.type === 'Connected').length, 1)
+    assert.equal(upgrades, 2)
+    assert.equal(Buffer.concat(received).length, 0)
+    client.close(null, null)
+  })
+})
+
+test('connected close preserves code and reason and remains idempotent', { timeout: 5000 }, async () => {
+  await fixture(async (server, config) => {
+    const frames = []
+    let resolveConnected
+    const connected = new Promise(resolve => { resolveConnected = resolve })
+    let ended
+    server.on('upgrade', (req, socket) => {
+      ended = once(socket, 'close')
+      socket.on('data', data => frames.push(data))
+      upgrade(req, socket)
+    })
+    const client = new JsWsClient(JSON.stringify(config), (err, value) => {
+      assert.ifError(err)
+      if (JSON.parse(value).type === 'Connected') resolveConnected()
+    })
+    await connected
+    await client.closeAndWait(1001, 'going away')
+    await ended
+    const frame = Buffer.concat(frames)
+    assert.equal(frame[0] & 15, 8)
+    const length = frame[1] & 127
+    const payload = Buffer.from(frame.subarray(6, 6 + length))
+    for (let i = 0; i < payload.length; i++) payload[i] ^= frame[2 + i % 4]
+    assert.equal(payload.readUInt16BE(0), 1001)
+    assert.equal(payload.subarray(2).toString(), 'going away')
+    await client.closeAndWait(null, null)
+  })
+})
+
+test('GC of native wrapper cancels an unfinished handshake', { timeout: 5000, skip: !global.gc }, async () => {
+  await fixture(async (server, config) => {
+    let upgrades = 0
+    server.on('upgrade', () => upgrades++)
+    const accepted = once(server, 'upgrade')
+    let client = new JsWsClient(JSON.stringify(config))
+    const weak = new WeakRef(client)
+    const [, socket] = await accepted
+    const ended = once(socket, 'close')
+    client = null
+    for (let i = 0; i < 50; i++) {
+      await delay(10)
+      global.gc()
+      await delay(10)
+      if (!weak.deref()) break
+    }
+    assert.equal(weak.deref(), undefined)
+    await ended
+    await delay(150)
+    assert.equal(upgrades, 1)
+  })
+})

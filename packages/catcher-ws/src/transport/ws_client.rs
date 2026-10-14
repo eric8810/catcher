@@ -15,6 +15,7 @@ use tokio::sync::mpsc;
 use url::Url;
 use yawc::{Frame, OpCode};
 
+use crate::transport::shutdown::WsShutdown;
 use crate::types::ws::{
     ApplicationCompressionAlgorithm, TlsConfig, TlsVersion, WsClientConfig, WsEvent,
 };
@@ -98,11 +99,18 @@ pub struct WsTransport;
 pub struct WsHandle {
     url: String,
     cmd_tx: mpsc::UnboundedSender<WsCommand>,
+    shutdown: WsShutdown,
 }
 
 impl WsHandle {
     /// 发送文本消息
     pub fn send_text(&self, text: &str) -> Result<(), CatcherError> {
+        if self.shutdown.is_cancelled() {
+            return Err(CatcherError::WsDisconnected {
+                code: 1006,
+                reason: "connection closed".into(),
+            });
+        }
         self.cmd_tx
             .send(WsCommand::Text(text.to_string()))
             .map_err(|_| CatcherError::WsDisconnected {
@@ -113,6 +121,12 @@ impl WsHandle {
 
     /// 发送二进制消息
     pub fn send_binary(&self, data: &[u8]) -> Result<(), CatcherError> {
+        if self.shutdown.is_cancelled() {
+            return Err(CatcherError::WsDisconnected {
+                code: 1006,
+                reason: "connection closed".into(),
+            });
+        }
         self.cmd_tx
             .send(WsCommand::Binary(data.to_vec()))
             .map_err(|_| CatcherError::WsDisconnected {
@@ -121,17 +135,23 @@ impl WsHandle {
             })
     }
 
-    /// 关闭连接
+    /// 请求关闭连接并立即禁止后续发送/重连；可重复调用。
+    /// Close 帧尽力发送，不保证对端确认。wait_closed 等待本地网络任务退出。
     pub fn close(&self, code: u16, reason: &str) -> Result<(), CatcherError> {
-        self.cmd_tx
-            .send(WsCommand::Close {
+        if !self.shutdown.is_cancelled() {
+            // 通道已结束时也视为关闭成功。
+            let _ = self.cmd_tx.send(WsCommand::Close {
                 code,
                 reason: reason.to_string(),
-            })
-            .map_err(|_| CatcherError::WsDisconnected {
-                code: 1006,
-                reason: "connection closed".into(),
-            })
+            });
+            self.shutdown.cancel();
+        }
+        Ok(())
+    }
+
+    /// 等待本地握手/连接管理器完全退出。
+    pub async fn wait_closed(&self) {
+        self.shutdown.wait_closed().await;
     }
 
     /// 通知库网络环境已发生变化（WiFi 切换、VPN 换节点、蜂窝/WiFi 切换等）。
@@ -145,6 +165,12 @@ impl WsHandle {
     ///
     /// 重连期间正在等待退避的也会被打断并立即重试。
     pub fn network_changed(&self) -> Result<(), CatcherError> {
+        if self.shutdown.is_cancelled() {
+            return Err(CatcherError::WsDisconnected {
+                code: 1006,
+                reason: "connection closed".into(),
+            });
+        }
         self.cmd_tx
             .send(WsCommand::NetworkChanged)
             .map_err(|_| CatcherError::WsDisconnected {
@@ -156,6 +182,21 @@ impl WsHandle {
     /// 返回连接的 URL（初始连接的 URL）
     pub fn url(&self) -> &str {
         &self.url
+    }
+}
+
+// 事件和网络任务共用同一终止状态，避免取消后继续向绑定层提交事件。
+struct EventSender {
+    sender: mpsc::UnboundedSender<WsEvent>,
+    shutdown: WsShutdown,
+}
+
+impl EventSender {
+    fn send(&self, event: WsEvent) -> Result<(), mpsc::error::SendError<WsEvent>> {
+        if self.shutdown.is_cancelled() {
+            return Err(mpsc::error::SendError(event));
+        }
+        self.sender.send(event)
     }
 }
 
@@ -613,7 +654,7 @@ fn build_reqwest_client_for_network_change(
 fn rebuild_reqwest_client_after_network_change(
     connect_ctx: &mut WsConnectContext,
     config: &WsClientConfig,
-    event_tx: &mpsc::UnboundedSender<WsEvent>,
+    event_tx: &EventSender,
 ) {
     if !matches!(connect_ctx.backend, WsBackend::Reqwest) {
         return;
@@ -697,20 +738,79 @@ where
     }
 }
 
+async fn connect_until_closed<T>(
+    shutdown: &WsShutdown,
+    attempt: impl std::future::Future<Output = Result<T, CatcherError>>,
+) -> Result<T, CatcherError> {
+    tokio::select! {
+        biased;
+        _ = shutdown.cancelled() => Err(CatcherError::WsDisconnected { code: 1000, reason: "connection closed".into() }),
+        result = attempt => result,
+    }
+}
+
+async fn send_frame_until_closed<S>(
+    writer: &mut S,
+    frame: Frame,
+    timeout_ms: u64,
+    shutdown: &WsShutdown,
+) -> SendStatus
+where
+    S: futures_util::Sink<Frame> + Unpin,
+{
+    tokio::select! {
+        biased;
+        _ = shutdown.cancelled() => SendStatus::Failed,
+        result = send_frame_with_timeout(writer, frame, timeout_ms) => result,
+    }
+}
+
+async fn send_close_best_effort<S>(writer: &mut S, code: u16, reason: &str)
+where
+    S: futures_util::Sink<Frame> + Unpin,
+{
+    // 关闭不依赖正常发送超时配置，避免半开连接使停止完成无限等待。
+    let _ = tokio::time::timeout(Duration::from_millis(100), async {
+        let _ = writer
+            .send(Frame::close(yawc::close::CloseCode::from(code), reason))
+            .await;
+        let _ = writer.close().await;
+    })
+    .await;
+}
+
+async fn close_from_queue<S>(writer: &mut S, commands: &mut mpsc::UnboundedReceiver<WsCommand>)
+where
+    S: futures_util::Sink<Frame> + Unpin,
+{
+    while let Ok(command) = commands.try_recv() {
+        if let WsCommand::Close { code, reason } = command {
+            send_close_best_effort(writer, code, &reason).await;
+            break;
+        }
+    }
+}
+
 /// 重连成功后重放缓存的发送命令（Close/NetworkChanged 已在缓存时被过滤）。
 async fn replay_buffered_commands<S>(
     stream: &mut S,
     commands: &[WsCommand],
     config: &WsClientConfig,
+    shutdown: &WsShutdown,
 ) -> SendStatus
 where
     S: futures_util::Sink<Frame> + Unpin,
 {
     for cmd in commands {
+        if shutdown.is_cancelled() {
+            return SendStatus::Failed;
+        }
         match cmd {
             WsCommand::Text(t) => {
                 if let Ok(msg) = encode_text_message(t, config) {
-                    let status = send_frame_with_timeout(stream, msg, config.send_timeout_ms).await;
+                    let status =
+                        send_frame_until_closed(stream, msg, config.send_timeout_ms, shutdown)
+                            .await;
                     if status != SendStatus::Sent {
                         return status;
                     }
@@ -718,7 +818,9 @@ where
             }
             WsCommand::Binary(d) => {
                 if let Ok(msg) = encode_binary_message(d, config) {
-                    let status = send_frame_with_timeout(stream, msg, config.send_timeout_ms).await;
+                    let status =
+                        send_frame_until_closed(stream, msg, config.send_timeout_ms, shutdown)
+                            .await;
                     if status != SendStatus::Sent {
                         return status;
                     }
@@ -779,6 +881,15 @@ impl WsTransport {
     pub async fn connect(
         config: &WsClientConfig,
     ) -> Result<(WsHandle, mpsc::UnboundedReceiver<WsEvent>), CatcherError> {
+        Self::connect_with_shutdown(config, WsShutdown::default()).await
+    }
+
+    /// 使用构造时创建的终止控制建立连接，可取消首次握手。
+    pub async fn connect_with_shutdown(
+        config: &WsClientConfig,
+        shutdown: WsShutdown,
+    ) -> Result<(WsHandle, mpsc::UnboundedReceiver<WsEvent>), CatcherError> {
+        let completion = shutdown.completion_guard();
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel::<WsCommand>();
 
@@ -788,30 +899,37 @@ impl WsTransport {
         let connect_ctx = build_connect_context(config)?;
 
         // 初始连接 — 多端点竞速或单 URL
-        let (connected_url, initial_stream, latency_ms) =
+        let initial_connect = async {
             if config.urls.len() > 1 || config.race_count > 1 {
                 let racer = EndpointRacer::new(config.urls.clone(), config.race_count);
                 let (url, stream, lat) = racer.race(config, &connect_ctx).await?;
-                (url, stream, lat)
+                Ok::<_, CatcherError>((url, stream, lat))
             } else {
                 let url = config.urls.first().unwrap().clone();
                 let (stream, lat) = connect_stream_with_context(&url, config, &connect_ctx).await?;
-                (url, stream, lat)
-            };
+                Ok::<_, CatcherError>((url, stream, lat))
+            }
+        };
 
+        let (connected_url, initial_stream, latency_ms) = tokio::select! {
+            biased;
+            _ = shutdown.cancelled() => return Err(CatcherError::WsDisconnected { code: 1000, reason: "connection closed".into() }),
+            result = initial_connect => result?,
+        };
         let handle_url = connected_url.clone();
         let mgr_config = config.clone();
 
         // 启动连接管理器任务
+        let manager_shutdown = shutdown.clone();
         tokio::spawn(async move {
+            let _completion = completion;
             connection_manager(
-                connected_url,
-                initial_stream,
-                latency_ms,
+                (connected_url, initial_stream, latency_ms),
                 &mgr_config,
                 connect_ctx,
                 event_tx,
                 cmd_rx,
+                &manager_shutdown,
             )
             .await;
         });
@@ -820,6 +938,7 @@ impl WsTransport {
             WsHandle {
                 url: handle_url,
                 cmd_tx,
+                shutdown,
             },
             event_rx,
         ))
@@ -829,14 +948,18 @@ impl WsTransport {
 // ── 连接管理器 ──
 
 async fn connection_manager(
-    initial_url: String,
-    initial_stream: WsStream,
-    initial_latency_ms: u64,
+    initial: (String, WsStream, u64),
     config: &WsClientConfig,
     mut connect_ctx: WsConnectContext,
     event_tx: mpsc::UnboundedSender<WsEvent>,
     mut cmd_rx: mpsc::UnboundedReceiver<WsCommand>,
+    shutdown: &WsShutdown,
 ) {
+    let event_tx = EventSender {
+        sender: event_tx,
+        shutdown: shutdown.clone(),
+    };
+    let (initial_url, initial_stream, initial_latency_ms) = initial;
     let mut current_url = initial_url;
     let mut stream_opt = Some(initial_stream);
     let mut reconnect_mgr = config
@@ -847,6 +970,9 @@ async fn connection_manager(
     let mut first_latency = initial_latency_ms;
 
     loop {
+        if shutdown.is_cancelled() {
+            break;
+        }
         // 发送 Connected 事件
         {
             let lat = first_latency;
@@ -883,8 +1009,17 @@ async fn connection_manager(
             tokio::select! {
                 biased;
 
+                _ = shutdown.cancelled() => {
+                    close_from_queue(&mut writer, &mut cmd_rx).await;
+                    break LoopOutcome::CleanClose;
+                }
+
                 // 用户命令
                 cmd = cmd_rx.recv() => {
+                    if shutdown.is_cancelled() {
+                        close_from_queue(&mut writer, &mut cmd_rx).await;
+                        break LoopOutcome::CleanClose;
+                    }
                     match cmd {
                         Some(WsCommand::Text(t)) => {
                             let msg = match encode_text_message(&t, config) {
@@ -896,7 +1031,7 @@ async fn connection_manager(
                                     continue;
                                 }
                             };
-                            match send_frame_with_timeout(&mut writer, msg, config.send_timeout_ms).await {
+                            match send_frame_until_closed(&mut writer, msg, config.send_timeout_ms, shutdown).await {
                                 SendStatus::Sent => {}
                                 SendStatus::Failed => break LoopOutcome::Disconnected {
                                     code: 1006,
@@ -918,7 +1053,7 @@ async fn connection_manager(
                                     continue;
                                 }
                             };
-                            match send_frame_with_timeout(&mut writer, msg, config.send_timeout_ms).await {
+                            match send_frame_until_closed(&mut writer, msg, config.send_timeout_ms, shutdown).await {
                                 SendStatus::Sent => {}
                                 SendStatus::Failed => break LoopOutcome::Disconnected {
                                     code: 1006,
@@ -931,17 +1066,7 @@ async fn connection_manager(
                             }
                         }
                         Some(WsCommand::Close { code, reason }) => {
-                            let msg = Frame::close(yawc::close::CloseCode::from(code), reason);
-                            let _ = send_frame_with_timeout(&mut writer, msg, config.send_timeout_ms).await;
-                            if config.send_timeout_ms == 0 {
-                                let _ = writer.close().await;
-                            } else {
-                                let _ = tokio::time::timeout(
-                                    Duration::from_millis(config.send_timeout_ms),
-                                    writer.close(),
-                                )
-                                .await;
-                            }
+                            send_close_best_effort(&mut writer, code, &reason).await;
                             break LoopOutcome::CleanClose;
                         }
                         Some(WsCommand::NetworkChanged) => {
@@ -969,10 +1094,11 @@ async fn connection_manager(
                         state.waiting_for_pong = true;
                         state.ping_sent_at = Some(Instant::now());
                         if matches!(
-                            send_frame_with_timeout(
+                            send_frame_until_closed(
                                 &mut writer,
                                 Frame::ping(Vec::new()),
                                 config.send_timeout_ms,
+                                shutdown,
                             )
                             .await,
                             SendStatus::TimedOut
@@ -1033,10 +1159,11 @@ async fn connection_manager(
                                     .unwrap_or("abnormal")
                                     .to_string();
                                 // RFC 6455 §5.5.1: 收到 Close 帧必须回一个 Close 帧
-                                let _ = send_frame_with_timeout(
+                                let _ = send_frame_until_closed(
                                     &mut writer,
                                     Frame::close(yawc::close::CloseCode::from(code), &reason),
                                     config.send_timeout_ms,
+                                    shutdown,
                                 )
                                 .await;
                                 break LoopOutcome::Disconnected { code, reason };
@@ -1053,6 +1180,10 @@ async fn connection_manager(
             }
         };
 
+        if shutdown.is_cancelled() {
+            close_from_queue(&mut writer, &mut cmd_rx).await;
+            break;
+        }
         // ── 处理 select loop 结果 ──
         let network_changed = matches!(outcome, LoopOutcome::NetworkChanged);
         match outcome {
@@ -1085,6 +1216,10 @@ async fn connection_manager(
             // 只重连一次；其余命令缓存等待重放，Close 中止
             let mut close_requested = false;
             loop {
+                if shutdown.is_cancelled() {
+                    close_requested = true;
+                    break;
+                }
                 match cmd_rx.try_recv() {
                     Ok(WsCommand::NetworkChanged) => {}
                     Ok(WsCommand::Close { .. }) => {
@@ -1112,10 +1247,11 @@ async fn connection_manager(
                 attempt: 0,
                 delay_ms: 0,
             });
-            match connect_any_endpoint(config, &connect_ctx).await {
+            match connect_until_closed(shutdown, connect_any_endpoint(config, &connect_ctx)).await {
                 Ok((url, mut stream, lat)) => {
                     let replay_status =
-                        replay_buffered_commands(&mut stream, &buffered_commands, config).await;
+                        replay_buffered_commands(&mut stream, &buffered_commands, config, shutdown)
+                            .await;
                     if let Some(reason) = replay_disconnect_reason(replay_status) {
                         let _ = event_tx.send(WsEvent::Disconnected {
                             code: 1006,
@@ -1154,7 +1290,10 @@ async fn connection_manager(
             // 会固守旧网络的获胜端点直到耗尽重试
             let mut race_endpoints = network_changed;
 
-            while let Some(delay) = mgr.on_disconnect() {
+            while !shutdown.is_cancelled() {
+                let Some(delay) = mgr.on_disconnect() else {
+                    break;
+                };
                 let attempt = mgr.attempt();
                 let _ = event_tx.send(WsEvent::Reconnecting {
                     attempt,
@@ -1170,6 +1309,8 @@ async fn connection_manager(
                     tokio::pin!(backoff_sleep);
                     loop {
                         tokio::select! {
+                            biased;
+                            _ = shutdown.cancelled() => { abort = true; break; },
                             _ = &mut backoff_sleep => break,
                             cmd = cmd_rx.recv() => match cmd {
                                 Some(WsCommand::Close { .. }) | None => {
@@ -1189,6 +1330,10 @@ async fn connection_manager(
                 // 排空剩余待处理命令
                 if !abort {
                     loop {
+                        if shutdown.is_cancelled() {
+                            abort = true;
+                            break;
+                        }
                         match cmd_rx.try_recv() {
                             Ok(WsCommand::Close { .. }) => {
                                 abort = true;
@@ -1218,20 +1363,32 @@ async fn connection_manager(
                 }
 
                 let connect_result = if race_endpoints {
-                    connect_any_endpoint(config, &connect_ctx)
+                    connect_until_closed(shutdown, connect_any_endpoint(config, &connect_ctx))
                         .await
                         .map(|(url, stream, lat)| {
                             current_url = url;
                             (stream, lat)
                         })
                 } else {
-                    connect_stream_with_context(&current_url, config, &connect_ctx).await
+                    connect_until_closed(
+                        shutdown,
+                        connect_stream_with_context(&current_url, config, &connect_ctx),
+                    )
+                    .await
                 };
 
+                if shutdown.is_cancelled() {
+                    break;
+                }
                 match connect_result {
                     Ok((mut stream, lat)) => {
-                        let replay_status =
-                            replay_buffered_commands(&mut stream, &buffered_commands, config).await;
+                        let replay_status = replay_buffered_commands(
+                            &mut stream,
+                            &buffered_commands,
+                            config,
+                            shutdown,
+                        )
+                        .await;
                         if let Some(reason) = replay_disconnect_reason(replay_status) {
                             let _ = event_tx.send(WsEvent::Disconnected {
                                 code: 1006,
@@ -1532,7 +1689,9 @@ mod tests {
         let commands = vec![WsCommand::Text("hello".to_string())];
 
         let start = Instant::now();
-        let status = replay_buffered_commands(&mut sink, &commands, &config).await;
+        let status =
+            replay_buffered_commands(&mut sink, &commands, &config, &super::WsShutdown::default())
+                .await;
 
         assert!(matches!(status, SendStatus::TimedOut));
         assert!(start.elapsed() < Duration::from_secs(2));
@@ -1818,6 +1977,162 @@ mod tests {
         let _ = handle.close(1000, "done");
         let _ = server.await;
     }
+    #[tokio::test]
+    async fn close_during_initial_handshake_cancels_all_endpoints() {
+        use tokio::io::AsyncReadExt;
+        let mut listeners = Vec::new();
+        let mut urls = Vec::new();
+        for _ in 0..2 {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            urls.push(format!("ws://{}", listener.local_addr().unwrap()));
+            listeners.push(listener);
+        }
+        let shutdown = super::WsShutdown::default();
+        let config = WsClientConfig {
+            urls,
+            race_count: 2,
+            handshake_timeout_ms: 60_000,
+            ..Default::default()
+        };
+        let control = shutdown.clone();
+        let connecting =
+            tokio::spawn(async move { WsTransport::connect_with_shutdown(&config, control).await });
+        let mut sockets = Vec::new();
+        for listener in &listeners {
+            let (mut socket, _) = tokio::time::timeout(Duration::from_secs(2), listener.accept())
+                .await
+                .unwrap()
+                .unwrap();
+            let mut request = vec![0; 4096];
+            assert!(socket.read(&mut request).await.unwrap() > 0);
+            sockets.push(socket);
+        }
+        shutdown.cancel();
+        shutdown.cancel();
+        assert!(tokio::time::timeout(Duration::from_secs(1), connecting)
+            .await
+            .unwrap()
+            .unwrap()
+            .is_err());
+        shutdown.wait_closed().await;
+        for mut socket in sockets {
+            let mut byte = [0];
+            assert_eq!(
+                tokio::time::timeout(Duration::from_secs(1), socket.read(&mut byte))
+                    .await
+                    .unwrap()
+                    .unwrap(),
+                0
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn close_during_reconnect_discards_buffer_and_stops_handshake() {
+        use tokio::io::AsyncReadExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let config = WsClientConfig {
+            urls: vec![format!("ws://{}", listener.local_addr().unwrap())],
+            reconnect: Some(ReconnectConfig {
+                initial_delay_ms: 60_000,
+                max_delay_ms: 60_000,
+                max_attempts: 3,
+                ..Default::default()
+            }),
+            handshake_timeout_ms: 60_000,
+            ..Default::default()
+        };
+        let (handshake_tx, handshake_rx) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let ws = tokio_tungstenite::accept_async(socket).await.unwrap();
+            drop(ws);
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = vec![0; 4096];
+            assert!(socket.read(&mut request).await.unwrap() > 0);
+            handshake_tx.send(()).unwrap();
+            // 不完成第二次握手：close 必须取消握手而不是等 60 秒超时。
+            let mut payload = Vec::new();
+            tokio::time::timeout(Duration::from_secs(2), socket.read_to_end(&mut payload))
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(
+                payload.is_empty(),
+                "cached data must never be sent after close"
+            );
+            assert!(
+                tokio::time::timeout(Duration::from_millis(100), listener.accept())
+                    .await
+                    .is_err()
+            );
+        });
+        let (handle, mut events) = WsTransport::connect(&config).await.unwrap();
+        loop {
+            if matches!(events.recv().await.unwrap(), WsEvent::Reconnecting { .. }) {
+                break;
+            }
+        }
+        handle.send_text("must be discarded").unwrap();
+        handle.send_binary(b"must also be discarded").unwrap();
+        handle.network_changed().unwrap();
+        tokio::time::timeout(Duration::from_secs(2), handshake_rx)
+            .await
+            .unwrap()
+            .unwrap();
+        handle.close(1000, "stop").unwrap();
+        handle.close(1000, "again").unwrap();
+        tokio::time::timeout(Duration::from_secs(1), handle.wait_closed())
+            .await
+            .unwrap();
+        assert!(handle.send_text("late").is_err());
+        assert!(handle.send_binary(b"late").is_err());
+        assert!(handle.network_changed().is_err());
+        while let Some(event) = events.recv().await {
+            assert!(!matches!(
+                event,
+                WsEvent::Connected { .. } | WsEvent::Message { .. }
+            ));
+        }
+        handle.close(1000, "already stopped").unwrap();
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn cancellation_interrupts_blocked_replay_and_discards_remaining_commands() {
+        let shutdown = super::WsShutdown::default();
+        let control = shutdown.clone();
+        let replay = tokio::spawn(async move {
+            let mut sink = PendingSink;
+            let commands = vec![WsCommand::Text("first".into()), WsCommand::Binary(vec![1])];
+            let config = WsClientConfig {
+                send_timeout_ms: 0,
+                ..Default::default()
+            };
+            replay_buffered_commands(&mut sink, &commands, &config, &control).await
+        });
+        tokio::task::yield_now().await;
+        shutdown.cancel();
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(1), replay)
+                .await
+                .unwrap()
+                .unwrap(),
+            SendStatus::Failed
+        );
+        let mut sink = futures_util::sink::drain();
+        assert_eq!(
+            replay_buffered_commands(
+                &mut sink,
+                &[WsCommand::Text("late".into())],
+                &WsClientConfig::default(),
+                &shutdown
+            )
+            .await,
+            SendStatus::Failed
+        );
+    }
+
     /// 验证 build_request 自动声明应用层压缩能力
     #[test]
     fn build_request_adds_application_compression_headers() {
