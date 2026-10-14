@@ -121,10 +121,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: "packages -> target"
-      - uses: actions/setup-python@v5
-        if: runner.os == 'Windows'
-        with:
-          python-version: '3.12'
       - run: pnpm install
       - run: pnpm --filter @eric8810/catcher-napi-ws build
-      - run: node --expose-gc --test packages/catcher-napi-ws/tests/close-lifecycle.cjs
+        if: runner.os != 'Windows'
+      - name: Build native addon with controlled Sink test feature
+        if: runner.os == 'Windows'
+        run: |
+          pnpm --filter @eric8810/catcher-napi-ws exec napi build --platform --release --features lifecycle-test-hooks
+          pnpm --filter @eric8810/catcher-napi-ws build:ts
+          pnpm --filter @eric8810/catcher-napi-ws exec napi artifacts
+      - run: node --expose-gc --test-concurrency=1 --test packages/catcher-napi-ws/tests/close-lifecycle.cjs

@@ -342,3 +342,32 @@ mod tests {
         assert_eq!(reason.unwrap_or_else(|| "normal".into()), "going away");
     }
 }
+
+/// 仅测试特性：控制真实原生 Sink 的 flush 闸门。
+#[cfg(feature = "lifecycle-test-hooks")]
+#[napi]
+pub fn test_set_flush_gate(paused: bool) {
+    catcher_ws::transport::test_gate::set_paused(paused);
+}
+
+/// 仅测试特性：读取 Pending 与取消后的 Sink 调用计数。
+#[cfg(feature = "lifecycle-test-hooks")]
+#[napi]
+pub fn test_flush_gate_state() -> napi::Result<serde_json::Value> {
+    serde_json::to_value(catcher_ws::transport::test_gate::snapshot())
+        .map_err(|error| napi::Error::from_reason(error.to_string()))
+}
+
+/// 仅测试特性：在同步关闭请求返回后开始记录后续 Sink 调用。
+#[cfg(feature = "lifecycle-test-hooks")]
+#[napi]
+pub fn test_mark_close_requested() {
+    catcher_ws::transport::test_gate::mark_close_requested();
+}
+
+/// 仅测试特性：释放 flush 并保留取消后的调用计数。
+#[cfg(feature = "lifecycle-test-hooks")]
+#[napi]
+pub fn test_release_flush_gate() {
+    catcher_ws::transport::test_gate::release_flush();
+}

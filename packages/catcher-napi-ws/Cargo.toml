@@ -8,6 +8,9 @@ license = "MIT"
 [lib]
 crate-type = ["cdylib"]
 
+[features]
+lifecycle-test-hooks = ["catcher-ws/lifecycle-test-hooks"]
+
 [dependencies]
 catcher-ws = { path = "../catcher-ws", version = "1.0.0", features = ["rustls-tls", "system-proxy"] }
 napi = { version = "2", default-features = false, features = ["napi4", "tokio_rt", "serde-json"] }

@@ -9,7 +9,8 @@ const path = require('node:path')
 const fs = require('node:fs')
 const root = path.resolve(__dirname, '..')
 const addon = process.env.CATCHER_WS_ADDON || path.join(root, fs.readdirSync(root).find(file => file.endsWith('.node')) || 'missing.node')
-const { JsWsClient } = require(addon)
+const native = require(addon)
+const { JsWsClient } = native
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
 
 async function fixture(run) {
@@ -156,33 +157,6 @@ test('GC of native wrapper cancels an unfinished handshake', { timeout: 5000, sk
   })
 })
 
-async function boundedReceivePeer() {
-  const { spawn } = require('node:child_process')
-  const { createInterface } = require('node:readline')
-  const peer = spawn(process.platform === 'win32' ? 'python' : 'python3',
-    ['-u', path.join(__dirname, 'backpressure-peer.py')], { stdio: ['pipe', 'pipe', 'pipe'] })
-  const messages = new Map(), waiters = new Map()
-  let failure
-  const rejectAll = error => {
-    failure = error
-    for (const waiter of waiters.values()) waiter.reject(error)
-  }
-  peer.on('error', rejectAll)
-  peer.stderr.on('data', data => rejectAll(new Error(data.toString())))
-  createInterface({ input: peer.stdout }).on('line', line => {
-    const message = JSON.parse(line)
-    messages.set(message.event, message)
-    waiters.get(message.event)?.resolve(message)
-  })
-  return {
-    wait: event => failure ? Promise.reject(failure) : messages.has(event)
-      ? Promise.resolve(messages.get(event))
-      : new Promise((resolve, reject) => waiters.set(event, { resolve, reject })),
-    resume: () => peer.stdin.write('resume\n'),
-    close: () => peer.kill(),
-  }
-}
-
 // Exercise both native exports and the public TS facade with each transport backend.
 for (const backend of ['native', 'reqwest']) {
   for (const api of ['raw', 'ts']) {
@@ -232,53 +206,60 @@ for (const backend of ['native', 'reqwest']) {
       }
     })
 
-    test(`${backend}/${api}: cancelled in-flight payload is never flushed by Close`, { timeout: 10000 }, async t => {
-      if (process.platform === 'win32' || process.env.CATCHER_BOUNDED_RECEIVE_TEST) {
-        const peer = await boundedReceivePeer()
-        let client, timer
-        try {
-          const { port } = await peer.wait('listening')
-          let resolveConnected
+    test(`${backend}/${api}: cancelled in-flight payload is never flushed by Close`, { timeout: 10000 }, async () => {
+      if (process.platform === 'win32' || process.env.CATCHER_CONTROLLED_SINK_TEST) {
+        assert.equal(typeof native.testSetFlushGate, 'function', 'controlled Sink feature is required')
+        await fixture(async (server, config) => {
+          config.send_timeout_ms = 0
+          let resolveConnected, peer, ended
           const connected = new Promise(resolve => { resolveConnected = resolve })
-          client = create({ urls: [`ws://127.0.0.1:${port}`], per_message_deflate: false, send_timeout_ms: 0 }, event => {
+          const chunks = []
+          let releaseTimer
+          server.on('upgrade', (req, socket) => {
+            peer = socket
+            ended = new Promise((resolve, reject) => {
+              socket.once('close', resolve)
+              socket.once('error', error => { if (error.code !== 'ECONNRESET') reject(error) })
+            })
+            socket.on('data', data => chunks.push(data))
+            upgrade(req, socket)
+          })
+          const client = create(config, event => {
             if (event.type === 'Connected') resolveConnected()
           })
-          await connected
-          global.gc?.()
-          const payload = crypto.randomBytes(32 * 1024 * 1024)
-          client.sendBinary(payload)
-          client.send('send-completed-before-close')
-          const { header } = await peer.wait('started')
-          const frame = Buffer.from(header, 'hex')
-          assert.equal(frame[0] & 15, 2)
-          assert.equal(Number(frame.readBigUInt64BE(2)), payload.length)
-          await delay(100)
-          client.close(1001, 'stop')
-          const waiting = client.closeAndWait(null, null)
-          timer = setTimeout(() => peer.resume(), 10)
-          await waiting
-          const { bytes, afterPayload } = await peer.wait('done')
-          const suffix = Buffer.from(afterPayload, 'hex')
-          let completedBeforeClose = false
-          if (suffix.length >= 6 && (suffix[0] & 15) === 1) {
-            const length = suffix[1] & 127
-            const marker = Buffer.from(suffix.subarray(6, 6 + length))
-            for (let i = 0; i < marker.length; i++) marker[i] ^= suffix[2 + i % 4]
-            completedBeforeClose = marker.toString() === 'send-completed-before-close'
+          try {
+            await connected
+            native.testSetFlushGate(true)
+            client.sendBinary(crypto.randomBytes(32 * 1024 * 1024))
+            // Native start_send queued a real frame; wait until poll_flush returns Pending.
+            const deadline = Date.now() + 2000
+            while (!native.testFlushGateState().pending && Date.now() < deadline) {
+              await new Promise(resolve => setImmediate(resolve))
+            }
+            assert.equal(native.testFlushGateState().pending, true, 'flush must be Pending before close')
+            assert.equal(Buffer.concat(chunks).length, 0)
+            client.close(1001, 'stop')
+            native.testMarkCloseRequested()
+            const waiting = client.closeAndWait(null, null)
+            // Release while a regressed Close/flush would still be waiting (100ms timeout).
+            const released = new Promise(resolve => {
+              releaseTimer = setTimeout(() => { native.testReleaseFlushGate(); resolve() }, 10)
+            })
+            assert.throws(() => client.send('late'), /closed/)
+            await waiting
+            await released
+            const state = native.testFlushGateState()
+            assert.equal(state.cancelled, true)
+            assert.equal(state.calls_after_cancel, 0, 'cancelled sink must never be polled or flushed again')
+            peer.resume()
+            await ended
+            assert.equal(Buffer.concat(chunks).length, 0, 'cancelled buffered frame must never reach the real peer')
+          } finally {
+            clearTimeout(releaseTimer)
+            native.testSetFlushGate(false)
+            client.close(null, null)
           }
-          t.diagnostic(`received=${bytes}; completionMarker=${completedBeforeClose}`)
-          if (completedBeforeClose) {
-            // The next command can only start after the entire payload send completed.
-            // This platform accepted the payload before close; cancellation wasn't exercised.
-            t.skip('transport completed the payload before close; no pending send to cancel')
-            return
-          }
-          assert.ok(bytes < payload.length + 14, `cancelled send was flushed: received ${bytes} bytes; completionMarker=false`)
-        } finally {
-          clearTimeout(timer)
-          client?.close(null, null)
-          peer.close()
-        }
+        })
         return
       }
       await fixture(async (server, config) => {

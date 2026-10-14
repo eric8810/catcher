@@ -52,6 +52,8 @@ impl futures_util::Sink<Frame> for WsStream {
     type Error = yawc::WebSocketError;
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        #[cfg(feature = "lifecycle-test-hooks")]
+        crate::transport::test_gate::record_sink_call();
         match self.get_mut() {
             WsStream::Native(stream) => Pin::new(stream).poll_ready(cx),
             WsStream::Reqwest(stream) => Pin::new(stream).poll_ready(cx),
@@ -59,6 +61,8 @@ impl futures_util::Sink<Frame> for WsStream {
     }
 
     fn start_send(self: Pin<&mut Self>, item: Frame) -> Result<(), Self::Error> {
+        #[cfg(feature = "lifecycle-test-hooks")]
+        crate::transport::test_gate::record_sink_call();
         match self.get_mut() {
             WsStream::Native(stream) => Pin::new(stream).start_send(item),
             WsStream::Reqwest(stream) => Pin::new(stream).start_send(item),
@@ -66,6 +70,12 @@ impl futures_util::Sink<Frame> for WsStream {
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        #[cfg(feature = "lifecycle-test-hooks")]
+        crate::transport::test_gate::record_sink_call();
+        #[cfg(feature = "lifecycle-test-hooks")]
+        if crate::transport::test_gate::flush_is_pending(cx) {
+            return Poll::Pending;
+        }
         match self.get_mut() {
             WsStream::Native(stream) => Pin::new(stream).poll_flush(cx),
             WsStream::Reqwest(stream) => Pin::new(stream).poll_flush(cx),
@@ -73,6 +83,8 @@ impl futures_util::Sink<Frame> for WsStream {
     }
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        #[cfg(feature = "lifecycle-test-hooks")]
+        crate::transport::test_gate::record_sink_call();
         match self.get_mut() {
             WsStream::Native(stream) => Pin::new(stream).poll_close(cx),
             WsStream::Reqwest(stream) => Pin::new(stream).poll_close(cx),

@@ -191,3 +191,9 @@ MIT
 需要确认该 WS 实例停止时，使用 `await client.closeAndWait()`：方法调用时同步保存关闭意图并拒绝新发送，Promise 完成时该实例的握手/连接管理器和事件转发任务均已退出，不会继续重连或提交新回调。该完成范围不包括共享 DNS 后台刷新、对端关闭确认或已排入 Node.js 队列的回调；已排队回调仍可能执行。该方法要求使用包含本修复的新原生插件。
 
 原生包装对象释放时也会请求取消。但 JavaScript GC 的时机不确定，请显式调用 `close()` 或 `closeAndWait()` 管理资源。
+
+### 原生取消回归
+
+默认构建不启用 `lifecycle-test-hooks`。Windows 原生 CI 使用该测试特性，在真实 Native/Reqwest 连接的 Sink `poll_flush` 上暂停，明确观察 Pending 后再通过原生/TS API 关闭，严格检查关闭后无再次 Sink 调用、无用户帧到达服务端。测试特性只提供观测和闸门，不属于发行 API。
+
+其他平台保留默认构建的真实网络背压测试。可在本机以 `napi build --platform --release --features lifecycle-test-hooks` 构建后设置 `CATCHER_CONTROLLED_SINK_TEST=1` 运行同一组受控测试；关闭 Pending 未建立、取消后再次驱动 Sink 或用户数据到达服务端都会失败，不会跳过。
