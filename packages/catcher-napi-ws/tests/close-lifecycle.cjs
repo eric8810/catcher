@@ -229,7 +229,10 @@ for (const backend of ['native', 'reqwest']) {
         let resume
         try {
           await connected
-          const payload = crypto.randomBytes(32 * 1024 * 1024)
+          // Windows loopback can accept 32MiB into OS buffers before cancellation.
+          // Use a larger frame there so the paused peer creates actual backpressure.
+          global.gc?.()
+          const payload = crypto.randomBytes((process.platform === 'win32' ? 128 : 32) * 1024 * 1024)
           client.sendBinary(payload)
           await started
           await delay(100)

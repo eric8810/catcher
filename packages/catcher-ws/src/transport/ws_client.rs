@@ -1019,7 +1019,12 @@ async fn connection_manager(
                 // 用户命令
                 cmd = cmd_rx.recv() => {
                     if shutdown.is_cancelled() {
-                        close_from_queue(&mut writer, &mut cmd_rx).await;
+                        // Close 可能已由 recv 取出，不能再从队列寻找并丢失其参数。
+                        if let Some(WsCommand::Close { code, reason }) = cmd {
+                            send_close_best_effort(&mut writer, code, &reason).await;
+                        } else {
+                            close_from_queue(&mut writer, &mut cmd_rx).await;
+                        }
                         break LoopOutcome::CleanClose;
                     }
                     match cmd {
