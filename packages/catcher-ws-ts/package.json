@@ -1,6 +1,6 @@
 {
   "name": "@eric8810/catcher-ws",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Catcher WebSocket client — resilient reconnect, multi-endpoint racing, msgpack codec",
   "type": "module",
   "main": "./dist/index.js",
