@@ -32,6 +32,8 @@ print(json.dumps({'event': 'started', 'header': first.hex()}), flush=True)
 if sys.stdin.readline().strip() != 'resume':
     raise RuntimeError('missing resume command')
 received = len(first)
+payload_end = 14 + int.from_bytes(first[2:10], "big")
+after_payload = bytearray()
 while True:
     try:
         chunk = peer.recv(65536)
@@ -40,7 +42,10 @@ while True:
         break
     if not chunk:
         break
+    previous = received
     received += len(chunk)
-print(json.dumps({'event': 'done', 'bytes': received}), flush=True)
+    if received > payload_end:
+        after_payload.extend(chunk[max(0, payload_end - previous):])
+print(json.dumps({'event': 'done', 'bytes': received, 'afterPayload': after_payload.hex()}), flush=True)
 peer.close()
 listener.close()
