@@ -156,6 +156,33 @@ test('GC of native wrapper cancels an unfinished handshake', { timeout: 5000, sk
   })
 })
 
+async function boundedReceivePeer() {
+  const { spawn } = require('node:child_process')
+  const { createInterface } = require('node:readline')
+  const peer = spawn(process.platform === 'win32' ? 'python' : 'python3',
+    ['-u', path.join(__dirname, 'backpressure-peer.py')], { stdio: ['pipe', 'pipe', 'pipe'] })
+  const messages = new Map(), waiters = new Map()
+  let failure
+  const rejectAll = error => {
+    failure = error
+    for (const waiter of waiters.values()) waiter.reject(error)
+  }
+  peer.on('error', rejectAll)
+  peer.stderr.on('data', data => rejectAll(new Error(data.toString())))
+  createInterface({ input: peer.stdout }).on('line', line => {
+    const message = JSON.parse(line)
+    messages.set(message.event, message)
+    waiters.get(message.event)?.resolve(message)
+  })
+  return {
+    wait: event => failure ? Promise.reject(failure) : messages.has(event)
+      ? Promise.resolve(messages.get(event))
+      : new Promise((resolve, reject) => waiters.set(event, { resolve, reject })),
+    resume: () => peer.stdin.write('resume\n'),
+    close: () => peer.kill(),
+  }
+}
+
 // Exercise both native exports and the public TS facade with each transport backend.
 for (const backend of ['native', 'reqwest']) {
   for (const api of ['raw', 'ts']) {
@@ -206,6 +233,38 @@ for (const backend of ['native', 'reqwest']) {
     })
 
     test(`${backend}/${api}: cancelled in-flight payload is never flushed by Close`, { timeout: 10000 }, async () => {
+      if (process.platform === 'win32' || process.env.CATCHER_BOUNDED_RECEIVE_TEST) {
+        const peer = await boundedReceivePeer()
+        let client, timer
+        try {
+          const { port } = await peer.wait('listening')
+          let resolveConnected
+          const connected = new Promise(resolve => { resolveConnected = resolve })
+          client = create({ urls: [`ws://127.0.0.1:${port}`], per_message_deflate: false, send_timeout_ms: 0 }, event => {
+            if (event.type === 'Connected') resolveConnected()
+          })
+          await connected
+          global.gc?.()
+          const payload = crypto.randomBytes(32 * 1024 * 1024)
+          client.sendBinary(payload)
+          const { header } = await peer.wait('started')
+          const frame = Buffer.from(header, 'hex')
+          assert.equal(frame[0] & 15, 2)
+          assert.equal(Number(frame.readBigUInt64BE(2)), payload.length)
+          await delay(100)
+          client.close(1001, 'stop')
+          const waiting = client.closeAndWait(null, null)
+          timer = setTimeout(() => peer.resume(), 10)
+          await waiting
+          const { bytes } = await peer.wait('done')
+          assert.ok(bytes < payload.length + 14, `cancelled send was flushed: received ${bytes} bytes`)
+        } finally {
+          clearTimeout(timer)
+          client?.close(null, null)
+          peer.close()
+        }
+        return
+      }
       await fixture(async (server, config) => {
         config.send_timeout_ms = 0
         const chunks = []
@@ -229,10 +288,8 @@ for (const backend of ['native', 'reqwest']) {
         let resume
         try {
           await connected
-          // Windows loopback can accept 32MiB into OS buffers before cancellation.
-          // Use a larger frame there so the paused peer creates actual backpressure.
           global.gc?.()
-          const payload = crypto.randomBytes((process.platform === 'win32' ? 128 : 32) * 1024 * 1024)
+          const payload = crypto.randomBytes(32 * 1024 * 1024)
           client.sendBinary(payload)
           await started
           await delay(100)
